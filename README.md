@@ -85,3 +85,7 @@ python collect_pose.py --video test.mp4 --backend rtmpose_t
 ## JSON 格式
 
 `frames[].persons[].keypoints`：`[[x, y, score], ...]` × 17（COCO-17）。
+
+## 问题记录
+
+见 **[problem.md](./problem.md)**：仓库/采集过程中观察到的问题（现象、原因、建议方案）。按编号追加，便于与代码变更对照；**未标注已修复的条目默认未实现**。

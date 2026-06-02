@@ -49,11 +49,11 @@ def assert_cuda_ort_available() -> None:
     import onnxruntime as ort
     from pathlib import Path
 
-    from model_assets import resolve_detection_onnx_path
-
-    probe = resolve_detection_onnx_path(
-        str(Path(__file__).resolve().parent / "localdata/models/onnx"),
-        "rtmdet_nano",
+    probe = Path(
+        resolve_detection_onnx_path(
+            str(Path(__file__).resolve().parent / "localdata/models/onnx"),
+            "rtmdet_nano",
+        )
     )
     if probe.is_file():
         sess = ort.InferenceSession(str(probe), providers=["CUDAExecutionProvider", "CPUExecutionProvider"])
