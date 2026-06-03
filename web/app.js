@@ -383,6 +383,10 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
       /* 无独立标注文件时忽略 */
     }
   }
+  const collisionHint =
+    annotationBoxes.length && !poseData?.collision?.enabled
+      ? " · 已加载标注，回放时将实时计算碰撞"
+      : "";
   $("#playback-video").value = "";
   const label = displayName || recordId;
   const jsonFile = jsonFileName || `${recordId}.json`;
@@ -392,7 +396,7 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
   if (videoLoaded) {
     const { frameW, frameH } = getVideoFrameSize();
     const f0 = frameByTime[0];
-    let hint = `${baseHint} · 已加载配套视频 ${frameW}×${frameH}。`;
+    let hint = `${baseHint}${collisionHint} · 已加载配套视频 ${frameW}×${frameH}。`;
     if (f0 && (f0.w !== frameW || f0.h !== frameH)) {
       hint += ` JSON 推理 ${f0.w}×${f0.h}，将自动对齐。`;
     }
@@ -437,6 +441,179 @@ function boxCollisionToken(box) {
   return shelf ? `${shelf}:${id}` : `Box_${id}`;
 }
 
+/** 射线法：点是否在多边形内（推理坐标系） */
+function pointInPolygon(point, polygon) {
+  if (!Array.isArray(polygon) || polygon.length < 3) return false;
+  const x = Number(point[0]);
+  const y = Number(point[1]);
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = Number(polygon[i][0]);
+    const yi = Number(polygon[i][1]);
+    const xj = Number(polygon[j][0]);
+    const yj = Number(polygon[j][1]);
+    const intersect = yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi || 1e-12) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+/** 回放时实时碰撞（与 event_engine/collision 逻辑一致：手腕 9/10，score>0.3） */
+class PlaybackCollisionTracker {
+  constructor(minConsecutive = 3, cooldownFrames = 6) {
+    this.minConsecutive = Math.max(1, minConsecutive);
+    this.cooldownFrames = Math.max(1, cooldownFrames);
+    this.consecutiveHits = new Map();
+    this.lastAlarmFrame = new Map();
+    this.boxCacheKey = "";
+    this.boxCache = [];
+  }
+
+  reset() {
+    this.consecutiveHits.clear();
+    this.lastAlarmFrame.clear();
+    this.boxCacheKey = "";
+    this.boxCache = [];
+  }
+
+  getBoxesInInferSpace(inferW, inferH) {
+    const key = `${inferW}x${inferH}:${annotationBoxes.length}:${annotationSize?.width || 0}x${annotationSize?.height || 0}`;
+    if (key === this.boxCacheKey) return this.boxCache;
+    const pl = window.previewLayout;
+    if (!pl?.resolvePolygonFramePoints) {
+      this.boxCache = [];
+      this.boxCacheKey = key;
+      return this.boxCache;
+    }
+    const { frameW, frameH } = getVideoFrameSize();
+    const annSize = getEffectiveAnnotationSize();
+    const f0 = frameByTime[0];
+    const boxesAlreadyInfer =
+      f0 &&
+      annSize?.width === f0.w &&
+      annSize?.height === f0.h &&
+      annotationBoxes.every((b) => {
+        let mx = 0;
+        let my = 0;
+        (b.video_polygon || []).forEach((pt) => {
+          mx = Math.max(mx, Number(pt[0]) || 0);
+          my = Math.max(my, Number(pt[1]) || 0);
+        });
+        return mx <= inferW * 1.05 && my <= inferH * 1.05;
+      });
+
+    this.boxCache = annotationBoxes
+      .map((box) => {
+        const poly = box.video_polygon;
+        if (!Array.isArray(poly) || poly.length < 3) return null;
+        let inferPts;
+        if (boxesAlreadyInfer) {
+          inferPts = poly.map((pt) => [Number(pt[0]), Number(pt[1])]);
+        } else {
+          const framePts = pl.resolvePolygonFramePoints(
+            poly,
+            box.video_polygon_norm,
+            annSize,
+            frameW,
+            frameH
+          );
+          if (framePts.length < 3) return null;
+          inferPts = framePts.map(([x, y]) => [
+            (x * inferW) / Math.max(1, frameW),
+            (y * inferH) / Math.max(1, frameH),
+          ]);
+        }
+        const token = boxCollisionToken(box);
+        return token ? { token, inferPts } : null;
+      })
+      .filter(Boolean);
+    this.boxCacheKey = key;
+    return this.boxCache;
+  }
+
+  update(frame, inferW, inferH) {
+    const boxes = this.getBoxesInInferSpace(inferW, inferH);
+    if (!boxes.length) return { collisions: [], alarm_collisions: [] };
+
+    const frameIdx = Number(frame?.frame_idx ?? frame?.source_frame_idx ?? 0);
+    const active = new Set();
+
+    (frame?.persons || []).forEach((person) => {
+      const kpts = person?.keypoints || [];
+      for (const idx of [9, 10]) {
+        const kp = kpts[idx];
+        if (!kp || kp.length < 3 || Number(kp[2]) <= 0.3) continue;
+        const wx = Number(kp[0]);
+        const wy = Number(kp[1]);
+        for (const { token, inferPts } of boxes) {
+          if (pointInPolygon([wx, wy], inferPts)) {
+            active.add(token);
+            break;
+          }
+        }
+      }
+    });
+
+    for (const token of this.consecutiveHits.keys()) {
+      if (!active.has(token)) this.consecutiveHits.set(token, 0);
+    }
+
+    const alarms = [];
+    active.forEach((token) => {
+      const next = (this.consecutiveHits.get(token) || 0) + 1;
+      this.consecutiveHits.set(token, next);
+      const last = this.lastAlarmFrame.get(token) ?? -1e9;
+      if (next >= this.minConsecutive && frameIdx - last >= this.cooldownFrames) {
+        alarms.push(token);
+        this.lastAlarmFrame.set(token, frameIdx);
+      }
+    });
+
+    return {
+      collisions: [...active],
+      alarm_collisions: alarms,
+    };
+  }
+}
+
+let playbackCollisionTracker = null;
+
+function resetPlaybackCollisionTracker() {
+  playbackCollisionTracker = null;
+}
+
+function getPlaybackCollisionTracker() {
+  if (!playbackCollisionTracker) {
+    const cfg = poseData?.collision || {};
+    playbackCollisionTracker = new PlaybackCollisionTracker(
+      cfg.alarm_min_consecutive_frames ?? 3,
+      cfg.alarm_cooldown_frames ?? 6
+    );
+  }
+  return playbackCollisionTracker;
+}
+
+function getFrameCollisionSets(frame, inferW, inferH) {
+  const hasStored =
+    frame &&
+    ("collisions" in frame || "alarm_collisions" in frame) &&
+    (Array.isArray(frame.collisions) || Array.isArray(frame.alarm_collisions));
+  if (hasStored) {
+    return {
+      collisionSet: new Set(frame.collisions || []),
+      alarmSet: new Set(frame.alarm_collisions || []),
+    };
+  }
+  if (!annotationBoxes.length) {
+    return { collisionSet: new Set(), alarmSet: new Set() };
+  }
+  const computed = getPlaybackCollisionTracker().update(frame, inferW, inferH);
+  return {
+    collisionSet: new Set(computed.collisions),
+    alarmSet: new Set(computed.alarm_collisions),
+  };
+}
+
 function getEffectiveAnnotationSize() {
   const { frameW, frameH } = getVideoFrameSize();
   let size = annotationSize;
@@ -479,11 +656,13 @@ function loadAnnotationBoxesFromData(data) {
   if (Array.isArray(data?.annotation?.boxes)) {
     annotationBoxes = data.annotation.boxes;
     annotationSize = data.annotation.annotation_size || data.annotation_size || null;
+    resetPlaybackCollisionTracker();
     return;
   }
   annotationSize = data?.annotation_size || null;
   if (Array.isArray(data?.boxes)) {
     annotationBoxes = data.boxes;
+    resetPlaybackCollisionTracker();
     return;
   }
   if (Array.isArray(data?.shelves)) {
@@ -494,9 +673,11 @@ function loadAnnotationBoxesFromData(data) {
         annotationBoxes.push({ ...b, shelf_code: b.shelf_code || code });
       });
     });
+    resetPlaybackCollisionTracker();
     return;
   }
   annotationBoxes = [];
+  resetPlaybackCollisionTracker();
 }
 
 async function loadAnnotationBoxesFromFile(file) {
@@ -506,6 +687,7 @@ async function loadAnnotationBoxesFromFile(file) {
 
 function buildFrameIndex() {
   frameByTime = [];
+  resetPlaybackCollisionTracker();
   syncAnnotationBoxesFromPose();
   if (!poseData?.frames?.length) return;
   poseData.frames.forEach((f) => {
@@ -541,7 +723,7 @@ function syncCanvasSize() {
   return { cw: cssW, ch: cssH };
 }
 
-function drawAnnotationBoxes(frame) {
+function drawAnnotationBoxes(frame, inferW, inferH) {
   if (!annotationBoxes.length) return;
   const pl = window.previewLayout;
   if (!pl?.resolvePolygonFramePoints || !pl?.mapPointToDisplay) return;
@@ -549,8 +731,7 @@ function drawAnnotationBoxes(frame) {
   const { frameW, frameH } = getVideoFrameSize();
   const layout = getDisplayLayout();
   const annSize = getEffectiveAnnotationSize();
-  const collisionSet = new Set(frame?.collisions || []);
-  const alarmSet = new Set(frame?.alarm_collisions || []);
+  const { collisionSet, alarmSet } = getFrameCollisionSets(frame, inferW, inferH);
 
   annotationBoxes.forEach((box) => {
     const poly = box.video_polygon;
@@ -582,7 +763,7 @@ function drawAnnotationBoxes(frame) {
 function drawSkeleton(frame, inferW, inferH) {
   const { cw, ch } = syncCanvasSize();
   ctx.clearRect(0, 0, cw, ch);
-  drawAnnotationBoxes(frame);
+  drawAnnotationBoxes(frame, inferW, inferH);
   if (!frame?.persons?.length) return;
 
   const layout = getDisplayLayout();
@@ -629,12 +810,13 @@ function renderAtTime(timeSec) {
     return;
   }
   drawSkeleton(hit.frame, hit.w, hit.h);
-  if (hit.frame?.collisions?.length || hit.frame?.alarm_collisions?.length) {
-    const c = (hit.frame.collisions || []).join(", ") || "—";
-    const a = (hit.frame.alarm_collisions || []).join(", ") || "—";
+  const { collisionSet, alarmSet } = getFrameCollisionSets(hit.frame, hit.w, hit.h);
+  if (collisionSet.size || alarmSet.size) {
+    const c = [...collisionSet].join(", ") || "—";
+    const a = [...alarmSet].join(", ") || "—";
     timeLabel.title = `碰撞: ${c} | 报警: ${a}`;
   } else {
-    timeLabel.title = "";
+    timeLabel.title = annotationBoxes.length ? "无碰撞" : "";
   }
 }
 
