@@ -84,6 +84,18 @@ def _record_id_from_pose_path(pose_path: Path) -> str:
     return pose_path.stem
 
 
+def _annotation_path_for_pose(pose_path: Path) -> Path:
+    return pose_path.with_name(f"{pose_path.stem}_annotation.json")
+
+
+def _save_annotation_copy(src_path: Path, pose_path: Path) -> Path | None:
+    if not src_path.is_file():
+        return None
+    dest = _annotation_path_for_pose(pose_path)
+    shutil.copy2(src_path, dest)
+    return dest
+
+
 def _parse_save_video_flag(raw: Any, *, default: bool) -> bool:
     if raw is None:
         return default
@@ -160,6 +172,7 @@ def _run_job(
     frame_rate: float,
     max_pose_frames: int | None,
     save_video: bool,
+    annotation_path: Path | None = None,
 ) -> None:
     settings = build_settings(config_path=resolve_config_path(None), cli={})
 
@@ -183,8 +196,14 @@ def _run_job(
             frame_rate=frame_rate,
             max_frames=max_pose_frames,
             on_progress=on_progress,
+            annotation_path=str(annotation_path) if annotation_path else None,
+            alarm_min_consecutive_frames=settings.alarm_min_consecutive_frames,
+            alarm_cooldown_frames=settings.alarm_cooldown_frames,
         )
         record_id = _record_id_from_pose_path(pose_path)
+        saved_annotation: Path | None = None
+        if annotation_path and annotation_path.is_file():
+            saved_annotation = _save_annotation_copy(annotation_path, pose_path)
         saved_video_path: Path | None = None
         if save_video and video_path.is_file():
             try:
@@ -208,6 +227,16 @@ def _run_job(
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "save_video": bool(save_video),
         }
+        if saved_annotation and saved_annotation.is_file():
+            meta["annotation_file"] = saved_annotation.name
+            meta["has_annotation"] = True
+            meta["collision_enabled"] = bool(data.get("collision", {}).get("enabled"))
+        elif data.get("annotation"):
+            meta["has_annotation"] = True
+            meta["collision_enabled"] = True
+        else:
+            meta["has_annotation"] = False
+            meta["collision_enabled"] = False
         if saved_video_path and saved_video_path.is_file():
             meta["video_file"] = saved_video_path.name
             meta["video_url"] = f"/api/records/{record_id}/video"
@@ -229,6 +258,8 @@ def _run_job(
             pose_file=pose_path.name,
             display_name=meta["display_name"],
             has_video=meta.get("has_video", False),
+            has_annotation=meta.get("has_annotation", False),
+            collision_enabled=meta.get("collision_enabled", False),
             video_url=meta.get("video_url"),
         )
     except Exception as exc:
@@ -296,6 +327,38 @@ def get_record_video(record_id: str) -> FileResponse:
     return FileResponse(path, media_type=media)
 
 
+@app.get("/api/records/{record_id}/annotation.json")
+def get_record_annotation(record_id: str) -> FileResponse:
+    pose_path = _json_path_for_record(record_id)
+    if not pose_path:
+        raise HTTPException(404, "记录不存在")
+    ann_path = _annotation_path_for_pose(pose_path)
+    if not ann_path.is_file():
+        raise HTTPException(404, "标注 JSON 不存在")
+    return FileResponse(ann_path, media_type="application/json")
+
+
+@app.post("/api/annotation/validate")
+async def validate_annotation(file: UploadFile = File(...)) -> dict[str, Any]:
+    """校验上传的标注 JSON 是否符合 visual-dps 格式。"""
+    if not file.filename:
+        raise HTTPException(400, "未选择文件")
+    try:
+        raw = await file.read()
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(400, f"无效 JSON: {exc}") from exc
+    from event_engine.annotation_boxes import flatten_annotation_boxes
+
+    boxes = flatten_annotation_boxes(data if isinstance(data, dict) else {})
+    return {
+        "status": "ok",
+        "box_count": len(boxes),
+        "has_shelves": isinstance(data, dict) and isinstance(data.get("shelves"), list),
+        "annotation_size": data.get("annotation_size") if isinstance(data, dict) else None,
+    }
+
+
 @app.get("/api/records/{record_id}/pose.json")
 def get_record_pose(record_id: str) -> FileResponse:
     path = _json_path_for_record(record_id)
@@ -317,6 +380,7 @@ def get_job(job_id: str) -> dict[str, Any]:
 async def collect_video(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    annotation: UploadFile | None = File(None),
     backend: str = Form(""),
     variant: str = Form(""),
     det_variant: str = Form(""),
@@ -383,6 +447,30 @@ async def collect_video(
         default=settings.save_video,
     )
 
+    annotation_path: Path | None = None
+    if annotation and annotation.filename:
+        ann_suffix = Path(annotation.filename).suffix.lower()
+        if ann_suffix != ".json":
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise HTTPException(400, "标注文件须为 .json")
+        paths.annotation_dir.mkdir(parents=True, exist_ok=True)
+        annotation_path = tmp_dir / f"annotation{ann_suffix}"
+        with open(annotation_path, "wb") as out:
+            shutil.copyfileobj(annotation.file, out)
+        try:
+            from event_engine.annotation_boxes import flatten_annotation_boxes, load_annotation_config
+
+            ann_data = load_annotation_config(annotation_path)
+            if not flatten_annotation_boxes(ann_data):
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+                raise HTTPException(400, "标注 JSON 无有效 boxes/shelves")
+        except FileNotFoundError as exc:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise HTTPException(400, str(exc)) from exc
+        except ValueError as exc:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise HTTPException(400, str(exc)) from exc
+
     with _jobs_lock:
         _jobs[job_id] = {
             "job_id": job_id,
@@ -411,6 +499,7 @@ async def collect_video(
         frame_rate=infer_frame_rate,
         max_pose_frames=max_f,
         save_video=save_video_flag,
+        annotation_path=annotation_path,
     )
 
     return {
@@ -419,6 +508,7 @@ async def collect_video(
         "status": "pending",
         "pose_file": pose_path.name,
         "save_video": save_video_flag,
+        "has_annotation": annotation_path is not None,
     }
 
 
@@ -492,7 +582,7 @@ def main() -> None:
     host = str(server.get("host") or "127.0.0.1")
     port = int(server.get("port") or 8765)
     paths = resolve_app_paths(cfg)
-    for p in (paths.json_dir, paths.video_dir, paths.upload_dir, paths.playback_temp_dir):
+    for p in (paths.json_dir, paths.video_dir, paths.upload_dir, paths.playback_temp_dir, paths.annotation_dir):
         p.mkdir(parents=True, exist_ok=True)
     settings = build_settings(config_path=resolve_config_path(None), cli={})
     print(f"🌐 Web UI: http://{host}:{port}")

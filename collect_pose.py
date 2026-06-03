@@ -68,6 +68,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="保存配套视频至 paths.video_dir（默认读 config storage.save_video）",
     )
     p.add_argument(
+        "--annotation",
+        "-a",
+        default=None,
+        help="visual-dps 格式标注 JSON（启用碰撞检测）",
+    )
+    p.add_argument(
         "--no-save-video",
         action="store_true",
         help="不保存配套视频",
@@ -118,6 +124,9 @@ def main(argv: list[str] | None = None) -> int:
     print(f"📦 姿态: {settings.backend} · 检测: {settings.det_backend}")
     print(f"⏱️ 采集节拍 frame_rate={settings.frame_rate}（0=全速）")
     print(f"🎬 保存配套视频: {'是' if settings.save_video else '否'}")
+    annotation_path = args.annotation
+    if annotation_path:
+        print(f"📐 标注 JSON: {annotation_path}")
     t0 = time.perf_counter()
     data = run_collect_job(
         video_path=video_path,
@@ -132,8 +141,15 @@ def main(argv: list[str] | None = None) -> int:
         frame_interval=settings.pose_frame_interval,
         frame_rate=settings.frame_rate,
         max_frames=settings.max_pose_frames,
+        annotation_path=annotation_path,
+        alarm_min_consecutive_frames=settings.alarm_min_consecutive_frames,
+        alarm_cooldown_frames=settings.alarm_cooldown_frames,
     )
     pose_path = Path(settings.output)
+    if annotation_path:
+        ann_src = Path(annotation_path)
+        if ann_src.is_file():
+            shutil.copy2(ann_src, pose_path.with_name(f"{pose_path.stem}_annotation.json"))
     if settings.save_video:
         paths = resolve_app_paths(load_config_file(resolve_config_path(args.config)))
         dest = record_video_path(paths, pose_path, video_path.suffix)

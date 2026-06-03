@@ -10,6 +10,7 @@ const tabs = document.querySelectorAll(".tab");
 const panels = { collect: $("#panel-collect"), playback: $("#panel-playback") };
 
 let poseData = null;
+let annotationBoxes = [];
 let frameByTime = [];
 let rafId = null;
 let playbackId = null;
@@ -141,6 +142,8 @@ collectForm.addEventListener("submit", async (e) => {
   fd.append("pose_frame_interval", $("#collect-interval").value || "1");
   fd.append("max_pose_frames", $("#collect-max").value || "0");
   fd.append("save_video", $("#collect-save-video").checked ? "1" : "0");
+  const annFile = $("#collect-annotation").files[0];
+  if (annFile) fd.append("annotation", annFile);
 
   collectBtn.disabled = true;
   const savingVideo = $("#collect-save-video").checked;
@@ -156,7 +159,7 @@ collectForm.addEventListener("submit", async (e) => {
     collectResult.classList.remove("hidden");
     const hasVideo = job.has_video || savingVideo;
     collectResult.innerHTML = `
-      <p>✅ 已保存至 <code>localdata/json</code>${hasVideo ? " 与 <code>localdata/video</code>" : ""}，共 <strong>${job.frame_count ?? "?"}</strong> 帧</p>
+      <p>✅ 已保存至 <code>localdata/json</code>${hasVideo ? " 与 <code>localdata/video</code>" : ""}${job.has_annotation ? " · 含碰撞检测" : ""}，共 <strong>${job.frame_count ?? "?"}</strong> 帧</p>
       <p>
         <a href="${job.pose_url}" download>下载 JSON</a>
         · <button type="button" class="primary-link" data-replay="${rid}" data-has-video="${hasVideo ? "1" : "0"}">回放</button>
@@ -200,7 +203,7 @@ async function loadRecords() {
           <strong class="record-name">${name}</strong>
           <span class="record-tag">骨架 JSON</span>
           <code class="record-json">${jsonFile}</code>
-          <span class="record-meta">${s.backend || "?"}${s.det_backend ? ` · ${s.det_backend}` : ""} · ${s.frame_count ?? "?"} 帧${s.has_video ? ' · <span class="record-badge">有视频</span>' : ""}</span>
+          <span class="record-meta">${s.backend || "?"}${s.det_backend ? ` · ${s.det_backend}` : ""} · ${s.frame_count ?? "?"} 帧${s.has_video ? ' · <span class="record-badge">有视频</span>' : ""}${s.collision_enabled ? ' · <span class="record-badge">碰撞</span>' : ""}</span>
         </div>
         <span class="record-actions">
           <a href="${s.pose_url}" download title="${jsonFile}">下载</a>
@@ -330,8 +333,43 @@ function clearVideoElement() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
 
+function boxCollisionToken(box) {
+  const shelf = String(box.shelf_code || "").trim();
+  const id = String(box.box_id ?? box.id ?? "").trim();
+  if (!id) return "";
+  return shelf ? `${shelf}:${id}` : `Box_${id}`;
+}
+
+function syncAnnotationBoxesFromPose() {
+  annotationBoxes = Array.isArray(poseData?.annotation?.boxes) ? poseData.annotation.boxes : [];
+}
+
+async function loadAnnotationBoxesFromFile(file) {
+  const data = JSON.parse(await file.text());
+  if (Array.isArray(data?.annotation?.boxes)) {
+    annotationBoxes = data.annotation.boxes;
+    return;
+  }
+  if (Array.isArray(data?.boxes)) {
+    annotationBoxes = data.boxes;
+    return;
+  }
+  if (Array.isArray(data?.shelves)) {
+    annotationBoxes = [];
+    data.shelves.forEach((shelf) => {
+      const code = String(shelf?.shelf_code || "").trim();
+      (shelf?.boxes || []).forEach((b) => {
+        annotationBoxes.push({ ...b, shelf_code: b.shelf_code || code });
+      });
+    });
+    return;
+  }
+  annotationBoxes = [];
+}
+
 function buildFrameIndex() {
   frameByTime = [];
+  syncAnnotationBoxesFromPose();
   if (!poseData?.frames?.length) return;
   poseData.frames.forEach((f) => {
     frameByTime.push({
@@ -366,9 +404,35 @@ function syncCanvasSize() {
   return { cw: cssW, ch: cssH };
 }
 
+function drawAnnotationBoxes(frame, inferW, inferH) {
+  if (!annotationBoxes.length) return;
+  const layout = getDisplayLayout();
+  const collisionSet = new Set(frame?.collisions || []);
+  const alarmSet = new Set(frame?.alarm_collisions || []);
+
+  annotationBoxes.forEach((box) => {
+    const poly = box.video_polygon;
+    if (!Array.isArray(poly) || poly.length < 3) return;
+    const token = boxCollisionToken(box);
+    const isAlarm = alarmSet.has(token);
+    const isHit = collisionSet.has(token);
+    ctx.strokeStyle = isAlarm ? "rgba(255, 71, 87, 0.95)" : isHit ? "rgba(255, 209, 102, 0.95)" : "rgba(0, 255, 0, 0.35)";
+    ctx.lineWidth = isAlarm || isHit ? 2.5 : 1.5;
+    ctx.beginPath();
+    poly.forEach((pt, i) => {
+      const [x, y] = mapInferToDisplay(pt[0], pt[1], inferW, inferH, layout);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.closePath();
+    ctx.stroke();
+  });
+}
+
 function drawSkeleton(frame, inferW, inferH) {
   const { cw, ch } = syncCanvasSize();
   ctx.clearRect(0, 0, cw, ch);
+  drawAnnotationBoxes(frame, inferW, inferH);
   if (!frame?.persons?.length) return;
 
   const layout = getDisplayLayout();
@@ -415,6 +479,13 @@ function renderAtTime(timeSec) {
     return;
   }
   drawSkeleton(hit.frame, hit.w, hit.h);
+  if (hit.frame?.collisions?.length || hit.frame?.alarm_collisions?.length) {
+    const c = (hit.frame.collisions || []).join(", ") || "—";
+    const a = (hit.frame.alarm_collisions || []).join(", ") || "—";
+    timeLabel.title = `碰撞: ${c} | 报警: ${a}`;
+  } else {
+    timeLabel.title = "";
+  }
 }
 
 function tick() {
@@ -474,6 +545,7 @@ $("#playback-json").addEventListener("change", async (e) => {
   clearVideoElement();
   poseData = JSON.parse(await file.text());
   buildFrameIndex();
+  $("#playback-annotation").value = "";
   const f0 = frameByTime[0];
   setPlaybackInfo(
     `已导入 ${file.name}，${poseData.frame_count ?? poseData.frames?.length ?? 0} 帧` +
@@ -481,6 +553,18 @@ $("#playback-json").addEventListener("change", async (e) => {
       "。请上传配套视频后播放。"
   );
   redrawCurrentFrame();
+});
+
+$("#playback-annotation").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    await loadAnnotationBoxesFromFile(file);
+    setPlaybackInfo(`已导入标注 ${file.name}，${annotationBoxes.length} 个货框`);
+    redrawCurrentFrame();
+  } catch (err) {
+    setPlaybackInfo(`❌ 标注 JSON 无效: ${err.message}`);
+  }
 });
 
 $("#playback-video").addEventListener("change", async (e) => {

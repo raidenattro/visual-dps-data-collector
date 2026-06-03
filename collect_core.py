@@ -12,6 +12,19 @@ import cv2
 from model_assets import COCO17_KEYPOINT_NAMES, RTMPOSE_VARIANTS, VIDEO_EXTENSIONS
 from rtmpose_infer import PoseBatch, RTMPosePipeline
 
+try:
+    from event_engine.annotation_boxes import (
+        boxes_for_json_export,
+        load_annotation_config,
+        load_scaled_boxes,
+    )
+    from event_engine.collision import CollisionProcessor
+except ImportError:
+    boxes_for_json_export = None  # type: ignore
+    load_annotation_config = None  # type: ignore
+    load_scaled_boxes = None  # type: ignore
+    CollisionProcessor = None  # type: ignore
+
 ProgressCallback = Callable[[int, int], None]
 
 
@@ -131,6 +144,9 @@ def collect_from_video(
     frame_rate: float = 0.0,
     max_frames: int | None = None,
     on_progress: ProgressCallback | None = None,
+    annotation_path: str | Path | None = None,
+    alarm_min_consecutive_frames: int = 3,
+    alarm_cooldown_frames: int = 12,
 ) -> dict[str, Any]:
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
@@ -147,6 +163,35 @@ def collect_from_video(
     interval = max(1, int(frame_interval))
 
     collect_frame_rate = max(0.0, float(frame_rate))
+
+    collision_processor: CollisionProcessor | None = None
+    annotation_meta: dict[str, Any] | None = None
+    infer_w_init = int(resize[0]) if resize else int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+    infer_h_init = int(resize[1]) if resize else int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+    if annotation_path and load_scaled_boxes and CollisionProcessor:
+        ann_path = Path(annotation_path)
+        if ann_path.is_file():
+            scaled_boxes = load_scaled_boxes(ann_path, max(1, infer_w_init), max(1, infer_h_init))
+            if scaled_boxes:
+                collision_processor = CollisionProcessor(
+                    scaled_boxes,
+                    alarm_min_consecutive_frames=alarm_min_consecutive_frames,
+                    alarm_cooldown_frames=alarm_cooldown_frames,
+                    video_fps=fps,
+                )
+                ann_cfg = load_annotation_config(ann_path)
+                annotation_meta = {
+                    "source_file": ann_path.name,
+                    "annotation_size": ann_cfg.get("annotation_size"),
+                    "source_info": ann_cfg.get("source_info"),
+                    "shelves": ann_cfg.get("shelves"),
+                    "grid_shape": ann_cfg.get("grid_shape"),
+                    "boxes": boxes_for_json_export(scaled_boxes),
+                    "box_count": len(scaled_boxes),
+                }
+                print(f"ℹ️ 碰撞检测: 已加载 {len(scaled_boxes)} 个货框（{ann_path.name}）")
+            else:
+                print(f"⚠️ 标注 JSON 无有效货框: {ann_path}")
 
     try:
         while True:
@@ -169,16 +214,23 @@ def collect_from_video(
             _throttle_frame_rate(collect_frame_rate, loop_started_at)
             saved_idx += 1
             ts = (read_idx - 1) / fps
-            frames_out.append(
-                {
-                    "frame_idx": saved_idx,
-                    "source_frame_idx": read_idx,
-                    "timestamp_sec": round(ts, 6),
-                    "infer_width": infer_w,
-                    "infer_height": infer_h,
-                    "persons": persons_from_batch(batch),
-                }
-            )
+            persons = persons_from_batch(batch)
+            frame_out: dict[str, Any] = {
+                "frame_idx": saved_idx,
+                "source_frame_idx": read_idx,
+                "timestamp_sec": round(ts, 6),
+                "infer_width": infer_w,
+                "infer_height": infer_h,
+                "persons": persons,
+            }
+            if collision_processor is not None:
+                event = collision_processor.process(
+                    {"frame_idx": read_idx, "persons": persons}
+                )
+                frame_out["persons"] = event.get("skeletons") or persons
+                frame_out["collisions"] = event.get("collisions") or []
+                frame_out["alarm_collisions"] = event.get("alarm_collisions") or []
+            frames_out.append(frame_out)
             if on_progress:
                 on_progress(read_idx, total_frames)
             if max_frames is not None and saved_idx >= max_frames:
@@ -186,7 +238,7 @@ def collect_from_video(
     finally:
         cap.release()
 
-    return {
+    result: dict[str, Any] = {
         "schema": 1,
         "kind": "pose_collect_video",
         "model": f"rtmpose_{pipeline.variant}",
@@ -204,6 +256,14 @@ def collect_from_video(
         "frame_count": len(frames_out),
         "frames": frames_out,
     }
+    if annotation_meta is not None:
+        result["annotation"] = annotation_meta
+        result["collision"] = {
+            "enabled": True,
+            "alarm_min_consecutive_frames": alarm_min_consecutive_frames,
+            "alarm_cooldown_frames": alarm_cooldown_frames,
+        }
+    return result
 
 
 def write_json(data: dict[str, Any], output_path: str | Path) -> Path:
@@ -229,6 +289,9 @@ def run_collect_job(
     frame_rate: float = 0.0,
     max_frames: int | None = None,
     on_progress: ProgressCallback | None = None,
+    annotation_path: str | Path | None = None,
+    alarm_min_consecutive_frames: int = 3,
+    alarm_cooldown_frames: int = 12,
 ) -> dict[str, Any]:
     video_path = validate_video_path(video_path)
     resize = _resolve_collect_resize(video_path, width, height)
@@ -257,6 +320,9 @@ def run_collect_job(
         frame_rate=frame_rate,
         max_frames=max_frames,
         on_progress=on_progress,
+        annotation_path=annotation_path,
+        alarm_min_consecutive_frames=alarm_min_consecutive_frames,
+        alarm_cooldown_frames=alarm_cooldown_frames,
     )
     data["collected_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     data["elapsed_sec"] = round(time.perf_counter() - t0, 3)

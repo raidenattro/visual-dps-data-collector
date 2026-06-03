@@ -38,6 +38,8 @@ python server.py
 | `inference` | `frame_rate` | 采集推理节拍（帧/秒），**默认 0**=全速；如 `15` 则限速到约 15 次推理/秒 |
 | `inference` | `pose_frame_interval` | 抽帧间隔 |
 | `inference` | `max_pose_frames` | 最多采集帧数，0 不限制 |
+| `inference` | `alarm_min_consecutive_frames` | 碰撞报警：连续命中帧数（默认 3，同 visual-dps） |
+| `inference` | `alarm_cooldown_frames` | 碰撞报警：同货框冷却帧数（默认 6） |
 | `source` | `video` | CLI 默认视频路径 |
 | `server` | `host` / `port` | Web 服务 |
 
@@ -81,6 +83,23 @@ python collect_pose.py --video test.mp4 --backend rtmpose_t
 ```
 
 未指定 `-o` 时写入 `paths.json_dir/{视频主名}_{backend}.json`（如 `test.mp4` → `test_rtmpose_t.json`）。
+
+带碰撞检测（上传 visual-dps 格式标注 JSON）：
+
+```bash
+python collect_pose.py --video test.mp4 --annotation path/to/boxes.json
+```
+
+Web 采集页可同时上传「视频 + 标注 JSON」。
+
+## 碰撞检测（与 visual-dps event-worker 一致）
+
+- **输入**：visual-dps / box_human_det 同款标注 JSON（`shelves[]` 或 legacy 顶层 `boxes[]`，含 `video_polygon` / `video_polygon_norm`、`annotation_size`）
+- **逻辑**：COCO-17 手腕（索引 9/10）score > 0.3，点落在货框多边形内 → `collisions`；连续 N 帧 + 冷却 → `alarm_collisions`
+- **输出**：每帧 `collisions` / `alarm_collisions`；根节点 `annotation.boxes` 为已缩放到推理分辨率的货框
+- **回放**：绿框=无碰撞，黄框=瞬时碰撞，红框=报警（与 box_human_det 三色一致）
+
+标注 JSON 会另存为 `{pose_stem}_annotation.json`，也可通过 `GET /api/records/{id}/annotation.json` 下载。
 
 ## JSON 格式
 

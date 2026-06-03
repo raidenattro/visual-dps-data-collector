@@ -138,6 +138,7 @@ class AppPaths:
     video_dir: Path
     upload_dir: Path
     playback_temp_dir: Path
+    annotation_dir: Path
     models_onnx_dir: Path
     models_detection_dir: Path
     models_pose_dir: Path
@@ -151,6 +152,12 @@ def resolve_app_paths(cfg: dict[str, Any] | None = None, *, base: Path | None = 
     json_dir = Path(_resolve_path(str(paths.get("json_dir") or "localdata/json"), base=root))
     video_dir = Path(_resolve_path(str(paths.get("video_dir") or "localdata/video"), base=root))
     upload_dir = Path(_resolve_path(str(paths.get("upload_dir") or "localdata/upload"), base=root))
+    annotation_dir = Path(
+        _resolve_path(
+            str(paths.get("annotation_dir") or "localdata/json/annotations"),
+            base=root,
+        )
+    )
     models_onnx = Path(
         _resolve_path(
             str(
@@ -169,6 +176,7 @@ def resolve_app_paths(cfg: dict[str, Any] | None = None, *, base: Path | None = 
         video_dir=video_dir,
         upload_dir=upload_dir,
         playback_temp_dir=(upload_dir / "playback_temp").resolve(),
+        annotation_dir=annotation_dir.resolve(),
         models_onnx_dir=models_onnx.resolve(),
         models_detection_dir=(models_onnx / ONNX_DETECTION_DIR).resolve(),
         models_pose_dir=(models_onnx / ONNX_POSE_DIR).resolve(),
@@ -226,6 +234,8 @@ class CollectSettings:
     frame_rate: float
     max_pose_frames: int | None
     save_video: bool
+    alarm_min_consecutive_frames: int
+    alarm_cooldown_frames: int
 
 
 def sanitize_file_stem(name: str) -> str:
@@ -398,6 +408,23 @@ def build_settings(*, config_path: Path, cli: dict[str, Any]) -> CollectSettings
     storage = _section(cfg, "storage")
     save_video = _pick_bool(cli.get("save_video"), storage.get("save_video"), True)
 
+    alarm_min = max(
+        1,
+        _pick_int(
+            cli.get("alarm_min_consecutive_frames"),
+            inference.get("alarm_min_consecutive_frames"),
+            3,
+        ),
+    )
+    alarm_cooldown = max(
+        1,
+        _pick_int(
+            cli.get("alarm_cooldown_frames"),
+            inference.get("alarm_cooldown_frames"),
+            12,
+        ),
+    )
+
     return CollectSettings(
         config_path=config_path.resolve(),
         backend=backend,
@@ -415,4 +442,6 @@ def build_settings(*, config_path: Path, cli: dict[str, Any]) -> CollectSettings
         frame_rate=frame_rate,
         max_pose_frames=max_pose_frames,
         save_video=save_video,
+        alarm_min_consecutive_frames=alarm_min,
+        alarm_cooldown_frames=alarm_cooldown,
     )

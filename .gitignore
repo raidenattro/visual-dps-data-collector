@@ -23,9 +23,11 @@ htmlcov/
 *.log
 
 # --- 本地数据（运行时生成，不入库）---
-# 采集产物：骨架 JSON 与 sidecar
+# 采集产物：骨架 JSON 与 sidecar（保留 *_annotation.json 与 pose 配对）
 localdata/json/*
 !localdata/json/.gitkeep
+localdata/json/annotations/*
+!localdata/json/annotations/.gitkeep
 
 # 配套视频（体积大）
 localdata/video/*
