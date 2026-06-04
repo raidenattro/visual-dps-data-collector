@@ -453,6 +453,71 @@ h2 {
   min-width: 10rem;
 }
 
+.collect-ocr-roi-wrap {
+  margin: 0.75rem 0;
+  padding: 0.75rem;
+  border: 1px solid #2a3f5f;
+  border-radius: 10px;
+  background: #0d1520;
+}
+
+.collect-ocr-roi-wrap.hidden {
+  display: none;
+}
+
+.collect-ocr-roi-hint {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+}
+
+.collect-ocr-roi-stage {
+  position: relative;
+  width: 100%;
+  max-width: 720px;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border-radius: 8px;
+  overflow: hidden;
+  user-select: none;
+  touch-action: none;
+}
+
+.collect-ocr-preview {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.collect-ocr-roi-box {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px solid #22d3ee;
+  background: rgba(34, 211, 238, 0.12);
+  cursor: move;
+  z-index: 2;
+}
+
+.collect-ocr-roi-handle {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #22d3ee;
+  border: 2px solid #0d1520;
+  cursor: nwse-resize;
+}
+
+.collect-ocr-roi-label {
+  margin: 0.5rem 0 0;
+  font-size: 0.82rem;
+  color: #8b9cb3;
+  font-family: ui-monospace, monospace;
+}
+
 .inline-tip-row {
   display: flex;
   align-items: center;

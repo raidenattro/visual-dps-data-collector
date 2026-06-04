@@ -61,7 +61,7 @@ from pose_store import (
 from video_frame import first_frame_base64
 
 try:
-    from corner_label.ocr import default_ocr_engine
+    from corner_label.ocr import CornerRoi, default_corner_roi, default_ocr_engine
     from corner_label.reflection import load_reflection
     from corner_label.resolve import resolve_annotation_for_video
     from event_engine.annotation_boxes import load_annotation_config
@@ -69,6 +69,8 @@ try:
     _CORNER_LABEL_OK = True
 except ImportError:
     default_ocr_engine = None  # type: ignore
+    default_corner_roi = None  # type: ignore
+    CornerRoi = None  # type: ignore
     load_reflection = None  # type: ignore
     resolve_annotation_for_video = None  # type: ignore
     load_annotation_config = None  # type: ignore
@@ -481,11 +483,39 @@ def get_ocr_config() -> dict[str, Any]:
             eng = default_ocr_engine()
         except Exception:
             pass
+    r = default_corner_roi() if default_corner_roi else None
     return {
         "available": _CORNER_LABEL_OK,
         "engine": eng,
         "reflection_path": str(_reflection_json_path()),
+        "roi": [r.x0, r.y0, r.x1, r.y1] if r else None,
     }
+
+
+def _corner_roi_from_form(
+    roi_x0: str = "",
+    roi_y0: str = "",
+    roi_x1: str = "",
+    roi_y1: str = "",
+) -> Any:
+    """前端手动框选 ROI（0~1），缺省用 config.json。"""
+    if not CornerRoi or not default_corner_roi:
+        return None
+    parts: list[float] = []
+    for raw in (roi_x0, roi_y0, roi_x1, roi_y1):
+        s = str(raw or "").strip()
+        if not s:
+            return default_corner_roi()
+        try:
+            parts.append(float(s))
+        except ValueError:
+            return default_corner_roi()
+    if len(parts) != 4:
+        return default_corner_roi()
+    x0, y0, x1, y1 = (max(0.0, min(1.0, v)) for v in parts)
+    if x1 <= x0 or y1 <= y0:
+        return default_corner_roi()
+    return CornerRoi(x0=x0, y0=y0, x1=x1, y1=y1)
 
 
 def _reflection_json_path() -> Path:
@@ -531,6 +561,10 @@ def _pop_ocr_match_annotation(match_id: str) -> dict[str, Any] | None:
 async def collect_ocr_match(
     file: UploadFile = File(...),
     ocr_engine: str = Form(""),
+    roi_x0: str = Form(""),
+    roi_y0: str = Form(""),
+    roi_x1: str = Form(""),
+    roi_y1: str = Form(""),
 ) -> dict[str, Any]:
     """同一 Python 环境内 OCR 机位并装配 annotation JSON（CPU Paddle 默认）。"""
     if not _CORNER_LABEL_OK:
@@ -561,11 +595,13 @@ async def collect_ocr_match(
 
         reflection = load_reflection(reflection_path)
         engine = str(ocr_engine or "").strip().lower() or default_ocr_engine()
+        roi = _corner_roi_from_form(roi_x0, roi_y0, roi_x1, roi_y1)
         resolved = resolve_annotation_for_video(
             tmp_video,
             reflection=reflection,
             annotations_dir=paths.annotation_dir,
             ocr_engine=engine,
+            roi=roi,
         )
         _, err = validate_annotation_payload(load_annotation_config(resolved.annotation_path))
         if err:
@@ -589,6 +625,7 @@ async def collect_ocr_match(
             "created_at": time.time(),
             "ocr_engine": engine,
             "ocr_meta": resolved.ocr_meta,
+            "roi": [roi.x0, roi.y0, roi.x1, roi.y1] if roi else None,
         }
         with _ocr_match_lock:
             _ocr_match_store[match_id] = entry
@@ -601,6 +638,7 @@ async def collect_ocr_match(
             "json_files": json_files,
             "json_files_display": entry["json_files_display"],
             "merged": entry["merged"],
+            "roi": entry.get("roi"),
             "message": (
                 f"已匹配机位 {resolved.corner_label}，标注 {', '.join(json_files)}"
                 + ("（已合并）" if entry["merged"] else "")

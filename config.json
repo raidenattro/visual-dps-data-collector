@@ -40,6 +40,7 @@
     },
     "ocr": {
         "engine": "paddle",
-        "reflection_path": "reflection.json"
+        "reflection_path": "reflection.json",
+        "roi": [0.72, 0.86, 1.0, 0.98]
     }
 }

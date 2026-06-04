@@ -122,14 +122,19 @@ pip install -r requirements.txt
 
 1. 将 `examples/reflection.example.json` 复制为仓库根目录 `reflection.json`，按现场维护 `camera` ↔ `annotation` 编号。
 2. 标注 JSON 放在 `localdata/json/annotations/{编号}.json`（与 reflection 中 `annotation` 同名）。
-3. 启动 `python server.py`，采集页选视频 → **「识别机位并匹配标注」** → 再 **开始采集**。  
-   控制台会打印 `[corner-ocr] raw=...` 便于核对识别结果。
+3. 启动 `python server.py`，采集页 **选择视频** → 在预览上 **拖拽绿框** 框住右下角机位字 → **「识别机位并匹配标注」** → **开始采集**。  
+   控制台会打印 `roi=(...)` 与 `[corner-ocr] raw=...`。
 
 命令行探针：
 
 ```bash
 python scripts/ocr_probe.py --video path/to.mp4 --engine paddle --resolve
+python scripts/ocr_probe.py --video path/to.mp4 --roi 0.72,0.86,1,0.98
 ```
+
+**手动调 ROI**：采集页选视频后在预览上拖拽绿框（优先于 `config.json` 的 `ocr.roi`）。OCR 会对 ROI 做多路增强（CLAHE、白字提取、Otsu 等）并合并结果。
+
+调试：启动前 `set CORNER_OCR_DEBUG_DIR=localdata\ocr_debug`，可保存裁图与各预处理 OCR 中间图；控制台会打印每一路 `variant` 的识别文本。
 
 `config.json` → `ocr.engine` 可选 `paddle` / `easy` / `auto`（默认 `paddle`）。
 

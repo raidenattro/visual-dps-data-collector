@@ -36,7 +36,7 @@ def default_ocr_engine() -> str:
 
 @dataclass(frozen=True)
 class CornerRoi:
-    """画面比例 ROI：默认中心右半区域。"""
+    """画面比例 ROI：x0,y0,x1,y1 ∈ [0,1]，优先读 config.json → ocr.roi。"""
 
     x0: float = 0.5
     y0: float = 0.25
@@ -44,8 +44,37 @@ class CornerRoi:
     y1: float = 0.75
 
 
+def default_corner_roi() -> CornerRoi:
+    """从 config.json 读取 ocr.roi: [x0, y0, x1, y1]，便于手动调 ROI。"""
+    try:
+        cfg = __import__("config_loader", fromlist=["load_config_file", "resolve_config_path"])
+        data = cfg.load_config_file(cfg.resolve_config_path(None))
+        ocr = data.get("ocr") if isinstance(data.get("ocr"), dict) else {}
+        box = ocr.get("roi")
+        if isinstance(box, (list, tuple)) and len(box) >= 4:
+            vals = [float(box[i]) for i in range(4)]
+            return CornerRoi(
+                x0=max(0.0, min(1.0, vals[0])),
+                y0=max(0.0, min(1.0, vals[1])),
+                x1=max(0.0, min(1.0, vals[2])),
+                y1=max(0.0, min(1.0, vals[3])),
+            )
+    except Exception:
+        pass
+    return CornerRoi()
+
+
+def _normalize_for_label_extract(text: str) -> str:
+    """纠正常见 OCR 误识后再做正则匹配。"""
+    s = str(text or "")
+    s = s.replace("＃", "#").replace("－", "-").replace("—", "-")
+    s = re.sub(r"(?i)#g", "组", s)
+    s = re.sub(r"\s+", "", s)
+    return s
+
+
 def extract_corner_label_candidates(text: str) -> list[str]:
-    found = CORNER_LABEL_RE.findall(str(text or ""))
+    found = CORNER_LABEL_RE.findall(_normalize_for_label_extract(text))
     return [normalize_corner_label(x) for x in found]
 
 
@@ -60,14 +89,40 @@ def _crop_roi(frame, roi: CornerRoi):
     return frame[y0:y1, x0:x1]
 
 
-def _preprocess_for_ocr(bgr):
-    if len(bgr.shape) == 2:
-        gray = bgr
+def _scale_min_side(bgr, min_side: int = 160):
+    h, w = bgr.shape[:2]
+    factor = max(2.0, float(min_side) / max(1, min(h, w)))
+    return cv2.resize(bgr, None, fx=factor, fy=factor, interpolation=cv2.INTER_CUBIC)
+
+
+def _preprocess_variants_for_osd(bgr) -> list[tuple[str, object]]:
+    """
+    监控 OSD 白字：原图放大、CLAHE、亮区掩膜、Otsu 等多路，供 Paddle 逐路识别。
+    """
+    scaled = _scale_min_side(bgr, min_side=160)
+    if len(scaled.shape) == 2:
+        gray = scaled
+        color = cv2.cvtColor(scaled, cv2.COLOR_GRAY2BGR)
     else:
-        gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
-    gray = cv2.resize(gray, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
-    _, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    return cv2.cvtColor(th, cv2.COLOR_GRAY2BGR)
+        color = scaled
+        gray = cv2.cvtColor(scaled, cv2.COLOR_BGR2GRAY)
+
+    variants: list[tuple[str, object]] = [("color", color)]
+
+    clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(4, 4))
+    enhanced = clahe.apply(gray)
+    variants.append(("clahe", cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)))
+
+    # 白字：高亮像素 → 黑字白底（OCR 更稳）
+    _, bright = cv2.threshold(enhanced, 165, 255, cv2.THRESH_BINARY)
+    white_fg = 255 - bright
+    variants.append(("white_fg", cv2.cvtColor(white_fg, cv2.COLOR_GRAY2BGR)))
+
+    _, th_otsu = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    variants.append(("otsu", cv2.cvtColor(th_otsu, cv2.COLOR_GRAY2BGR)))
+    variants.append(("otsu_inv", cv2.cvtColor(255 - th_otsu, cv2.COLOR_GRAY2BGR)))
+
+    return variants
 
 
 _EASYOCR_READER = None
@@ -111,7 +166,13 @@ def _get_paddle_ocr():
         from paddleocr import PaddleOCR
 
         try:
-            _PADDLE_OCR = PaddleOCR(use_angle_cls=False, lang="ch", show_log=False)
+            _PADDLE_OCR = PaddleOCR(
+                use_angle_cls=False,
+                lang="ch",
+                show_log=False,
+                det_db_thresh=0.2,
+                det_limit_side_len=1280,
+            )
         except TypeError:
             try:
                 _PADDLE_OCR = PaddleOCR(lang="ch")
@@ -128,7 +189,17 @@ def _collect_text_from_paddle_result(result) -> list[str]:
     if result is None:
         return parts
     if isinstance(result, list):
+        if result and all(isinstance(x, str) for x in result):
+            parts.extend(str(x).strip() for x in result if str(x).strip())
+            return parts
         for item in result:
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                if isinstance(item[0], str) and isinstance(item[1], (int, float)):
+                    parts.append(str(item[0]).strip())
+                    continue
+                if isinstance(item[1], (list, tuple)) and item[1]:
+                    parts.append(str(item[1][0]).strip())
+                    continue
             parts.extend(_collect_text_from_paddle_result(item))
         return parts
     if isinstance(result, dict):
@@ -153,41 +224,73 @@ def _collect_text_from_paddle_result(result) -> list[str]:
     return parts
 
 
-def _ocr_paddle(image_bgr) -> str:
+def _ocr_paddle_once(image_bgr, *, det: bool = True) -> str:
     ocr = _get_paddle_ocr()
-    rgb = (
-        cv2.cvtColor(image_bgr, cv2.COLOR_GRAY2RGB)
-        if len(image_bgr.shape) == 2
-        else cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
-    )
+    if len(image_bgr.shape) == 2:
+        img = cv2.cvtColor(image_bgr, cv2.COLOR_GRAY2BGR)
+    else:
+        img = image_bgr
+
     parts: list[str] = []
-    if hasattr(ocr, "predict"):
+    if hasattr(ocr, "ocr"):
         try:
+            legacy = ocr.ocr(img, det=det, rec=True, cls=False)
+        except TypeError:
+            try:
+                legacy = ocr.ocr(img, cls=False)
+            except TypeError:
+                legacy = ocr.ocr(img)
+        parts.extend(_collect_text_from_paddle_result(legacy))
+    if not parts and hasattr(ocr, "predict"):
+        try:
+            rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             for batch in ocr.predict(rgb):
                 parts.extend(_collect_text_from_paddle_result(batch))
         except NotImplementedError as exc:
             raise RuntimeError(
                 "Paddle 3.x 在 Windows 上 oneDNN 报错，请: pip install paddlepaddle==2.6.2 paddleocr==2.7.3"
             ) from exc
-    if not parts and hasattr(ocr, "ocr"):
-        try:
-            legacy = ocr.ocr(rgb, cls=False)
-        except TypeError:
-            legacy = ocr.ocr(rgb)
-        parts.extend(_collect_text_from_paddle_result(legacy))
     return " ".join(parts)
 
 
-def ocr_image_corner(image_bgr, *, engine: str = "auto") -> str:
-    proc = _preprocess_for_ocr(image_bgr)
+def _ocr_paddle_multi(image_bgr, *, debug_tag: str = "") -> tuple[str, list[dict]]:
+    """多路预处理 + det / det=False 整图识别，合并文本。"""
+    chunks: list[str] = []
+    steps: list[dict] = []
+    for name, variant in _preprocess_variants_for_osd(image_bgr):
+        for use_det in (True, False):
+            try:
+                text = _ocr_paddle_once(variant, det=use_det)
+            except Exception as exc:
+                steps.append({"variant": name, "det": use_det, "error": str(exc)})
+                continue
+            t = str(text or "").strip()
+            steps.append({"variant": name, "det": use_det, "text": t})
+            if t:
+                chunks.append(t)
+            if debug_tag:
+                dbg = os.environ.get("CORNER_OCR_DEBUG_DIR", "").strip()
+                if dbg:
+                    p = Path(dbg)
+                    p.mkdir(parents=True, exist_ok=True)
+                    suffix = f"{debug_tag}_{name}_{'det' if use_det else 'rec'}.png"
+                    cv2.imwrite(str(p / suffix), variant)
+    merged = " ".join(chunks).strip()
+    return merged, steps
+
+
+def ocr_image_corner(image_bgr, *, engine: str = "auto", debug_tag: str = "") -> tuple[str, list[dict]]:
     eng = str(engine or "auto").strip().lower()
     if eng == "auto":
         eng = default_ocr_engine()
 
     errors: list[str] = []
+    steps: list[dict] = []
     if eng in ("paddle", "auto"):
         try:
-            return _ocr_paddle(proc)
+            text, steps = _ocr_paddle_multi(image_bgr, debug_tag=debug_tag)
+            if text:
+                return text, steps
         except ImportError:
             errors.append("未安装 paddleocr（见 requirements-ocr.txt）")
         except Exception as exc:
@@ -197,7 +300,15 @@ def ocr_image_corner(image_bgr, *, engine: str = "auto") -> str:
 
     if eng in ("easy", "auto"):
         try:
-            return _ocr_easy(proc)
+            parts: list[str] = []
+            for name, variant in _preprocess_variants_for_osd(image_bgr):
+                t = _ocr_easy(variant).strip()
+                steps.append({"variant": name, "engine": "easy", "text": t})
+                if t:
+                    parts.append(t)
+            text = " ".join(parts).strip()
+            if text:
+                return text, steps
         except ImportError:
             errors.append("未安装 easyocr")
         except Exception as exc:
@@ -234,7 +345,7 @@ def read_corner_label_from_video(
     sample_frame_indices: tuple[int, ...] = (0, 30, 60, 90),
     engine: str = "auto",
 ) -> tuple[str | None, dict]:
-    roi = roi or CornerRoi()
+    roi = roi or default_corner_roi()
     path = Path(video_path)
     eng = str(engine or "auto").strip().lower() or default_ocr_engine()
     votes: dict[str, int] = {}
@@ -255,16 +366,34 @@ def read_corner_label_from_video(
     for frame_idx, frame in frames:
         crop = _crop_roi(frame, roi)
         h, w = crop.shape[:2]
+        dbg_dir = os.environ.get("CORNER_OCR_DEBUG_DIR", "").strip()
+        if dbg_dir:
+            Path(dbg_dir).mkdir(parents=True, exist_ok=True)
+            cv2.imwrite(str(Path(dbg_dir) / f"crop_f{frame_idx}.png"), crop)
         try:
-            raw = ocr_image_corner(crop, engine=eng)
+            raw, ocr_steps = ocr_image_corner(crop, engine=eng, debug_tag=f"f{frame_idx}")
         except Exception as exc:
             last_error = str(exc)
             _ocr_log(f"帧 {frame_idx} 失败: {last_error}")
             meta["frames"].append({"frame": frame_idx, "error": last_error})
             continue
         cands = extract_corner_label_candidates(raw)
-        _ocr_log(f"帧 {frame_idx} crop={w}x{h} raw={raw!r} candidates={cands!r}")
-        meta["frames"].append({"frame": frame_idx, "raw": raw, "candidates": cands})
+        norm = _normalize_for_label_extract(raw)
+        _ocr_log(
+            f"帧 {frame_idx} crop={w}x{h} raw={raw!r} norm={norm!r} candidates={cands!r}"
+        )
+        for step in ocr_steps:
+            if step.get("text"):
+                _ocr_log(f"  · {step.get('variant')} det={step.get('det')} → {step.get('text')!r}")
+        meta["frames"].append(
+            {
+                "frame": frame_idx,
+                "raw": raw,
+                "normalized": norm,
+                "candidates": cands,
+                "ocr_steps": ocr_steps,
+            }
+        )
         for c in cands:
             votes[c] = votes.get(c, 0) + 1
 

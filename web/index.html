@@ -93,7 +93,7 @@
         <div class="collect-ocr-row">
           <label class="collect-ocr-engine-label">
             <span class="label-with-tip">OCR 引擎
-              <button type="button" class="field-tip" data-tip="与骨架采集同一 Python 环境。推荐 CPU 版 Paddle（requirements-ocr.txt）。识别视频画面机位标签并对照 reflection.json 装配标注。">?</button>
+              <button type="button" class="field-tip" data-tip="与骨架采集同一环境。选视频后在下方预览框用手动绿框标定机位文字区域，再点识别。框选范围会随请求提交，优先于 config.json 中的 ocr.roi。">?</button>
             </span>
             <select id="collect-ocr-engine">
               <option value="paddle" selected>paddle（CPU，推荐）</option>
@@ -102,6 +102,20 @@
             </select>
           </label>
           <button type="button" id="collect-ocr-run" class="secondary-btn">识别机位并匹配标注</button>
+          <button type="button" id="collect-ocr-roi-reset" class="secondary-btn">重置 OCR 区域</button>
+        </div>
+        <div id="collect-ocr-roi-wrap" class="collect-ocr-roi-wrap hidden">
+          <p class="hint collect-ocr-roi-hint">
+            在预览上<strong>拖拽绿框</strong>移动、<strong>右下角圆点</strong>缩放，框住机位文字（如 2-1组-3）后再点「识别机位」。
+            识别失败时可在启动 server 前设置环境变量 <code>CORNER_OCR_DEBUG_DIR=localdata/ocr_debug</code> 查看预处理图与各步 OCR 结果。
+          </p>
+          <div id="collect-ocr-roi-stage" class="collect-ocr-roi-stage">
+            <video id="collect-ocr-preview" class="collect-ocr-preview" playsinline muted preload="metadata"></video>
+            <div id="collect-ocr-roi-box" class="collect-ocr-roi-box">
+              <span class="collect-ocr-roi-handle" title="拖动缩放"></span>
+            </div>
+          </div>
+          <p id="collect-ocr-roi-label" class="hint collect-ocr-roi-label">OCR 区域（画面比例）：—</p>
         </div>
         <p id="collect-ocr-status" class="annotation-status hint hidden" role="status"></p>
         <label>
@@ -285,10 +299,11 @@
 
   <script src="fieldTips.js"></script>
   <script src="previewLayout.js"></script>
+  <script src="collectOcrRoi.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.8.0/math.js"></script>
   <script src="annotateGeometry.js"></script>
   <script src="annotateVisualMode.js"></script>
-  <script src="app.js?v=19"></script>
+  <script src="app.js?v=20"></script>
   <script src="annotate.js?v=10"></script>
 </body>
 </html>

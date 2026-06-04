@@ -16,7 +16,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from config_loader import load_config_file, project_root, resolve_app_paths, resolve_config_path
-from corner_label.ocr import CornerRoi, default_ocr_engine, read_corner_label_from_video
+from corner_label.ocr import CornerRoi, default_corner_roi, default_ocr_engine, read_corner_label_from_video
 from corner_label.reflection import load_reflection
 from corner_label.resolve import resolve_annotation_for_video
 
@@ -27,6 +27,11 @@ def main() -> int:
     p.add_argument("--engine", default="", help="paddle / easy / auto")
     p.add_argument("--reflection", default="", help="reflection.json，默认仓库根目录")
     p.add_argument("--resolve", action="store_true", help="尝试匹配 annotation JSON")
+    p.add_argument(
+        "--roi",
+        default="",
+        help="覆盖 config：x0,y0,x1,y1 比例，如 0.72,0.86,1,0.98",
+    )
     args = p.parse_args()
 
     video = Path(args.video).resolve()
@@ -35,7 +40,14 @@ def main() -> int:
         return 1
 
     engine = str(args.engine or "").strip().lower() or default_ocr_engine()
-    label, meta = read_corner_label_from_video(video, engine=engine)
+    roi = default_corner_roi()
+    if str(args.roi or "").strip():
+        parts = [float(x.strip()) for x in str(args.roi).split(",")]
+        if len(parts) != 4:
+            print("ROI 须为 4 个数: x0,y0,x1,y1", file=sys.stderr)
+            return 1
+        roi = CornerRoi(x0=parts[0], y0=parts[1], x1=parts[2], y1=parts[3])
+    label, meta = read_corner_label_from_video(video, engine=engine, roi=roi)
     print(json.dumps({"corner_label": label, "meta": meta}, ensure_ascii=False, indent=2))
 
     if not args.resolve or not label:

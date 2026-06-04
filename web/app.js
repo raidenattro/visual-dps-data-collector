@@ -370,6 +370,9 @@ async function loadOcrConfigDefaults() {
     const body = await res.json();
     const sel = $("#collect-ocr-engine");
     if (sel && body.engine) sel.value = body.engine;
+    if (Array.isArray(body.roi) && body.roi.length >= 4 && typeof window.setCollectOcrRoiNorm === "function") {
+      window.setCollectOcrRoiNorm(body.roi);
+    }
     if (!body.available) {
       setCollectOcrStatus("⚠️ 服务端未加载 corner_label 模块", "is-error");
     }
@@ -452,6 +455,10 @@ $("#collect-file")?.addEventListener("change", () => {
   collectOcrMatchId = null;
   setCollectOcrStatus("");
   collectOcrStatus?.classList.add("hidden");
+  const file = $("#collect-file")?.files?.[0];
+  if (typeof window.initCollectOcrRoiPreview === "function") {
+    window.initCollectOcrRoiPreview(file || null);
+  }
   void refreshCollectAnnotationHint();
 });
 
@@ -464,7 +471,15 @@ $("#collect-ocr-run")?.addEventListener("click", async () => {
   const fd = new FormData();
   fd.append("file", file);
   fd.append("ocr_engine", $("#collect-ocr-engine")?.value || "paddle");
-  setCollectOcrStatus("正在 OCR 识别机位（同一环境 CPU Paddle）…", "is-loading");
+  const roi =
+    typeof window.getCollectOcrRoiNorm === "function" ? window.getCollectOcrRoiNorm() : null;
+  if (roi) {
+    fd.append("roi_x0", String(roi.x0));
+    fd.append("roi_y0", String(roi.y0));
+    fd.append("roi_x1", String(roi.x1));
+    fd.append("roi_y1", String(roi.y1));
+  }
+  setCollectOcrStatus("正在 OCR 识别机位（使用手动框选区域）…", "is-loading");
   collectOcrMatchId = null;
   try {
     const res = await fetch("/api/collect/ocr-match", { method: "POST", body: fd });
