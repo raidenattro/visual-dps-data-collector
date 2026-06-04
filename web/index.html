@@ -66,6 +66,18 @@
           <input type="file" id="collect-annotation" accept=".json,application/json" />
         </label>
         <p id="collect-annotation-hint" class="hint field-hint">按视频主名绑定一份标注。未上传时将检查 <code>localdata/json/annotations/{主名}.json</code>；若无标注请先 <button type="button" id="collect-goto-annotate" class="link-btn">去标注页</button> 或上传 JSON。采集将<strong>强制</strong>计算并保存碰撞/告警事件。</p>
+        <fieldset class="collision-config">
+          <legend>碰撞检测（inference，与 visual-dps 一致）</legend>
+          <div class="row">
+            <label>alarm_min_consecutive_frames
+              <input type="number" id="collect-alarm-min" value="3" min="1" step="1" title="手腕在货框内连续命中多少帧后触发告警" />
+            </label>
+            <label>alarm_cooldown_frames
+              <input type="number" id="collect-alarm-cooldown" value="6" min="1" step="1" title="同一货框两次告警之间的最小帧间隔" />
+            </label>
+          </div>
+          <p class="hint field-hint">瞬时碰撞：手腕（COCO 9/10）score&gt;0.3 进入货框 → <code>collisions</code>；满足连续帧且过冷却 → <code>alarm_collisions</code>。默认来自 <code>config.json</code>，可修改；回放补算时也使用此处配置。</p>
+        </fieldset>
         <button type="submit" id="collect-btn">开始采集</button>
       </form>
       <div id="collect-status" class="status hidden"></div>
@@ -156,7 +168,7 @@
 
   <script src="previewLayout.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.8.0/math.js"></script>
-  <script src="app.js?v=10"></script>
+  <script src="app.js?v=11"></script>
   <script src="annotate.js?v=3"></script>
 </body>
 </html>

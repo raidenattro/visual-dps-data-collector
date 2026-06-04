@@ -256,8 +256,12 @@ def _run_job(
     max_pose_frames: int | None,
     save_video: bool,
     annotation_path: Path | None = None,
+    alarm_min_consecutive_frames: int = 3,
+    alarm_cooldown_frames: int = 6,
 ) -> None:
     settings = build_settings(config_path=resolve_config_path(None), cli={})
+    alarm_min = max(1, int(alarm_min_consecutive_frames))
+    alarm_cd = max(1, int(alarm_cooldown_frames))
 
     def on_progress(current: int, total: int) -> None:
         pct = int(current / total * 100) if total > 0 else 0
@@ -280,8 +284,8 @@ def _run_job(
             max_frames=max_pose_frames,
             on_progress=on_progress,
             annotation_path=str(annotation_path) if annotation_path else None,
-            alarm_min_consecutive_frames=settings.alarm_min_consecutive_frames,
-            alarm_cooldown_frames=settings.alarm_cooldown_frames,
+            alarm_min_consecutive_frames=alarm_min,
+            alarm_cooldown_frames=alarm_cd,
         )
         record_id = _record_id_from_pose_path(pose_path)
         if annotation_path and annotation_path.is_file():
@@ -369,6 +373,23 @@ def _run_job(
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/config/inference")
+def get_inference_config() -> dict[str, Any]:
+    """采集页默认推理/碰撞参数（来自 config.json inference 节点）。"""
+    cfg = load_config_file(resolve_config_path(None))
+    inference = cfg.get("inference") if isinstance(cfg.get("inference"), dict) else {}
+    return {
+        "frame_rate": float(inference.get("frame_rate") or 0),
+        "height": int(inference.get("height") or 480),
+        "pose_frame_interval": int(inference.get("pose_frame_interval") or 1),
+        "max_pose_frames": int(inference.get("max_pose_frames") or 0),
+        "alarm_min_consecutive_frames": max(
+            1, int(inference.get("alarm_min_consecutive_frames") or 3)
+        ),
+        "alarm_cooldown_frames": max(1, int(inference.get("alarm_cooldown_frames") or 6)),
+    }
 
 
 def _record_meta_for_list(locator) -> dict[str, Any]:
@@ -838,6 +859,8 @@ async def collect_video(
     frame_rate: float = Form(0),
     max_pose_frames: int = Form(0),
     save_video: str = Form(""),
+    alarm_min_consecutive_frames: int = Form(0),
+    alarm_cooldown_frames: int = Form(0),
 ) -> dict[str, Any]:
     if not file.filename:
         raise HTTPException(400, "未选择文件")
@@ -858,6 +881,12 @@ async def collect_video(
             "frame_rate": frame_rate if frame_rate > 0 else None,
             "max_frames": max_pose_frames,
             "save_video": save_video if str(save_video).strip() else None,
+            "alarm_min_consecutive_frames": alarm_min_consecutive_frames
+            if int(alarm_min_consecutive_frames) > 0
+            else None,
+            "alarm_cooldown_frames": alarm_cooldown_frames
+            if int(alarm_cooldown_frames) > 0
+            else None,
         },
     )
 
@@ -948,6 +977,8 @@ async def collect_video(
         max_pose_frames=max_f,
         save_video=save_video_flag,
         annotation_path=annotation_path,
+        alarm_min_consecutive_frames=settings.alarm_min_consecutive_frames,
+        alarm_cooldown_frames=settings.alarm_cooldown_frames,
     )
 
     return {
@@ -959,6 +990,8 @@ async def collect_video(
         "has_annotation": annotation_path is not None,
         "video_stem": video_stem,
         "annotation_auto": annotation_path is not None and upload_ann_path is None,
+        "alarm_min_consecutive_frames": settings.alarm_min_consecutive_frames,
+        "alarm_cooldown_frames": settings.alarm_cooldown_frames,
     }
 
 

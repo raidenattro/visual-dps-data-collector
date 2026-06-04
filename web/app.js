@@ -27,6 +27,7 @@ let playbackEvents = [];
 let playbackEventsFromRealtime = false;
 let activeEventKey = null;
 const FRAME_CHUNK_SIZE = 120;
+const COLLISION_CFG_STORAGE_KEY = "datacollect_collision_cfg";
 let rafId = null;
 let playbackId = null;
 let playbackVideoObjectUrl = null;
@@ -275,11 +276,105 @@ tabs.forEach((btn) => {
     tabs.forEach((b) => b.classList.toggle("active", b === btn));
     Object.values(panels).forEach((p) => p.classList.remove("active"));
     panels[btn.dataset.tab].classList.add("active");
-    if (btn.dataset.tab === "collect") loadRecords();
+    if (btn.dataset.tab === "collect") {
+      loadRecords();
+      void loadInferenceConfigDefaults();
+    }
     if (btn.dataset.tab === "annotate") loadAnnotateRecordSelect();
     if (btn.dataset.tab === "playback") restorePlaybackPanelUi();
   });
 });
+
+$("#collect-fps")?.addEventListener("input", () => {
+  $("#collect-fps").dataset.userTouched = "1";
+});
+$("#collect-alarm-min")?.addEventListener("change", () => {
+  saveCollisionConfigToStorage(readCollisionConfigFromForm());
+  resetPlaybackCollisionTracker();
+});
+$("#collect-alarm-cooldown")?.addEventListener("change", () => {
+  saveCollisionConfigToStorage(readCollisionConfigFromForm());
+  resetPlaybackCollisionTracker();
+});
+
+function readCollisionConfigFromForm() {
+  const min = Math.max(1, parseInt($("#collect-alarm-min")?.value, 10) || 3);
+  const cd = Math.max(1, parseInt($("#collect-alarm-cooldown")?.value, 10) || 6);
+  return { alarm_min_consecutive_frames: min, alarm_cooldown_frames: cd };
+}
+
+function saveCollisionConfigToStorage(cfg) {
+  try {
+    localStorage.setItem(COLLISION_CFG_STORAGE_KEY, JSON.stringify(cfg));
+  } catch {
+    /* ignore */
+  }
+}
+
+function loadCollisionConfigFromStorage() {
+  try {
+    const raw = localStorage.getItem(COLLISION_CFG_STORAGE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (!data || typeof data !== "object") return null;
+    return {
+      alarm_min_consecutive_frames: Math.max(
+        1,
+        parseInt(data.alarm_min_consecutive_frames, 10) || 3
+      ),
+      alarm_cooldown_frames: Math.max(1, parseInt(data.alarm_cooldown_frames, 10) || 6),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function applyCollisionConfigToForm(cfg) {
+  if (!cfg) return;
+  const minEl = $("#collect-alarm-min");
+  const cdEl = $("#collect-alarm-cooldown");
+  if (minEl && cfg.alarm_min_consecutive_frames != null) {
+    minEl.value = String(cfg.alarm_min_consecutive_frames);
+  }
+  if (cdEl && cfg.alarm_cooldown_frames != null) {
+    cdEl.value = String(cfg.alarm_cooldown_frames);
+  }
+}
+
+/** 采集落盘用 manifest；回放实时补算用表单/本地缓存 */
+function getEffectiveCollisionConfig() {
+  const stored = poseData?.collision;
+  if (stored && typeof stored === "object" && stored.enabled) {
+    return {
+      alarm_min_consecutive_frames:
+        stored.alarm_min_consecutive_frames ?? 3,
+      alarm_cooldown_frames: stored.alarm_cooldown_frames ?? 6,
+    };
+  }
+  return loadCollisionConfigFromStorage() || readCollisionConfigFromForm();
+}
+
+async function loadInferenceConfigDefaults() {
+  let serverCfg = null;
+  try {
+    const res = await fetch("/api/config/inference");
+    if (res.ok) serverCfg = await res.json();
+  } catch {
+    /* ignore */
+  }
+  const stored = loadCollisionConfigFromStorage();
+  applyCollisionConfigToForm({
+    alarm_min_consecutive_frames:
+      stored?.alarm_min_consecutive_frames ??
+      serverCfg?.alarm_min_consecutive_frames ??
+      3,
+    alarm_cooldown_frames:
+      stored?.alarm_cooldown_frames ?? serverCfg?.alarm_cooldown_frames ?? 6,
+  });
+  if (serverCfg?.frame_rate != null && $("#collect-fps") && !$("#collect-fps").dataset.userTouched) {
+    $("#collect-fps").value = String(serverCfg.frame_rate);
+  }
+}
 
 // --- 采集 ---
 const collectForm = $("#collect-form");
@@ -411,6 +506,10 @@ collectForm.addEventListener("submit", async (e) => {
   fd.append("max_pose_frames", $("#collect-max").value || "0");
   fd.append("save_video", $("#collect-save-video").checked ? "1" : "0");
   if (annFile) fd.append("annotation", annFile);
+  const collisionCfg = readCollisionConfigFromForm();
+  saveCollisionConfigToStorage(collisionCfg);
+  fd.append("alarm_min_consecutive_frames", String(collisionCfg.alarm_min_consecutive_frames));
+  fd.append("alarm_cooldown_frames", String(collisionCfg.alarm_cooldown_frames));
 
   collectBtn.disabled = true;
   const savingVideo = $("#collect-save-video").checked;
@@ -1129,10 +1228,10 @@ function resetPlaybackCollisionTracker() {
 
 function getPlaybackCollisionTracker() {
   if (!playbackCollisionTracker) {
-    const cfg = poseData?.collision || {};
+    const cfg = getEffectiveCollisionConfig();
     playbackCollisionTracker = new PlaybackCollisionTracker(
-      cfg.alarm_min_consecutive_frames ?? 3,
-      cfg.alarm_cooldown_frames ?? 6
+      cfg.alarm_min_consecutive_frames,
+      cfg.alarm_cooldown_frames
     );
   }
   return playbackCollisionTracker;
@@ -1606,3 +1705,4 @@ seekBar.addEventListener("input", async () => {
 
 loadRecords();
 loadAnnotateRecordSelect();
+void loadInferenceConfigDefaults();
