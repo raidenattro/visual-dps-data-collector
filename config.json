@@ -38,9 +38,7 @@
         "host": "127.0.0.1",
         "port": 8765
     },
-    "ocr": {
-        "engine": "paddle",
-        "reflection_path": "reflection.json",
-        "roi": [0.72, 0.86, 1.0, 0.98]
+    "reflection": {
+        "path": "reflection.json"
     }
 }

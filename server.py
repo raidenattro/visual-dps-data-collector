@@ -61,20 +61,17 @@ from pose_store import (
 from video_frame import first_frame_base64
 
 try:
-    from corner_label.ocr import CornerRoi, default_corner_roi, default_ocr_engine
-    from corner_label.reflection import load_reflection
-    from corner_label.resolve import resolve_annotation_for_video
+    from corner_label.reflection import load_reflection, normalize_corner_label
+    from corner_label.resolve import resolve_annotation_for_camera
     from event_engine.annotation_boxes import load_annotation_config
 
-    _CORNER_LABEL_OK = True
+    _REFLECTION_OK = True
 except ImportError:
-    default_ocr_engine = None  # type: ignore
-    default_corner_roi = None  # type: ignore
-    CornerRoi = None  # type: ignore
     load_reflection = None  # type: ignore
-    resolve_annotation_for_video = None  # type: ignore
+    normalize_corner_label = None  # type: ignore
+    resolve_annotation_for_camera = None  # type: ignore
     load_annotation_config = None  # type: ignore
-    _CORNER_LABEL_OK = False
+    _REFLECTION_OK = False
 
 app = FastAPI(title="visual-dps-datacollect", version="0.2.0")
 
@@ -89,11 +86,6 @@ _VIDEO_MIME = {
 
 _jobs_lock = threading.Lock()
 _jobs: dict[str, dict[str, Any]] = {}
-
-_ocr_match_lock = threading.Lock()
-_ocr_match_store: dict[str, dict[str, Any]] = {}
-_OCR_MATCH_TTL_SEC = 3600
-
 
 def _get_job(job_id: str) -> dict[str, Any]:
     with _jobs_lock:
@@ -473,187 +465,67 @@ def get_inference_config() -> dict[str, Any]:
     }
 
 
-@app.get("/api/config/ocr")
-def get_ocr_config() -> dict[str, Any]:
-    cfg = load_config_file(resolve_config_path(None))
-    ocr = cfg.get("ocr") if isinstance(cfg.get("ocr"), dict) else {}
-    eng = str(ocr.get("engine") or "paddle").strip().lower()
-    if default_ocr_engine:
-        try:
-            eng = default_ocr_engine()
-        except Exception:
-            pass
-    r = default_corner_roi() if default_corner_roi else None
-    return {
-        "available": _CORNER_LABEL_OK,
-        "engine": eng,
-        "reflection_path": str(_reflection_json_path()),
-        "roi": [r.x0, r.y0, r.x1, r.y1] if r else None,
-    }
-
-
-def _corner_roi_from_form(
-    roi_x0: str = "",
-    roi_y0: str = "",
-    roi_x1: str = "",
-    roi_y1: str = "",
-) -> Any:
-    """前端手动框选 ROI（0~1），缺省用 config.json。"""
-    if not CornerRoi or not default_corner_roi:
-        return None
-    parts: list[float] = []
-    for raw in (roi_x0, roi_y0, roi_x1, roi_y1):
-        s = str(raw or "").strip()
-        if not s:
-            return default_corner_roi()
-        try:
-            parts.append(float(s))
-        except ValueError:
-            return default_corner_roi()
-    if len(parts) != 4:
-        return default_corner_roi()
-    x0, y0, x1, y1 = (max(0.0, min(1.0, v)) for v in parts)
-    if x1 <= x0 or y1 <= y0:
-        return default_corner_roi()
-    return CornerRoi(x0=x0, y0=y0, x1=x1, y1=y1)
-
-
 def _reflection_json_path() -> Path:
     cfg = load_config_file(resolve_config_path(None))
+    ref = cfg.get("reflection") if isinstance(cfg.get("reflection"), dict) else {}
     ocr = cfg.get("ocr") if isinstance(cfg.get("ocr"), dict) else {}
-    rel = str(ocr.get("reflection_path") or "reflection.json").strip()
+    rel = str(ref.get("path") or ocr.get("reflection_path") or "reflection.json").strip()
     return (project_root() / rel).resolve()
 
 
-def _cleanup_stale_ocr_matches() -> None:
-    now = time.time()
-    with _ocr_match_lock:
-        stale = [
-            mid
-            for mid, e in _ocr_match_store.items()
-            if now - float(e.get("created_at") or 0) > _OCR_MATCH_TTL_SEC
-        ]
-        for mid in stale:
-            entry = _ocr_match_store.pop(mid, None)
-            if entry:
-                p = Path(entry.get("path") or "")
-                if p.is_file() and "ocr_match_" in p.name:
-                    p.unlink(missing_ok=True)
-
-
-def _pop_ocr_match_annotation(match_id: str) -> dict[str, Any] | None:
-    mid = str(match_id or "").strip()
-    if not mid:
-        return None
-    with _ocr_match_lock:
-        entry = _ocr_match_store.get(mid)
-    if not entry:
-        return None
-    p = Path(entry.get("path") or "")
-    if not p.is_file():
-        with _ocr_match_lock:
-            _ocr_match_store.pop(mid, None)
-        return None
-    return entry
-
-
-@app.post("/api/collect/ocr-match")
-async def collect_ocr_match(
-    file: UploadFile = File(...),
-    ocr_engine: str = Form(""),
-    roi_x0: str = Form(""),
-    roi_y0: str = Form(""),
-    roi_x1: str = Form(""),
-    roi_y1: str = Form(""),
-) -> dict[str, Any]:
-    """同一 Python 环境内 OCR 机位并装配 annotation JSON（CPU Paddle 默认）。"""
-    if not _CORNER_LABEL_OK:
-        raise HTTPException(500, "corner_label 未就绪")
-    if not file.filename:
-        raise HTTPException(400, "未选择视频")
-    suffix = Path(file.filename).suffix.lower()
-    if suffix not in VIDEO_EXTENSIONS:
-        raise HTTPException(400, f"仅支持视频: {', '.join(sorted(VIDEO_EXTENSIONS))}")
-
+def _load_reflection_or_http() -> Any:
+    if not _REFLECTION_OK or not load_reflection:
+        raise HTTPException(500, "reflection 模块未就绪")
     reflection_path = _reflection_json_path()
     if not reflection_path.is_file():
         raise HTTPException(
             500,
             f"缺少 reflection.json: {reflection_path}（可复制 examples/reflection.example.json）",
         )
+    return load_reflection(reflection_path)
 
+
+@app.get("/api/reflection/cameras")
+def list_reflection_cameras() -> dict[str, Any]:
+    """reflection.json 中全部机位标识，供采集页手动输入提示。"""
+    reflection = _load_reflection_or_http()
+    return {
+        "reflection_path": str(_reflection_json_path()),
+        "cameras": reflection.cameras,
+    }
+
+
+@app.get("/api/reflection/lookup")
+def lookup_reflection_camera(camera: str = "") -> dict[str, Any]:
+    """校验机位标识并返回将装配的标注文件列表（不读视频）。"""
+    label = normalize_corner_label(camera) if normalize_corner_label else str(camera or "").strip()
+    if not label:
+        raise HTTPException(400, "请填写机位标识")
+    reflection = _load_reflection_or_http()
     paths = resolve_app_paths()
-    paths.upload_dir.mkdir(parents=True, exist_ok=True)
-    _cleanup_stale_ocr_matches()
-
-    tmp_id = uuid.uuid4().hex[:12]
-    tmp_video = paths.upload_dir / f"ocr_probe_{tmp_id}{suffix}"
     try:
-        with open(tmp_video, "wb") as out:
-            shutil.copyfileobj(file.file, out)
-        validate_video_path(tmp_video)
+        from corner_label.reflection import resolve_annotation_paths_for_camera
 
-        reflection = load_reflection(reflection_path)
-        engine = str(ocr_engine or "").strip().lower() or default_ocr_engine()
-        roi = _corner_roi_from_form(roi_x0, roi_y0, roi_x1, roi_y1)
-        resolved = resolve_annotation_for_video(
-            tmp_video,
-            reflection=reflection,
-            annotations_dir=paths.annotation_dir,
-            ocr_engine=engine,
-            roi=roi,
+        src_paths = resolve_annotation_paths_for_camera(
+            label, reflection, paths.annotation_dir
         )
-        _, err = validate_annotation_payload(load_annotation_config(resolved.annotation_path))
-        if err:
-            raise HTTPException(400, err)
-
-        match_id = uuid.uuid4().hex[:12]
-        dest = paths.upload_dir / f"ocr_match_{match_id}.json"
-        shutil.copy2(resolved.annotation_path, dest)
-        if resolved.annotation_path != dest and resolved.annotation_path.name.startswith("tmp"):
-            resolved.annotation_path.unlink(missing_ok=True)
-
-        json_files = [p.name for p in resolved.source_annotation_paths]
-        rel_dir = "localdata/json/annotations"
-        entry = {
-            "path": str(dest),
-            "corner_label": resolved.corner_label,
-            "annotation_ids": resolved.annotation_ids,
-            "json_files": json_files,
-            "json_files_display": [f"{rel_dir}/{name}" for name in json_files],
-            "merged": len(json_files) > 1,
-            "created_at": time.time(),
-            "ocr_engine": engine,
-            "ocr_meta": resolved.ocr_meta,
-            "roi": [roi.x0, roi.y0, roi.x1, roi.y1] if roi else None,
-        }
-        with _ocr_match_lock:
-            _ocr_match_store[match_id] = entry
-
-        return {
-            "ok": True,
-            "match_id": match_id,
-            "corner_label": resolved.corner_label,
-            "annotation_ids": resolved.annotation_ids,
-            "json_files": json_files,
-            "json_files_display": entry["json_files_display"],
-            "merged": entry["merged"],
-            "roi": entry.get("roi"),
-            "message": (
-                f"已匹配机位 {resolved.corner_label}，标注 {', '.join(json_files)}"
-                + ("（已合并）" if entry["merged"] else "")
-            ),
-        }
-    except HTTPException:
-        raise
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(400, str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(500, f"OCR 匹配失败: {exc}") from exc
-    finally:
-        tmp_video.unlink(missing_ok=True)
+
+    json_files = [p.name for p in src_paths]
+    rel_dir = "localdata/json/annotations"
+    return {
+        "ok": True,
+        "camera_label": label,
+        "annotation_ids": reflection.annotations_for_camera(label),
+        "json_files": json_files,
+        "json_files_display": [f"{rel_dir}/{name}" for name in json_files],
+        "merged": len(json_files) > 1,
+        "message": f"机位 {label} → {', '.join(json_files)}"
+        + ("（采集时将合并）" if len(json_files) > 1 else ""),
+    }
 
 
 def _record_meta_for_list(locator) -> dict[str, Any]:
@@ -1181,7 +1053,7 @@ async def collect_video(
     save_video: str = Form(""),
     alarm_min_consecutive_frames: int = Form(0),
     alarm_cooldown_frames: int = Form(0),
-    ocr_match_id: str = Form(""),
+    camera_label: str = Form(""),
 ) -> dict[str, Any]:
     if not file.filename:
         raise HTTPException(400, "未选择文件")
@@ -1247,18 +1119,7 @@ async def collect_video(
 
     annotation_path: Path | None = None
     upload_ann_path: Path | None = None
-    ocr_match_meta: dict[str, Any] | None = None
-
-    ocr_mid = str(ocr_match_id or "").strip()
-    if ocr_mid:
-        ocr_match_meta = _pop_ocr_match_annotation(ocr_mid)
-        if not ocr_match_meta:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-            raise HTTPException(400, "OCR 匹配已过期或无效，请重新点击「识别机位」")
-        annotation_path = Path(ocr_match_meta["path"])
-        if not annotation_path.is_file():
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-            raise HTTPException(400, "OCR 匹配的标注文件不存在")
+    camera_match_label: str | None = None
 
     if annotation and annotation.filename:
         ann_suffix = Path(annotation.filename).suffix.lower()
@@ -1268,6 +1129,45 @@ async def collect_video(
         upload_ann_path = tmp_dir / f"annotation{ann_suffix}"
         with open(upload_ann_path, "wb") as out:
             shutil.copyfileobj(annotation.file, out)
+        annotation_path = upload_ann_path
+        _, err = validate_annotation_payload(load_annotation_config(annotation_path))
+        if err:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise HTTPException(400, err)
+
+    if not annotation_path:
+        cam = normalize_corner_label(camera_label) if normalize_corner_label else str(camera_label or "").strip()
+        if cam and _REFLECTION_OK and resolve_annotation_for_camera:
+            try:
+                reflection = _load_reflection_or_http()
+                resolved = resolve_annotation_for_camera(
+                    cam,
+                    reflection=reflection,
+                    annotations_dir=paths.annotation_dir,
+                )
+                _, err = validate_annotation_payload(
+                    load_annotation_config(resolved.annotation_path)
+                )
+                if err:
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
+                    raise HTTPException(400, err)
+                if len(resolved.source_annotation_paths) > 1:
+                    dest = tmp_dir / "annotation_merged.json"
+                    shutil.copy2(resolved.annotation_path, dest)
+                    if resolved.annotation_path.name.startswith("tmp"):
+                        resolved.annotation_path.unlink(missing_ok=True)
+                    annotation_path = dest
+                else:
+                    annotation_path = resolved.source_annotation_paths[0]
+                camera_match_label = resolved.camera_label
+            except HTTPException:
+                raise
+            except ValueError as exc:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+                raise HTTPException(400, str(exc)) from exc
+            except FileNotFoundError as exc:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+                raise HTTPException(400, str(exc)) from exc
 
     if not annotation_path:
         try:
@@ -1328,9 +1228,8 @@ async def collect_video(
         "alarm_min_consecutive_frames": settings.alarm_min_consecutive_frames,
         "alarm_cooldown_frames": settings.alarm_cooldown_frames,
     }
-    if ocr_match_meta:
-        resp["ocr_corner_label"] = ocr_match_meta.get("corner_label")
-        resp["ocr_json_files"] = ocr_match_meta.get("json_files")
+    if camera_match_label:
+        resp["camera_label"] = camera_match_label
     return resp
 
 

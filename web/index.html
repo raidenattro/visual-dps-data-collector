@@ -90,37 +90,23 @@
             <button type="button" class="field-tip" data-tip="默认开启：将源视频副本与骨架 JSON 同一记录关联保存，便于回放页加载。">?</button>
           </span>
         </label>
-        <div class="collect-ocr-row">
-          <label class="collect-ocr-engine-label">
-            <span class="label-with-tip">OCR 引擎
-              <button type="button" class="field-tip" data-tip="与骨架采集同一环境。选视频后在下方预览框用手动绿框标定机位文字区域，再点识别。框选范围会随请求提交，优先于 config.json 中的 ocr.roi。">?</button>
-            </span>
-            <select id="collect-ocr-engine">
-              <option value="paddle" selected>paddle（CPU，推荐）</option>
-              <option value="easy">easyocr</option>
-              <option value="auto">auto</option>
-            </select>
-          </label>
-          <button type="button" id="collect-ocr-run" class="secondary-btn">识别机位并匹配标注</button>
-          <button type="button" id="collect-ocr-roi-reset" class="secondary-btn">重置 OCR 区域</button>
-        </div>
-        <div id="collect-ocr-roi-wrap" class="collect-ocr-roi-wrap hidden">
-          <p class="hint collect-ocr-roi-hint">
-            在预览上<strong>拖拽绿框</strong>移动、<strong>右下角圆点</strong>缩放，框住机位文字（如 2-1组-3）后再点「识别机位」。
-            识别失败时可在启动 server 前设置环境变量 <code>CORNER_OCR_DEBUG_DIR=localdata/ocr_debug</code> 查看预处理图与各步 OCR 结果。
-          </p>
-          <div id="collect-ocr-roi-stage" class="collect-ocr-roi-stage">
-            <video id="collect-ocr-preview" class="collect-ocr-preview" playsinline muted preload="metadata"></video>
-            <div id="collect-ocr-roi-box" class="collect-ocr-roi-box">
-              <span class="collect-ocr-roi-handle" title="拖动缩放"></span>
-            </div>
+        <label class="field-block">
+          <span class="label-with-tip">机位标识（与画面右下角一致，如 2-1组-3）
+            <button type="button" class="field-tip" data-tip="手动输入视频画面上的机位文字，须与仓库根目录 reflection.json 中 camera 字段一致。将按 reflection 装配 localdata/json/annotations/{编号}.json。也可上传标注 JSON 或使用标注页按视频主名保存。">?</button>
+          </span>
+          <input type="text" id="collect-camera-label" list="collect-camera-datalist" placeholder="例如 2-1组-3" autocomplete="off" />
+          <datalist id="collect-camera-datalist"></datalist>
+        </label>
+        <p id="collect-camera-status" class="annotation-status hint hidden" role="status"></p>
+        <div id="collect-preview-wrap" class="collect-preview-wrap hidden">
+          <p class="hint collect-preview-hint">视频首帧预览（对照画面右下角机位标识填写上方输入框）</p>
+          <div class="collect-preview-stage">
+            <video id="collect-preview-video" class="collect-preview-video" playsinline muted preload="metadata"></video>
           </div>
-          <p id="collect-ocr-roi-label" class="hint collect-ocr-roi-label">OCR 区域（画面比例）：—</p>
         </div>
-        <p id="collect-ocr-status" class="annotation-status hint hidden" role="status"></p>
         <label>
-          <span class="label-with-tip">标注 JSON（必填其一：OCR 匹配 / 本地上传 / 标注页已保存）
-            <button type="button" class="field-tip" data-tip="按视频主名绑定货位标注。可用「识别机位」按 reflection 自动装配；或上传 JSON；或检查 localdata/json/annotations/{主名}.json。">?</button>
+          <span class="label-with-tip">标注 JSON（必填其一：机位标识 / 本地上传 / 标注页已保存）
+            <button type="button" class="field-tip" data-tip="优先：填写机位标识并按 reflection 匹配；或上传 JSON；或检查 localdata/json/annotations/{视频主名}.json。">?</button>
           </span>
           <input type="file" id="collect-annotation" accept=".json,application/json" />
         </label>
@@ -299,11 +285,11 @@
 
   <script src="fieldTips.js"></script>
   <script src="previewLayout.js"></script>
-  <script src="collectOcrRoi.js"></script>
+  <script src="collectVideoPreview.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.8.0/math.js"></script>
   <script src="annotateGeometry.js"></script>
   <script src="annotateVisualMode.js"></script>
-  <script src="app.js?v=20"></script>
+  <script src="app.js?v=21"></script>
   <script src="annotate.js?v=10"></script>
 </body>
 </html>

@@ -353,31 +353,54 @@ const collectStatus = $("#collect-status");
 const collectResult = $("#collect-result");
 const collectBtn = $("#collect-btn");
 const collectAnnotationStatus = $("#collect-annotation-status");
-const collectOcrStatus = $("#collect-ocr-status");
-let collectOcrMatchId = null;
+const collectCameraStatus = $("#collect-camera-status");
 
-function setCollectOcrStatus(html, className = "") {
-  if (!collectOcrStatus) return;
-  collectOcrStatus.classList.remove("hidden", "is-loading", "is-ok", "is-error");
-  if (className) collectOcrStatus.classList.add(className);
-  collectOcrStatus.innerHTML = html;
+function setCollectCameraStatus(html, className = "") {
+  if (!collectCameraStatus) return;
+  collectCameraStatus.classList.remove("hidden", "is-loading", "is-ok", "is-error");
+  if (!html) {
+    collectCameraStatus.classList.add("hidden");
+    collectCameraStatus.innerHTML = "";
+    return;
+  }
+  if (className) collectCameraStatus.classList.add(className);
+  collectCameraStatus.innerHTML = html;
 }
 
-async function loadOcrConfigDefaults() {
+async function loadReflectionCameras() {
+  const datalist = $("#collect-camera-datalist");
   try {
-    const res = await fetch("/api/config/ocr");
+    const res = await fetch("/api/reflection/cameras");
     if (!res.ok) return;
     const body = await res.json();
-    const sel = $("#collect-ocr-engine");
-    if (sel && body.engine) sel.value = body.engine;
-    if (Array.isArray(body.roi) && body.roi.length >= 4 && typeof window.setCollectOcrRoiNorm === "function") {
-      window.setCollectOcrRoiNorm(body.roi);
-    }
-    if (!body.available) {
-      setCollectOcrStatus("⚠️ 服务端未加载 corner_label 模块", "is-error");
-    }
+    if (!datalist || !Array.isArray(body.cameras)) return;
+    datalist.innerHTML = body.cameras.map((c) => `<option value="${String(c).replace(/"/g, "&quot;")}"></option>`).join("");
   } catch {
     /* ignore */
+  }
+}
+
+async function lookupCollectCameraLabel(label) {
+  const cam = String(label || "").trim();
+  if (!cam) {
+    setCollectCameraStatus("");
+    return { ok: false, empty: true };
+  }
+  setCollectCameraStatus("正在校验机位标识…", "is-loading");
+  try {
+    const res = await fetch(`/api/reflection/lookup?camera=${encodeURIComponent(cam)}`);
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg = body.detail || body.message || res.statusText;
+      setCollectCameraStatus(`❌ ${msg}`, "is-error");
+      return { ok: false, message: msg };
+    }
+    const files = (body.json_files_display || body.json_files || []).join(", ");
+    setCollectCameraStatus(`✅ ${body.message || `将装配 ${files}`}`, "is-ok");
+    return { ok: true, camera: body.camera_label || cam, body };
+  } catch (err) {
+    setCollectCameraStatus(`❌ ${err.message || err}`, "is-error");
+    return { ok: false, message: err.message || String(err) };
   }
 }
 
@@ -402,8 +425,15 @@ function openAnnotateForVideoStem(stem) {
 }
 
 async function resolveCollectAnnotationSource(file, annFile) {
-  if (collectOcrMatchId) return { ok: true, source: "ocr" };
   if (annFile) return { ok: true, source: "upload" };
+  const camera = $("#collect-camera-label")?.value?.trim();
+  if (camera) {
+    const lookup = await lookupCollectCameraLabel(camera);
+    if (lookup.ok) return { ok: true, source: "camera", camera: lookup.camera };
+    if (!lookup.empty) {
+      return { ok: false, message: lookup.message || "机位标识无效" };
+    }
+  }
   const stem = videoStemFromFilename(file?.name);
   if (!stem) return { ok: false, stem: "", message: "无法从视频文件名解析主名" };
   try {
@@ -415,7 +445,7 @@ async function resolveCollectAnnotationSource(file, annFile) {
   return {
     ok: false,
     stem,
-    message: `视频主名「${stem}」尚无标注：请上传标注 JSON，或到「标注」页保存后再采集`,
+    message: `请填写机位标识、上传标注 JSON，或到「标注」页按视频主名「${stem}」保存后再采集`,
   };
 }
 
@@ -432,8 +462,8 @@ async function refreshCollectAnnotationHint() {
   const check = await resolveCollectAnnotationSource(file, annFile);
   if (check.ok) {
     const via =
-      check.source === "ocr"
-        ? "将使用 OCR 匹配的标注 JSON"
+      check.source === "camera"
+        ? `将使用机位 <strong>${check.camera}</strong> 的 reflection 标注`
         : check.source === "upload"
           ? "将使用本次上传的标注 JSON"
           : `将使用已存标注（<code>annotations/${check.stem}.json</code>）`;
@@ -452,51 +482,24 @@ collectAnnotationStatus?.addEventListener("click", (e) => {
 });
 
 $("#collect-file")?.addEventListener("change", () => {
-  collectOcrMatchId = null;
-  setCollectOcrStatus("");
-  collectOcrStatus?.classList.add("hidden");
   const file = $("#collect-file")?.files?.[0];
-  if (typeof window.initCollectOcrRoiPreview === "function") {
-    window.initCollectOcrRoiPreview(file || null);
+  if (typeof window.initCollectVideoPreview === "function") {
+    window.initCollectVideoPreview(file || null);
   }
   void refreshCollectAnnotationHint();
 });
 
-$("#collect-ocr-run")?.addEventListener("click", async () => {
-  const file = $("#collect-file")?.files?.[0];
-  if (!file) {
-    setCollectOcrStatus("请先选择视频", "is-error");
-    return;
-  }
-  const fd = new FormData();
-  fd.append("file", file);
-  fd.append("ocr_engine", $("#collect-ocr-engine")?.value || "paddle");
-  const roi =
-    typeof window.getCollectOcrRoiNorm === "function" ? window.getCollectOcrRoiNorm() : null;
-  if (roi) {
-    fd.append("roi_x0", String(roi.x0));
-    fd.append("roi_y0", String(roi.y0));
-    fd.append("roi_x1", String(roi.x1));
-    fd.append("roi_y1", String(roi.y1));
-  }
-  setCollectOcrStatus("正在 OCR 识别机位（使用手动框选区域）…", "is-loading");
-  collectOcrMatchId = null;
-  try {
-    const res = await fetch("/api/collect/ocr-match", { method: "POST", body: fd });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok || !body.ok || !body.match_id) {
-      throw new Error(body.detail || body.message || (await res.text()) || res.statusText);
-    }
-    collectOcrMatchId = body.match_id;
-    const files = (body.json_files_display || body.json_files || []).join(", ");
-    setCollectOcrStatus(
-      `✅ 机位 <strong>${body.corner_label}</strong> → ${files || "标注已装配"}`,
-      "is-ok"
-    );
+let collectCameraLookupTimer = null;
+$("#collect-camera-label")?.addEventListener("input", () => {
+  clearTimeout(collectCameraLookupTimer);
+  collectCameraLookupTimer = setTimeout(() => {
+    void lookupCollectCameraLabel($("#collect-camera-label")?.value);
     void refreshCollectAnnotationHint();
-  } catch (err) {
-    setCollectOcrStatus(`❌ ${err.message || err}（详见 server 控制台 [corner-ocr]）`, "is-error");
-  }
+  }, 400);
+});
+$("#collect-camera-label")?.addEventListener("change", () => {
+  void lookupCollectCameraLabel($("#collect-camera-label")?.value);
+  void refreshCollectAnnotationHint();
 });
 $("#collect-annotation")?.addEventListener("change", () => {
   void refreshCollectAnnotationHint();
@@ -552,7 +555,8 @@ collectForm.addEventListener("submit", async (e) => {
   fd.append("max_pose_frames", $("#collect-max").value || "0");
   fd.append("save_video", $("#collect-save-video").checked ? "1" : "0");
   if (annFile) fd.append("annotation", annFile);
-  if (collectOcrMatchId) fd.append("ocr_match_id", collectOcrMatchId);
+  const cameraLabel = $("#collect-camera-label")?.value?.trim();
+  if (cameraLabel && annCheck.source === "camera") fd.append("camera_label", cameraLabel);
   const collisionCfg = readCollisionConfigFromForm();
   saveCollisionConfigToStorage(collisionCfg);
   fd.append("alarm_min_consecutive_frames", String(collisionCfg.alarm_min_consecutive_frames));
@@ -561,8 +565,8 @@ collectForm.addEventListener("submit", async (e) => {
   collectBtn.disabled = true;
   const savingVideo = $("#collect-save-video").checked;
   const annNote =
-    annCheck.source === "ocr"
-      ? "（OCR 标注 + 碰撞事件）"
+    annCheck.source === "camera"
+      ? "（机位标注 + 碰撞事件）"
       : annCheck.source === "stored"
         ? "（已存标注 + 碰撞事件）"
         : "（上传标注 + 碰撞事件）";
@@ -1778,7 +1782,7 @@ seekBar.addEventListener("input", async () => {
 bindStageLayoutWatch();
 loadRecords();
 void loadInferenceConfigDefaults();
-void loadOcrConfigDefaults();
+void loadReflectionCameras();
 updatePlaybackLoadButton();
 
 $("#playback-load-record")?.addEventListener("click", () => {
