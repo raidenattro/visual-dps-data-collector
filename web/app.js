@@ -147,7 +147,8 @@ async function ensureFrameChunkLoaded(frameIdx) {
 }
 
 function getDisplayLayout() {
-  const wrap = document.querySelector(".stage-wrap");
+  const wrap = stageWrap || document.querySelector(".stage-wrap");
+  if (!wrap) return computeContainLayout(640, 480, 640, 480);
   const rect = wrap.getBoundingClientRect();
   const { frameW, frameH } = getVideoFrameSize();
   return computeContainLayout(rect.width, rect.height, frameW, frameH);
@@ -745,6 +746,32 @@ const eventJumpList = $("#event-jump-list");
 const eventFilterSelect = $("#event-filter");
 const eventCountLabel = $("#event-count-label");
 const eventsPanel = $("#playback-events-panel");
+const stageWrap = document.querySelector(".stage-wrap");
+
+/** 舞台尺寸变化时重算 canvas 并强制重绘（避免退出全屏/窗口缩放后骨架卡住） */
+function bindStageLayoutWatch() {
+  if (!stageWrap || stageWrap.dataset.layoutWatch) return;
+  stageWrap.dataset.layoutWatch = "1";
+
+  let layoutTimer = null;
+  const onLayoutChange = () => {
+    if (layoutTimer) clearTimeout(layoutTimer);
+    layoutTimer = setTimeout(() => {
+      layoutTimer = null;
+      syncCanvasSize();
+      redrawCurrentFrame();
+    }, 50);
+  };
+
+  if (typeof ResizeObserver !== "undefined") {
+    const ro = new ResizeObserver(onLayoutChange);
+    ro.observe(stageWrap);
+  }
+  window.addEventListener("resize", onLayoutChange);
+  document.addEventListener("fullscreenchange", onLayoutChange);
+  videoEl.addEventListener("webkitbeginfullscreen", onLayoutChange);
+  videoEl.addEventListener("webkitendfullscreen", onLayoutChange);
+}
 
 function eventRowKey(ev) {
   return `${ev.event_type}:${ev.frame_idx}:${(ev.box_tokens || []).join(",")}`;
@@ -1341,7 +1368,8 @@ function findFrameAt(timeSec) {
 }
 
 function syncCanvasSize() {
-  const wrap = document.querySelector(".stage-wrap");
+  const wrap = stageWrap || document.querySelector(".stage-wrap");
+  if (!wrap) return { cw: 1, ch: 1 };
   const rect = wrap.getBoundingClientRect();
   const dpr = window.devicePixelRatio || 1;
   const cssW = Math.max(1, Math.floor(rect.width));
@@ -1668,6 +1696,7 @@ seekBar.addEventListener("input", async () => {
   renderEventJumpList();
 });
 
+bindStageLayoutWatch();
 loadRecords();
 void loadInferenceConfigDefaults();
 updatePlaybackLoadButton();
