@@ -59,6 +59,7 @@ from api.record_service import (
     persist_annotation_for_video,
     record_id_from_pose_path,
     record_meta_for_list,
+    resolve_annotation_path_for_record,
     video_path_for_record,
     video_path_for_video_stem,
 )
@@ -144,18 +145,6 @@ def list_records() -> list[dict[str, Any]]:
     return items[:500]
 
 
-@router.get("/api/records/{record_id:path}")
-def get_record_meta(record_id: str) -> dict[str, Any]:
-    """单条记录元数据（标注页解析 video_stem / source_video）。"""
-    rid = str(record_id or "").strip()
-    if not rid:
-        raise HTTPException(400, "record_id 无效")
-    locator = locate_record_by_id(rid)
-    if not locator:
-        raise HTTPException(404, "记录不存在")
-    return record_meta_for_list(locator)
-
-
 @router.post("/api/annotate/extract-frame")
 async def extract_frame_from_upload(file: UploadFile = File(...)) -> dict[str, Any]:
     """浏览器无法解码时，由服务端 OpenCV 从上传视频提取首帧。"""
@@ -226,19 +215,9 @@ def get_record_annotation(record_id: str) -> FileResponse:
             meta = json.loads(sidecar.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             meta = None
-    video_stem = resolve_video_stem_from_record(
-        record_id,
-        json_dir=paths.json_dir,
-        pose_path=locator.path,
-        meta=meta,
-    )
-    ann_path = annotation_path_for_video_stem(video_stem, annotation_dir=paths.annotation_dir)
-    if not ann_path.is_file():
-        legacy = paths.json_dir / f"{record_id}_annotation.json"
-        if legacy.is_file():
-            ann_path = legacy
-        else:
-            raise HTTPException(404, "标注 JSON 不存在")
+    ann_path = resolve_annotation_path_for_record(record_id, locator=locator, meta=meta)
+    if not ann_path or not ann_path.is_file():
+        raise HTTPException(404, "标注 JSON 不存在")
     return FileResponse(ann_path, media_type="application/json")
 
 
@@ -531,6 +510,18 @@ def get_record_pose(record_id: str) -> JSONResponse:
     header.setdefault("record_id", record_id)
     header.setdefault("frames_url", f"/api/records/{record_id}/frames")
     return JSONResponse(header)
+
+
+@router.get("/api/records/{record_id:path}")
+def get_record_meta(record_id: str) -> dict[str, Any]:
+    """单条记录元数据（须在 /manifest.json 等子路径路由之后注册，避免 path 贪婪匹配）。"""
+    rid = str(record_id or "").strip()
+    if not rid or rid.endswith(".json") or rid.endswith(".xlsx"):
+        raise HTTPException(404, "记录不存在")
+    locator = locate_record_by_id(rid)
+    if not locator:
+        raise HTTPException(404, "记录不存在")
+    return record_meta_for_list(locator)
 
 
 @router.get("/api/jobs/{job_id}")

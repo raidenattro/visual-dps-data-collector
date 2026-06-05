@@ -7,6 +7,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from fastapi import HTTPException
+
 from annotation_store import (
     annotation_path_for_video_stem,
     load_annotation_json,
@@ -15,6 +17,7 @@ from annotation_store import (
     save_annotation_json,
     validate_annotation_payload,
 )
+from event_engine.annotation_boxes import load_annotation_config
 from config_loader import (
     record_id_for_pose_path,
     record_video_path,
@@ -31,6 +34,7 @@ from pose_store import (
 )
 
 from api.naming import display_name_from_pose_file
+from api.reflection_service import REFLECTION_OK, load_reflection_or_http, normalize_corner_label
 
 def json_archive_dir() -> Path:
     return resolve_app_paths().json_dir / "archive"
@@ -310,8 +314,11 @@ def record_meta_for_list(locator) -> dict[str, Any]:
     )
     meta["video_stem"] = video_stem
     stored_ann = load_annotation_json(video_stem, annotation_dir=paths.annotation_dir)
-    meta["has_stored_annotation"] = stored_ann is not None
-    if stored_ann and not meta.get("has_annotation"):
+    ann_on_disk = resolve_annotation_path_for_record(record_id, locator=locator, meta=meta)
+    meta["has_stored_annotation"] = stored_ann is not None or (
+        ann_on_disk is not None and ann_on_disk.is_file()
+    )
+    if meta["has_stored_annotation"] and not meta.get("has_annotation"):
         meta["has_annotation"] = True
     vpath = video_path_for_record(record_id)
     meta["has_video"] = bool(vpath and vpath.is_file())
@@ -323,20 +330,51 @@ def record_meta_for_list(locator) -> dict[str, Any]:
     return meta
 
 
-def annotation_path_for_record(record_id: str, locator=None) -> Path | None:
-    """解析记录关联的标注 JSON 路径（annotations 目录或 legacy 旁路文件）。"""
+def resolve_annotation_path_for_record(
+    record_id: str,
+    locator=None,
+    meta: dict[str, Any] | None = None,
+) -> Path | None:
+    """解析记录关联的标注 JSON（机位 reflection / 包内副本 / annotations/{video_stem}）。"""
     if locator is None:
         locator = locate_record_by_id(record_id)
     if not locator:
         return None
     paths = resolve_app_paths()
     sidecar = meta_path_for_record(record_id, locator)
-    meta: dict[str, Any] | None = None
-    if sidecar.is_file():
+    if meta is None and sidecar.is_file():
         try:
             meta = json.loads(sidecar.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             meta = None
+
+    if locator.path.is_dir():
+        pkg_ann = locator.path / "annotation.json"
+        if pkg_ann.is_file():
+            return pkg_ann
+
+    if meta:
+        ann_name = str(meta.get("annotation_file") or "").strip()
+        if ann_name:
+            by_name = paths.annotation_dir / ann_name
+            if by_name.is_file():
+                return by_name
+        cam = str(meta.get("camera_label") or "").strip()
+        if cam and REFLECTION_OK and normalize_corner_label:
+            try:
+                from corner_label.resolve import resolve_annotation_for_camera as resolve_cam
+
+                reflection = load_reflection_or_http()
+                resolved = resolve_cam(
+                    normalize_corner_label(cam),
+                    reflection=reflection,
+                    annotations_dir=paths.annotation_dir,
+                )
+                if resolved.annotation_path.is_file():
+                    return resolved.annotation_path
+            except (HTTPException, ValueError, FileNotFoundError):
+                pass
+
     video_stem = resolve_video_stem_from_record(
         record_id,
         json_dir=paths.json_dir,
@@ -346,8 +384,46 @@ def annotation_path_for_record(record_id: str, locator=None) -> Path | None:
     ann_path = annotation_path_for_video_stem(video_stem, annotation_dir=paths.annotation_dir)
     if ann_path.is_file():
         return ann_path
-    legacy = paths.json_dir / f"{record_id}_annotation.json"
-    if legacy.is_file():
-        return legacy
+
+    if sidecar.is_file():
+        legacy = sidecar.parent / f"{locator.path.name}_annotation.json"
+        if legacy.is_file():
+            return legacy
+    legacy_flat = paths.json_dir / f"{str(record_id).replace('/', '_')}_annotation.json"
+    if legacy_flat.is_file():
+        return legacy_flat
     return None
+
+
+def annotation_path_for_record(record_id: str, locator=None) -> Path | None:
+    return resolve_annotation_path_for_record(record_id, locator=locator)
+
+
+def persist_playback_annotation(
+    annotation_path: Path,
+    *,
+    video_stem: str,
+    pose_path: Path,
+    source_video: str = "",
+) -> Path | None:
+    """采集完成后写入回放可查找的标注（annotations/{video_stem}.json + 包内 annotation.json）。"""
+    if not annotation_path.is_file() or not video_stem:
+        return None
+    paths = resolve_app_paths()
+    try:
+        raw = load_annotation_config(annotation_path)
+        normalized = normalize_annotation_payload(
+            raw,
+            video_stem=video_stem,
+            source_video=source_video or str(raw.get("source_info", {}).get("source_video") or ""),
+        )
+        dest = save_annotation_json(video_stem, normalized, annotation_dir=paths.annotation_dir)
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return None
+    if pose_path.is_dir():
+        try:
+            shutil.copy2(dest, pose_path / "annotation.json")
+        except OSError:
+            pass
+    return dest
 

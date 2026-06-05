@@ -8,6 +8,7 @@ from typing import Any
 
 from config_loader import sanitize_file_stem
 from event_engine.annotation_boxes import flatten_annotation_boxes, load_annotation_config
+from pose_store import meta_sidecar_path
 
 
 def annotation_path_for_video_stem(video_stem: str, *, annotation_dir: Path) -> Path:
@@ -125,6 +126,21 @@ def resolve_video_stem_from_record(
                     pose_path = p
                     break
 
+    if pose_path and pose_path.is_dir():
+        sidecar = meta_sidecar_path(json_dir, record_id) if record_id else None
+        if sidecar and sidecar.is_file():
+            try:
+                m = json.loads(sidecar.read_text(encoding="utf-8"))
+                if isinstance(m, dict):
+                    return resolve_video_stem_from_record(record_id, json_dir=json_dir, meta=m)
+            except json.JSONDecodeError:
+                pass
+        stem = pose_path.name
+        for tag in ("_rtmpose_t", "_rtmpose_s", "_rtmpose_m"):
+            if stem.endswith(tag):
+                return sanitize_file_stem(stem[: -len(tag)] or stem)
+        return sanitize_file_stem(stem)
+
     if pose_path and pose_path.is_file():
         sidecar = pose_path.with_suffix(".meta.json")
         if sidecar.is_file():
@@ -139,6 +155,9 @@ def resolve_video_stem_from_record(
             if stem.endswith(tag):
                 return sanitize_file_stem(stem[: -len(tag)] or stem)
         return sanitize_file_stem(stem)
+
+    if record_id and "/" in str(record_id):
+        return sanitize_file_stem(Path(str(record_id)).name)
 
     return sanitize_file_stem(record_id)
 

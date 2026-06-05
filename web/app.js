@@ -97,7 +97,7 @@ async function prefetchFrameChunk(from, to) {
 
   const promise = (async () => {
     const res = await fetch(
-      `/api/records/${encodeURIComponent(currentRecordId)}/frames?from_frame=${lo}&to_frame=${hi}`
+      `${recordApiUrl(currentRecordId, "/frames")}?from_frame=${lo}&to_frame=${hi}`
     );
     if (!res.ok) return;
     const body = await res.json();
@@ -222,7 +222,7 @@ function restorePlaybackPanelUi() {
   if (!poseData && !currentRecordId) return;
   const exportLink = $("#playback-export-xlsx");
   if (exportLink && currentRecordId) {
-    exportLink.href = `/api/records/${encodeURIComponent(currentRecordId)}/export.xlsx`;
+    exportLink.href = recordApiUrl(currentRecordId, "/export.xlsx");
     exportLink.download = `${currentRecordId}_skeleton.xlsx`;
     exportLink.classList.remove("hidden");
   }
@@ -393,8 +393,18 @@ function folderNameFromFileList(files) {
   return parts.length >= 2 ? parts[0] : "";
 }
 
+/** 机位子目录 record_id（如 2-1-3/foo_rtmpose_t）按路径段编码，避免 %2F 导致 404 */
+function encodeRecordIdPath(recordId) {
+  return String(recordId || "")
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter((p) => p.length > 0)
+    .map(encodeURIComponent)
+    .join("/");
+}
+
 function recordApiUrl(recordId, suffix = "") {
-  const base = `/api/records/${encodeURIComponent(recordId)}`;
+  const base = `/api/records/${encodeRecordIdPath(recordId)}`;
   return suffix ? `${base}${suffix.startsWith("/") ? suffix : `/${suffix}`}` : base;
 }
 
@@ -993,7 +1003,7 @@ async function loadRecords() {
 }
 
 async function loadSavedRecordVideo(recordId) {
-  const url = `/api/records/${encodeURIComponent(recordId)}/video`;
+  const url = recordApiUrl(recordId, "/video");
 
   if (playbackVideoObjectUrl) {
     URL.revokeObjectURL(playbackVideoObjectUrl);
@@ -1046,7 +1056,7 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
   const exportLink = $("#playback-export-xlsx");
   if (exportLink) {
     if (recordId) {
-      exportLink.href = `/api/records/${encodeURIComponent(recordId)}/export.xlsx`;
+      exportLink.href = recordApiUrl(recordId, "/export.xlsx");
       exportLink.download = `${recordId}_skeleton.xlsx`;
       exportLink.classList.remove("hidden");
     } else {
@@ -1058,19 +1068,29 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
   currentRecordId = recordId;
   highlightPlaybackRecordInList(recordId);
   resetFrameFetchState();
-  const poseRes = await fetch(`/api/records/${encodeURIComponent(recordId)}/manifest.json`);
+  const manifestUrl = recordApiUrl(recordId, "/manifest.json");
+  const poseRes = await fetch(manifestUrl);
   if (!poseRes.ok) {
-    const fallback = await fetch(`/api/records/${encodeURIComponent(recordId)}/pose.json`);
-    if (!fallback.ok) throw new Error("无法加载骨架记录");
+    const fallbackUrl = recordApiUrl(recordId, "/pose.json");
+    const fallback = await fetch(fallbackUrl);
+    if (!fallback.ok) {
+      throw new Error(
+        `无法加载骨架记录（manifest ${poseRes.status} / pose ${fallback.status}）\n${manifestUrl}`
+      );
+    }
     poseData = await fallback.json();
   } else {
+    const ct = poseRes.headers.get("content-type") || "";
+    if (!ct.includes("json")) {
+      throw new Error(`骨架接口返回非 JSON（${poseRes.status} ${ct}）\n${manifestUrl}`);
+    }
     poseData = await poseRes.json();
   }
   await buildFrameIndex(recordId);
   await prefetchFrameChunk(1, FRAME_CHUNK_SIZE);
   if (!annotationBoxes.length) {
     try {
-      const annRes = await fetch(`/api/records/${encodeURIComponent(recordId)}/annotation.json`);
+      const annRes = await fetch(recordApiUrl(recordId, "/annotation.json"));
       if (annRes.ok) {
         loadAnnotationBoxesFromData(await annRes.json());
       }
@@ -1362,7 +1382,7 @@ async function loadPlaybackEvents(recordId = null) {
 
   if (recordId) {
     try {
-      const res = await fetch(`/api/records/${encodeURIComponent(recordId)}/events`);
+      const res = await fetch(recordApiUrl(recordId, "/events"));
       if (res.ok) {
         const body = await res.json();
         playbackEvents = Array.isArray(body.events) ? body.events : [];
@@ -1701,7 +1721,7 @@ function buildFrameIndex(recordId = null) {
   if (!poseData) return Promise.resolve();
 
   if ((poseData.schema || 1) >= 2 && recordId) {
-    return fetch(`/api/records/${encodeURIComponent(recordId)}/timeline`)
+    return fetch(recordApiUrl(recordId, "/timeline"))
       .then((res) => (res.ok ? res.json() : { timeline: [] }))
       .then((body) => {
         const inferW = poseData.infer_width || 640;

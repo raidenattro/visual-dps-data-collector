@@ -29,7 +29,11 @@ from pose_store import STORAGE_V2_PARQUET, meta_sidecar_path
 
 from api.job_store import batch_timing_from_progress, update_job
 from api.job_store import _jobs, _jobs_lock
-from api.record_service import persist_record_video, record_id_from_pose_path
+from api.record_service import (
+    persist_playback_annotation,
+    persist_record_video,
+    record_id_from_pose_path,
+)
 from api.reflection_service import (
     REFLECTION_OK,
     load_reflection_or_http,
@@ -172,10 +176,15 @@ def run_job(
             alarm_cooldown_frames=alarm_cd,
         )
         record_id = record_id_from_pose_path(pose_path)
+        saved_annotation: Path | None = None
         if annotation_path and annotation_path.is_file():
-            saved_annotation = annotation_path
-        else:
-            saved_annotation = None
+            playback_ann = persist_playback_annotation(
+                annotation_path,
+                video_stem=video_stem,
+                pose_path=pose_path,
+                source_video=source_video_name,
+            )
+            saved_annotation = playback_ann or annotation_path
         saved_video_path: Path | None = None
         if save_video and video_path.is_file():
             try:

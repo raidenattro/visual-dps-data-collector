@@ -109,6 +109,13 @@ def iter_active_records(json_dir: Path) -> list[RecordLocator]:
     seen: set[str] = set()
     reserved = {"archive", "annotations"}
 
+    def _skip_json_file(path: Path) -> bool:
+        if path.name.endswith(".meta.json"):
+            return True
+        if path.name.startswith("_batch_"):
+            return True
+        return False
+
     def _add(loc: RecordLocator) -> None:
         if loc.record_id not in seen:
             seen.add(loc.record_id)
@@ -120,12 +127,12 @@ def iter_active_records(json_dir: Path) -> list[RecordLocator]:
         if p.is_dir() and is_v2_package(p):
             _add(RecordLocator(p.name, STORAGE_V2_PARQUET, p))
             continue
-        if is_v1_json(p):
+        if is_v1_json(p) and not _skip_json_file(p):
             _add(RecordLocator(p.stem, STORAGE_V1_JSON, p))
             continue
         if p.is_dir():
             for child in p.iterdir():
-                if child.name.endswith(".meta.json"):
+                if _skip_json_file(child):
                     continue
                 if child.is_dir() and is_v2_package(child):
                     rid = f"{p.name}/{child.name}"
