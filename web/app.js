@@ -29,6 +29,7 @@ let activeEventKey = null;
 /** 人工标为真的事件键（eventRowKey） */
 const verifiedTrueKeys = new Set();
 let eventReviewSaveTimer = null;
+let currentEventReviewStatus = "not_started";
 const FRAME_CHUNK_SIZE = 120;
 const COLLISION_CFG_STORAGE_KEY = "datacollect_collision_cfg";
 let rafId = null;
@@ -896,13 +897,74 @@ function recordItemEsc(v) {
 
 function recordSearchBlob(s) {
   const name = s.display_name || s.record_id || "";
-  return `${name} ${s.record_id || ""} ${s.video_stem || ""} ${s.camera_label || ""} ${s.camera_slug || ""}`.toLowerCase();
+  const review = s.event_review_label || reviewStatusLabel(s.event_review_status);
+  return `${name} ${s.record_id || ""} ${s.video_stem || ""} ${s.camera_label || ""} ${s.camera_slug || ""} ${review}`.toLowerCase();
+}
+
+function reviewStatusLabel(status) {
+  if (status === "completed") return "已复核";
+  if (status === "in_progress") return "复核中";
+  return "未复核";
+}
+
+function reviewStatusClass(status) {
+  if (status === "completed") return "review-completed";
+  if (status === "in_progress") return "review-in-progress";
+  return "review-not-started";
+}
+
+function renderReviewPill(status, label = "") {
+  const st = status || "not_started";
+  const text = label || reviewStatusLabel(st);
+  return `<span class="record-review-pill ${reviewStatusClass(st)}" title="人工事件复核状态">${text}</span>`;
+}
+
+/** 本地即时更新单条/机位分组的复核状态，避免等慢接口返回 */
+function patchPlaybackRecordReviewStatus(recordId, status, label = "") {
+  if (!recordId) return;
+  const st = status || "not_started";
+  const labelText = label || reviewStatusLabel(st);
+  let changed = false;
+  playbackRecordsCache = playbackRecordsCache.map((item) => {
+    if (item.record_id !== recordId) return item;
+    changed = true;
+    return {
+      ...item,
+      event_review_status: st,
+      event_review_label: labelText,
+    };
+  });
+  if (changed) renderPlaybackRecordsList(playbackRecordsCache);
+}
+
+function applyEventReviewPatchFromBody(body) {
+  if (!currentRecordId || !body) return;
+  const st =
+    body.event_review_status ||
+    body.event_review?.status ||
+    (body.event_review?.verified_true?.length || body.event_review?.updated_at ? "in_progress" : null);
+  if (!st) return;
+  patchPlaybackRecordReviewStatus(
+    currentRecordId,
+    st,
+    body.event_review_label || reviewStatusLabel(st)
+  );
+}
+
+function aggregateReviewStatus(items) {
+  const statuses = (items || []).map((s) => s.event_review_status || "not_started");
+  if (!statuses.length) return "not_started";
+  if (statuses.every((st) => st === "completed")) return "completed";
+  if (statuses.every((st) => st === "not_started")) return "not_started";
+  return "in_progress";
 }
 
 function renderRecordItem(s) {
   const name = s.display_name || s.record_id;
   const jsonFile = s.pose_label || s.pose_file || `${s.record_id}/manifest.json`;
   const esc = recordItemEsc;
+  const reviewSt = s.event_review_status || "not_started";
+  const reviewPill = renderReviewPill(reviewSt, s.event_review_label);
   const badges = [];
   if (s.frame_count != null) badges.push(`${s.frame_count} 帧`);
   if (s.has_video) badges.push("视频");
@@ -912,6 +974,7 @@ function renderRecordItem(s) {
   return `
       <li class="record-item record-item-compact" data-record-id="${esc(s.record_id)}" data-display-name="${esc(name)}" data-pose-file="${esc(jsonFile)}" data-has-video="${s.has_video ? "1" : "0"}" data-search="${esc(recordSearchBlob(s))}">
         <div class="record-main record-main-compact">
+          ${reviewPill}
           <strong class="record-name" title="${esc(name)}">${name}</strong>
           <span class="record-meta-inline">${badgeHtml}</span>
         </div>
@@ -1037,6 +1100,8 @@ function renderPlaybackRecordsList(items) {
       const visible = groupItems.slice(0, limit);
       const hidden = total - visible.length;
       const title = groupItems[0]?.camera_label || key;
+      const groupReview = aggregateReviewStatus(groupItems);
+      const groupReviewPill = renderReviewPill(groupReview);
       const rows = visible.map(renderRecordItem).join("");
       const openGroup =
         keys.length === 1 ||
@@ -1047,7 +1112,10 @@ function renderPlaybackRecordsList(items) {
       }>
           <summary class="record-group-title">
             <span class="record-group-label">机位 ${recordItemEsc(title)}</span>
-            <span class="record-group-meta"><code>${recordItemEsc(key)}</code> · ${total} 条</span>
+            <span class="record-group-meta">
+              ${groupReviewPill}
+              <code>${recordItemEsc(key)}</code> · ${total} 条
+            </span>
           </summary>
           <ul class="session-list">${rows}</ul>
           ${
@@ -1062,10 +1130,13 @@ function renderPlaybackRecordsList(items) {
   if (keepId) highlightPlaybackRecordInList(keepId);
 }
 
-async function loadRecords() {
+async function loadRecords({ quiet = false } = {}) {
   const list = $("#session-list");
+  if (!quiet && !playbackRecordsCache.length) {
+    list.innerHTML = "<p class='hint playback-records-empty'>加载记录中…</p>";
+  }
   try {
-    const res = await fetch("/api/records");
+    const res = await fetch("/api/records?summary=1");
     const items = await res.json();
     playbackRecordsCache = items;
     renderPlaybackRecordsList(items);
@@ -1360,9 +1431,8 @@ function scheduleSaveEventReview() {
   eventReviewSaveTimer = setTimeout(() => void saveEventReviewNow(), 450);
 }
 
-async function saveEventReviewNow() {
-  if (!currentRecordId) return;
-  const verified_true = playbackEvents
+function buildVerifiedTruePayload() {
+  return playbackEvents
     .filter((e) => isEventVerified(e))
     .map((e) => ({
       event_type: e.event_type,
@@ -1370,11 +1440,19 @@ async function saveEventReviewNow() {
       source_frame_idx: e.source_frame_idx ?? e.frame_idx,
       box_tokens: [...(e.box_tokens || [])],
     }));
+}
+
+async function saveEventReviewNow() {
+  if (!currentRecordId) return;
+  const verified_true = buildVerifiedTruePayload();
   try {
     const res = await fetch(recordApiUrl(currentRecordId, "/event-review"), {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ verified_true }),
+      body: JSON.stringify({
+        verified_true,
+        event_total: playbackEvents.length,
+      }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -1385,10 +1463,44 @@ async function saveEventReviewNow() {
       playbackEvents = body.events;
       syncVerifiedKeysFromEvents(playbackEvents);
     }
+    currentEventReviewStatus = body.event_review_status || "in_progress";
+    applyEventReviewPatchFromBody(body);
     const n = body.verified_true_count ?? verified_true.length;
     setEventReviewSaveStatus(`已保存 · 标真 ${n} 条`);
+    updateReviewDock();
   } catch (err) {
     setEventReviewSaveStatus(err.message || "保存失败", "error");
+  }
+}
+
+async function markEventReviewCompleted() {
+  if (!currentRecordId) {
+    setEventReviewSaveStatus("请从记录列表打开回放后再完成复核", "error");
+    return;
+  }
+  setEventReviewSaveStatus("正在标记已复核…", "pending");
+  try {
+    const res = await fetch(recordApiUrl(currentRecordId, "/event-review"), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        status: "completed",
+        event_total: playbackEvents.length,
+        verified_true: buildVerifiedTruePayload(),
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `操作失败 (${res.status})`);
+    }
+    const body = await res.json();
+    currentEventReviewStatus = body.event_review_status || "completed";
+    patchPlaybackRecordReviewStatus(currentRecordId, "completed", "已复核");
+    setEventReviewSaveStatus("已标记为复核完成");
+    updateReviewDock();
+    await loadRecords({ quiet: true });
+  } catch (err) {
+    setEventReviewSaveStatus(err.message || "操作失败", "error");
   }
 }
 
@@ -1444,7 +1556,20 @@ function updateReviewDock() {
   const verifiedN = playbackEvents.filter((e) => isEventVerified(e)).length;
 
   if (summaryEl) {
-    summaryEl.textContent = `全部事件列表（${playbackEvents.length} 条，已标真 ${verifiedN}）`;
+    const reviewNote =
+      currentEventReviewStatus === "completed"
+        ? " · 记录已复核"
+        : currentEventReviewStatus === "in_progress"
+          ? " · 复核中"
+          : "";
+    summaryEl.textContent = `全部事件列表（${playbackEvents.length} 条，已标真 ${verifiedN}${reviewNote}）`;
+  }
+
+  const completeBtn = $("#event-review-complete-btn");
+  if (completeBtn) {
+    completeBtn.disabled = currentEventReviewStatus === "completed" || !currentRecordId;
+    completeBtn.textContent =
+      currentEventReviewStatus === "completed" ? "已复核完成" : "标记复核完成";
   }
 
   if (!playbackEvents.length) {
@@ -1730,6 +1855,7 @@ async function loadPlaybackEvents(recordId = null) {
   playbackEventsFromRealtime = false;
   activeEventKey = null;
   verifiedTrueKeys.clear();
+  currentEventReviewStatus = "not_started";
   setEventReviewSaveStatus("");
 
   if (recordId) {
@@ -1739,6 +1865,13 @@ async function loadPlaybackEvents(recordId = null) {
         const body = await res.json();
         playbackEvents = Array.isArray(body.events) ? body.events : [];
         syncVerifiedKeysFromEvents(playbackEvents);
+        currentEventReviewStatus =
+          body.event_review_status ||
+          (body.event_review?.status
+            ? body.event_review.status
+            : body.event_review?.verified_true?.length || body.event_review?.updated_at
+              ? "in_progress"
+              : "not_started");
       }
     } catch {
       /* 忽略 */
@@ -2430,6 +2563,7 @@ function initEventReviewControls() {
   $("#event-skip-next-btn")?.addEventListener("click", () => void skipToNextEvent());
   $("#event-mark-true-next-btn")?.addEventListener("click", () => void confirmTrueAndNext());
   $("#event-unmark-btn")?.addEventListener("click", () => markActiveEventVerified(false));
+  $("#event-review-complete-btn")?.addEventListener("click", () => void markEventReviewCompleted());
 
   $("#event-review-list-details")?.addEventListener("toggle", (e) => {
     if (e.target.open) renderEventReviewTable();

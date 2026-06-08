@@ -44,6 +44,7 @@ from pose_store import (
     load_pose_document,
     load_pose_header,
     load_timeline,
+    resolve_event_review_status,
     save_event_review,
 )
 from video_frame import first_frame_base64
@@ -68,6 +69,7 @@ from api.record_service import (
     persist_annotation_for_video,
     record_id_from_pose_path,
     record_meta_for_list,
+    record_summary_for_list,
     resolve_annotation_path_for_record,
     video_path_for_record,
     video_path_for_video_stem,
@@ -178,11 +180,15 @@ def lookup_reflection_camera(camera: str = "") -> dict[str, Any]:
 
 
 @router.get("/api/records")
-def list_records() -> list[dict[str, Any]]:
+def list_records(summary: bool = True) -> list[dict[str, Any]]:
     paths = resolve_app_paths()
     paths.json_dir.mkdir(parents=True, exist_ok=True)
-    items = [record_meta_for_list(loc) for loc in iter_active_records(paths.json_dir)]
-    return items[:500]
+    locators = iter_active_records(paths.json_dir)[:500]
+    if summary:
+        items = [record_summary_for_list(loc, paths) for loc in locators]
+    else:
+        items = [record_meta_for_list(loc) for loc in locators]
+    return items
 
 
 @router.post("/api/annotate/extract-frame")
@@ -306,20 +312,17 @@ def list_annotate_options() -> list[dict[str, Any]]:
     seen_stems: set[str] = set()
 
     for locator in iter_active_records(paths.json_dir):
-        meta = record_meta_for_list(locator)
+        meta = record_summary_for_list(locator, paths)
         record_id = locator.record_id
         video_stem = meta.get("video_stem") or record_id
         seen_stems.add(video_stem)
-        has_disk_video = bool(video_path_for_record(record_id)) or bool(
-            video_path_for_video_stem(video_stem)
-        )
         items.append({
             "video_stem": video_stem,
             "display_name": meta.get("display_name") or video_stem,
             "record_id": record_id,
             "pose_file": meta.get("pose_file") or record_id,
             "source_video": meta.get("source_video") or "",
-            "has_video": bool(meta.get("has_video")) or has_disk_video,
+            "has_video": bool(meta.get("has_video")),
             "has_stored_annotation": bool(meta.get("has_stored_annotation")),
         })
 
@@ -547,6 +550,7 @@ def get_record_events(record_id: str) -> JSONResponse:
     alarm_n = sum(1 for e in events if e.get("event_type") == "alarm")
     collision_n = sum(1 for e in events if e.get("event_type") == "collision")
     verified_n = sum(1 for e in events if e.get("verified_true"))
+    review_status = resolve_event_review_status(review)
     return JSONResponse(
         {
             "record_id": record_id,
@@ -554,6 +558,7 @@ def get_record_events(record_id: str) -> JSONResponse:
             "alarm_count": alarm_n,
             "collision_count": collision_n,
             "verified_true_count": verified_n,
+            "event_review_status": review_status,
             "events": events,
             "event_review": review,
         }
@@ -570,7 +575,7 @@ def get_record_event_review(record_id: str) -> JSONResponse:
 
 @router.patch("/api/records/{record_id:path}/event-review")
 def patch_record_event_review(record_id: str, body: dict[str, Any] = Body(...)) -> JSONResponse:
-    """更新人工复核：支持 verified_true 全量替换，或 action=toggle 单条切换。"""
+    """更新人工复核：verified_true / toggle / status=completed。"""
     locator = locate_record_by_id(record_id)
     if not locator:
         raise HTTPException(404, "记录不存在")
@@ -584,6 +589,47 @@ def patch_record_event_review(record_id: str, body: dict[str, Any] = Body(...)) 
         for v in verified
         if isinstance(v, dict)
     }
+
+    requested_status = str(body.get("status") or "").strip().lower()
+    if requested_status == "completed":
+        if "verified_true" in body and isinstance(body.get("verified_true"), list):
+            verified = []
+            seen: set[str] = set()
+            for item in body.get("verified_true") or []:
+                norm = normalize_review_entry(item if isinstance(item, dict) else {})
+                if not norm:
+                    continue
+                sig = event_signature(norm["event_type"], norm["frame_idx"], norm["box_tokens"])
+                if sig in seen:
+                    continue
+                seen.add(sig)
+                verified.append(norm)
+        try:
+            event_total = int(body.get("event_total")) if body.get("event_total") is not None else len(load_events(locator))
+        except (TypeError, ValueError):
+            event_total = len(load_events(locator))
+        try:
+            path = save_event_review(
+                locator,
+                verified,
+                status="completed",
+                event_total=event_total,
+            )
+        except OSError as exc:
+            raise HTTPException(500, f"保存复核失败: {exc}") from exc
+        saved = load_event_review(locator)
+        events = enrich_events_with_review(load_events(locator), locator)
+        return JSONResponse(
+            {
+                "status": "ok",
+                "record_id": record_id,
+                "path": str(path),
+                "verified_true_count": len(saved.get("verified_true") or []),
+                "event_review_status": resolve_event_review_status(saved),
+                "event_review": saved,
+                "events": events,
+            }
+        )
 
     action = str(body.get("action") or "").strip().lower()
     if action == "toggle":
@@ -618,10 +664,29 @@ def patch_record_event_review(record_id: str, body: dict[str, Any] = Body(...)) 
             seen.add(sig)
             verified.append(norm)
     else:
-        raise HTTPException(400, "请提供 verified_true 或 action=toggle")
+        raise HTTPException(400, "请提供 verified_true、action=toggle 或 status=completed")
+
+    prev_status = resolve_event_review_status(review)
+    next_status = None if prev_status == "completed" else "in_progress"
+    event_total: int | None = None
+    if body.get("event_total") is not None:
+        try:
+            event_total = max(0, int(body.get("event_total")))
+        except (TypeError, ValueError):
+            event_total = None
+    if event_total is None and next_status == "in_progress":
+        try:
+            event_total = len(load_events(locator))
+        except RuntimeError:
+            event_total = None
 
     try:
-        path = save_event_review(locator, verified)
+        path = save_event_review(
+            locator,
+            verified,
+            status=next_status,
+            event_total=event_total,
+        )
     except OSError as exc:
         raise HTTPException(500, f"保存复核失败: {exc}") from exc
 
@@ -633,6 +698,7 @@ def patch_record_event_review(record_id: str, body: dict[str, Any] = Body(...)) 
             "record_id": record_id,
             "path": str(path),
             "verified_true_count": len(saved.get("verified_true") or []),
+            "event_review_status": resolve_event_review_status(saved),
             "event_review": saved,
             "events": events,
         }

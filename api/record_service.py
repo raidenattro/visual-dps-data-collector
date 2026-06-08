@@ -20,6 +20,7 @@ from annotation_store import (
 )
 from event_engine.annotation_boxes import load_annotation_config
 from config_loader import (
+    AppPaths,
     record_id_for_pose_path,
     record_video_path,
     resolve_app_paths,
@@ -29,10 +30,14 @@ from config_loader import (
 from model_assets import VIDEO_EXTENSIONS
 from pose_store import (
     STORAGE_V2_PARQUET,
+    event_review_status_label,
     iter_active_records,
+    load_event_review,
+    load_event_review_raw,
     load_pose_header,
     locate_record as find_record,
     meta_sidecar_path,
+    resolve_event_review_status,
 )
 
 from api.naming import display_name_from_pose_file
@@ -295,6 +300,124 @@ def persist_record_video(
 
 
 
+def _read_sidecar_meta(record_id: str, locator) -> dict[str, Any]:
+    sidecar = meta_path_for_record(record_id, locator)
+    if not sidecar.is_file():
+        return {}
+    try:
+        data = json.loads(sidecar.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _video_stem_for_summary(record_id: str, locator, meta: dict[str, Any]) -> str:
+    for key in ("video_stem", "display_name"):
+        v = str(meta.get(key) or "").strip()
+        if v:
+            return sanitize_file_stem(v)
+    src = str(meta.get("source_video") or "").strip()
+    if src:
+        return sanitize_file_stem(Path(src).stem)
+    if locator.path.is_dir():
+        return sanitize_file_stem(locator.path.name)
+    return sanitize_file_stem(Path(str(record_id)).name)
+
+
+def _has_video_fast(record_id: str, locator, meta: dict[str, Any], paths: AppPaths) -> bool:
+    camera_slug = str(meta.get("camera_slug") or "").strip()
+    if not camera_slug and "/" in str(record_id):
+        camera_slug = str(record_id).split("/", 1)[0]
+    video_base = paths.video_dir / camera_slug if camera_slug else paths.video_dir
+    pkg_stem = locator.path.name if locator.path.is_dir() else Path(str(record_id)).name
+
+    vf = str(meta.get("video_file") or "").strip()
+    if vf:
+        if (video_base / vf).is_file() or (paths.video_dir / vf).is_file():
+            return True
+    src = str(meta.get("source_video") or "").strip()
+    if src:
+        name = Path(src).name
+        if (video_base / name).is_file() or (paths.video_dir / name).is_file():
+            return True
+    for stem_key in (str(meta.get("video_stem") or "").strip(), pkg_stem):
+        if not stem_key:
+            continue
+        safe = sanitize_file_stem(stem_key)
+        for ext in VIDEO_EXTENSIONS:
+            if (video_base / f"{safe}{ext}").is_file() or (paths.video_dir / f"{safe}{ext}").is_file():
+                return True
+    return False
+
+
+def _has_annotation_fast(locator, video_stem: str, paths: AppPaths) -> bool:
+    if locator.path.is_dir() and (locator.path / "annotation.json").is_file():
+        return True
+    ann_path = paths.annotation_dir / f"{sanitize_file_stem(video_stem)}.json"
+    return ann_path.is_file()
+
+
+def record_summary_for_list(locator, paths: AppPaths | None = None) -> dict[str, Any]:
+    """回放列表用轻量元数据（避免 reflection/标注全文/重复定位）。"""
+    paths = paths or resolve_app_paths()
+    record_id = locator.record_id
+    meta = _read_sidecar_meta(record_id, locator)
+
+    header: dict[str, Any] = {}
+    if meta.get("frame_count") is None or meta.get("collision") is None:
+        try:
+            header = load_pose_header(locator)
+        except (FileNotFoundError, json.JSONDecodeError, ValueError, OSError):
+            header = {}
+
+    collision = meta.get("collision") if meta.get("collision") is not None else header.get("collision")
+    collision_enabled = isinstance(collision, dict) and bool(collision.get("enabled"))
+    frame_count = meta.get("frame_count") if meta.get("frame_count") is not None else header.get("frame_count")
+
+    camera_slug = str(meta.get("camera_slug") or "").strip()
+    if not camera_slug and "/" in str(record_id):
+        camera_slug = str(record_id).split("/", 1)[0]
+
+    video_stem = _video_stem_for_summary(record_id, locator, meta)
+    backend = str(meta.get("backend") or variant_to_backend(str(meta.get("variant") or header.get("variant") or "")))
+    display_name = str(meta.get("display_name") or "").strip() or display_name_from_pose_file(
+        record_id if locator.storage == STORAGE_V2_PARQUET else locator.path.name,
+        backend,
+    )
+
+    review_raw = load_event_review_raw(locator)
+    review_status = resolve_event_review_status(review_raw)
+
+    if locator.storage == STORAGE_V2_PARQUET:
+        pose_file = f"{record_id}/manifest.json"
+        pose_label = record_id
+    else:
+        pose_file = locator.path.name
+        pose_label = locator.path.name
+
+    has_video = _has_video_fast(record_id, locator, meta, paths)
+    return {
+        "record_id": record_id,
+        "storage": locator.storage,
+        "display_name": display_name,
+        "camera_slug": camera_slug,
+        "camera_label": str(meta.get("camera_label") or "").strip(),
+        "video_stem": video_stem,
+        "frame_count": frame_count,
+        "has_video": has_video,
+        "has_stored_annotation": _has_annotation_fast(locator, video_stem, paths),
+        "collision_enabled": collision_enabled,
+        "event_review_status": review_status,
+        "event_review_label": event_review_status_label(review_status),
+        "event_review_verified_count": len(review_raw.get("verified_true") or [])
+        if isinstance(review_raw.get("verified_true"), list)
+        else 0,
+        "pose_file": pose_file,
+        "pose_label": pose_label,
+        "summary": True,
+    }
+
+
 def record_meta_for_list(locator) -> dict[str, Any]:
     paths = resolve_app_paths()
     record_id = locator.record_id
@@ -370,6 +493,14 @@ def record_meta_for_list(locator) -> dict[str, Any]:
         meta["video_url"] = f"/api/records/{record_id}/video"
     else:
         meta.pop("video_url", None)
+
+    review = load_event_review(locator)
+    review_status = resolve_event_review_status(review)
+    meta["event_review_status"] = review_status
+    meta["event_review_label"] = event_review_status_label(review_status)
+    meta["event_review_verified_count"] = len(review.get("verified_true") or [])
+    if review.get("event_total") is not None:
+        meta["event_review_total"] = int(review.get("event_total") or 0)
     return meta
 
 

@@ -536,9 +536,16 @@ h2 {
 }
 
 .record-group-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
   font-size: 0.78rem;
   color: #64748b;
   font-weight: normal;
+}
+
+.record-group-meta .record-review-pill {
+  font-size: 0.72rem;
 }
 
 .record-group-meta code {
@@ -570,9 +577,39 @@ h2 {
   min-width: 0;
 }
 
+.record-review-pill {
+  flex-shrink: 0;
+  display: inline-block;
+  font-size: 0.68rem;
+  line-height: 1.2;
+  padding: 0.12rem 0.42rem;
+  border-radius: 999px;
+  font-weight: 600;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.record-review-pill.review-completed {
+  color: #052e16;
+  background: #4ade80;
+  border-color: #22c55e;
+}
+
+.record-review-pill.review-in-progress {
+  color: #422006;
+  background: #fbbf24;
+  border-color: #f59e0b;
+}
+
+.record-review-pill.review-not-started {
+  color: #cbd5e1;
+  background: #334155;
+  border-color: #475569;
+}
+
 .record-main-compact .record-name {
   flex: 0 1 auto;
-  max-width: 55%;
+  max-width: 42%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -593,6 +630,24 @@ h2 {
   display: inline;
   margin-right: 0.35rem;
   color: #94a3b8;
+}
+
+.record-badge.review-completed {
+  color: #4ade80;
+  font-weight: 600;
+}
+
+.record-badge.review-in-progress {
+  color: #fbbf24;
+  font-weight: 600;
+}
+
+.record-badge.review-not-started {
+  color: #94a3b8;
+}
+
+.record-group-meta .record-badge {
+  margin-right: 0.45rem;
 }
 
 .record-actions-compact {
@@ -873,7 +928,7 @@ h2 {
 
 .event-review-actions {
   display: grid;
-  grid-template-columns: minmax(5rem, auto) 1fr 1fr minmax(5.5rem, auto);
+  grid-template-columns: minmax(5rem, auto) 1fr 1fr minmax(5.5rem, auto) minmax(6.5rem, auto);
   gap: 0.45rem;
 }
 
@@ -913,6 +968,22 @@ h2 {
   background: #475569;
 }
 
+.btn-review-complete {
+  background: #1d4ed8;
+  color: #fff;
+  border-color: #1e40af;
+  font-weight: 600;
+}
+
+.btn-review-complete:hover:not(:disabled) {
+  background: #1e40af;
+}
+
+.btn-review-complete:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .event-review-kbd-hint {
   margin: 0.5rem 0 0;
   font-size: 0.75rem;
@@ -947,7 +1018,8 @@ h2 {
     grid-template-columns: 1fr 1fr;
   }
 
-  .btn-review-true {
+  .btn-review-true,
+  .btn-review-complete {
     grid-column: 1 / -1;
   }
 }

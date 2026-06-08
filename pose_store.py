@@ -17,6 +17,14 @@ TIMELINE_FILE = "timeline.parquet"
 SKELETON_FILE = "skeleton.parquet"
 EVENT_REVIEW_FILE = "event_review.json"
 EVENT_REVIEW_SCHEMA = 1
+REVIEW_STATUS_COMPLETED = "completed"
+REVIEW_STATUS_IN_PROGRESS = "in_progress"
+REVIEW_STATUS_NOT_STARTED = "not_started"
+REVIEW_STATUS_LABELS = {
+    REVIEW_STATUS_COMPLETED: "已复核",
+    REVIEW_STATUS_IN_PROGRESS: "复核中",
+    REVIEW_STATUS_NOT_STARTED: "未复核",
+}
 STORAGE_V2_PARQUET = "v2_parquet"
 STORAGE_V1_JSON = "v1_json"
 
@@ -597,6 +605,19 @@ def normalize_review_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def load_event_review_raw(locator: RecordLocator) -> dict[str, Any]:
+    """仅读取 event_review.json 原始内容（列表接口用，不做 verified 规范化）。"""
+    path = event_review_path(locator)
+    if not path.is_file():
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
 def load_event_review(locator: RecordLocator) -> dict[str, Any]:
     """加载人工复核结果（标为真的碰撞/告警）。"""
     path = event_review_path(locator)
@@ -604,6 +625,9 @@ def load_event_review(locator: RecordLocator) -> dict[str, Any]:
         "schema": EVENT_REVIEW_SCHEMA,
         "record_id": locator.record_id,
         "verified_true": [],
+        "status": "",
+        "completed_at": "",
+        "event_total": None,
     }
     if not path.is_file():
         return empty
@@ -627,12 +651,37 @@ def load_event_review(locator: RecordLocator) -> dict[str, Any]:
         seen.add(sig)
         verified.append(norm)
 
+    event_total_raw = raw.get("event_total")
+    try:
+        event_total = int(event_total_raw) if event_total_raw is not None else None
+    except (TypeError, ValueError):
+        event_total = None
+
     return {
         "schema": int(raw.get("schema") or EVENT_REVIEW_SCHEMA),
         "record_id": str(raw.get("record_id") or locator.record_id),
         "updated_at": str(raw.get("updated_at") or ""),
+        "status": str(raw.get("status") or "").strip().lower(),
+        "completed_at": str(raw.get("completed_at") or ""),
+        "event_total": event_total,
         "verified_true": verified,
     }
+
+
+def resolve_event_review_status(review: dict[str, Any]) -> str:
+    """未复核 / 复核中 / 已复核。"""
+    status = str(review.get("status") or "").strip().lower()
+    if status == REVIEW_STATUS_COMPLETED:
+        return REVIEW_STATUS_COMPLETED
+    if status == REVIEW_STATUS_IN_PROGRESS:
+        return REVIEW_STATUS_IN_PROGRESS
+    if review.get("verified_true") or review.get("updated_at"):
+        return REVIEW_STATUS_IN_PROGRESS
+    return REVIEW_STATUS_NOT_STARTED
+
+
+def event_review_status_label(status: str) -> str:
+    return REVIEW_STATUS_LABELS.get(str(status or "").strip().lower(), REVIEW_STATUS_LABELS[REVIEW_STATUS_NOT_STARTED])
 
 
 def load_verified_true_signatures(locator: RecordLocator) -> set[str]:
@@ -651,33 +700,68 @@ def load_verified_true_signatures(locator: RecordLocator) -> set[str]:
     return out
 
 
-def save_event_review(locator: RecordLocator, verified_true: list[dict[str, Any]]) -> Path:
+def save_event_review(
+    locator: RecordLocator,
+    verified_true: list[dict[str, Any]] | None = None,
+    *,
+    status: str | None = None,
+    event_total: int | None = None,
+) -> Path:
     """保存人工复核结果到记录目录 event_review.json。"""
-    normalized: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for item in verified_true:
-        norm = normalize_review_entry(item if isinstance(item, dict) else {})
-        if not norm:
-            continue
-        sig = event_signature(norm["event_type"], norm["frame_idx"], norm["box_tokens"])
-        if sig in seen:
-            continue
-        seen.add(sig)
-        normalized.append(norm)
-    normalized.sort(
-        key=lambda e: (
-            int(e.get("frame_idx") or 0),
-            str(e.get("event_type") or ""),
-            ",".join(e.get("box_tokens") or []),
+    existing = load_event_review(locator)
+    if verified_true is None:
+        normalized = list(existing.get("verified_true") or [])
+    else:
+        normalized = []
+        seen: set[str] = set()
+        for item in verified_true:
+            norm = normalize_review_entry(item if isinstance(item, dict) else {})
+            if not norm:
+                continue
+            sig = event_signature(norm["event_type"], norm["frame_idx"], norm["box_tokens"])
+            if sig in seen:
+                continue
+            seen.add(sig)
+            normalized.append(norm)
+        normalized.sort(
+            key=lambda e: (
+                int(e.get("frame_idx") or 0),
+                str(e.get("event_type") or ""),
+                ",".join(e.get("box_tokens") or []),
+            )
         )
-    )
 
-    payload = {
+    payload: dict[str, Any] = {
         "schema": EVENT_REVIEW_SCHEMA,
         "record_id": locator.record_id,
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "verified_true": normalized,
     }
+
+    prev_status = resolve_event_review_status(existing)
+    if event_total is not None:
+        payload["event_total"] = max(0, int(event_total))
+    elif existing.get("event_total") is not None:
+        payload["event_total"] = existing.get("event_total")
+
+    if status is not None:
+        st = str(status).strip().lower()
+        payload["status"] = st
+        if st == REVIEW_STATUS_COMPLETED:
+            payload["completed_at"] = datetime.now(timezone.utc).isoformat()
+        elif existing.get("completed_at") and st != REVIEW_STATUS_COMPLETED:
+            payload.pop("completed_at", None)
+    elif prev_status == REVIEW_STATUS_COMPLETED:
+        payload["status"] = REVIEW_STATUS_COMPLETED
+        if existing.get("completed_at"):
+            payload["completed_at"] = existing.get("completed_at")
+    elif normalized or verified_true is not None:
+        payload["status"] = REVIEW_STATUS_IN_PROGRESS
+    elif existing.get("status"):
+        payload["status"] = existing.get("status")
+        if existing.get("completed_at"):
+            payload["completed_at"] = existing.get("completed_at")
+
     path = event_review_path(locator)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
