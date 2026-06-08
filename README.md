@@ -171,28 +171,40 @@ python collect_pose.py --video test.mp4
 
 Web 采集页：无本地标注时会提示去「标注」页或上传 JSON，服务端拒绝无标注采集。
 
-### 文件夹递归批处理（仅骨架，不算碰撞）
+### 文件夹递归批处理（CLI 一键，无需启动 Web）
 
-对齐 Web 采集页「仅计算骨架 + 文件夹批处理」，无需启动服务，递归处理根目录及全部子文件夹内的视频：
+对齐 Web 采集页「文件夹批处理」，递归处理根目录及全部子文件夹内的视频。输入文件夹须**互不相同**；同机位多批数据用后缀区分：
+
+| 输入文件夹（须唯一） | 机位（reflection） | 输出目录 |
+|---------------------|-------------------|----------|
+| `1-2组-1` | `1-2组-1` | `localdata/json/1-2-1/` |
+| `1-2组-1(2)` | `1-2组-1` | `localdata/json/1-2-1-(2)/` |
+| `1-2组-1(3)` | `1-2组-1` | `localdata/json/1-2-1-(3)/` |
+
+无 `(2)` 后缀且输出目录已占用时，也会自动分配 `1-2-1-(2)`…
 
 ```bash
-# 单机位：全部视频写入 localdata/json/{机位slug}/
-python scripts/batch_skeleton_collect.py D:/videos/1-1-1 --camera-label 1-1-1
+# 仅骨架（不算碰撞）
+python scripts/batch_skeleton_collect.py D:/videos/1-2组-1 --camera-label 1-2组-1
+python scripts/batch_skeleton_collect.py D:/videos/1-2组-1 --camera-label 1-2组-1 --save-video
 
-# 保存配套视频到 localdata/video/{机位slug}/
-python scripts/batch_skeleton_collect.py D:/videos/1-1-1 --camera-label 1-1-1 --save-video
-
-# 多机位：root 下第一级子目录名作机位（如 root/1-1-1/*.mp4、root/1-1-2/*.mp4）
+# 多机位：root 下第一级子目录名作机位（D:/videos/1-2组-1/*.mp4、D:/videos/1-2组-2/*.mp4）
 python scripts/batch_skeleton_collect.py D:/videos --group-by-subfolder
 
+# 骨架 + 碰撞（需 reflection.json 与 localdata/json/annotations/{编号}.json）
+python scripts/batch_skeleton_collect.py D:/videos --group-by-subfolder --with-collision
+python scripts/batch_skeleton_collect.py D:/videos/1-2组-1 --camera-label 1-2组-1 --with-collision
+
 # 预览待处理列表
-python scripts/batch_skeleton_collect.py D:/videos --camera-label 1-1-1 --dry-run
+python scripts/batch_skeleton_collect.py D:/videos --group-by-subfolder --dry-run
 
 # 已存在 manifest.json 的记录跳过
-python scripts/batch_skeleton_collect.py D:/videos/1-1-1 --camera-label 1-1-1 --skip-existing
+python scripts/batch_skeleton_collect.py D:/videos/1-2组-1 --camera-label 1-2组-1 --skip-existing
 ```
 
 推理参数与 `collect_pose.py` 相同（`--backend`、`--frame-rate`、`--no-save-video` 等），读取 `config.json`。
+
+CLI 批处理（`--with-collision`）**复用** `reflection.json` 指向的 `annotations/{编号}.json`，不会为每个视频新建 `clip_*.json`。记录包内仅保留一份 `annotation.json` 副本供回放。若历史批处理产生大量 `annotations/clip_*.json`，可安全删除（须保留 `71.json` 等 reflection 编号源文件）；已采集记录的骨架与碰撞数据在 `skeleton.parquet` / `timeline.parquet` 中，不受影响。
 
 ## 碰撞检测（与 visual-dps event-worker 一致）
 

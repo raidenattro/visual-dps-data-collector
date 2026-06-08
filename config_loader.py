@@ -272,6 +272,43 @@ def camera_storage_slug(camera_label: str) -> str:
     return s or "camera"
 
 
+_FOLDER_DUP_SUFFIX_RE = re.compile(
+    r"^(?P<base>.+?)(?:[-_]?[（(](?P<n>\d+)[)）])$",
+    re.UNICODE,
+)
+
+
+def parse_camera_folder_name(folder_name: str) -> tuple[str, int | None]:
+    """视频文件夹名 → (机位标识, 重复序号)。
+
+    输入文件夹不能同名时，可用后缀区分同机位多批数据：
+      1-2组-1     → (1-2组-1, None)
+      1-2组-1(2)  → (1-2组-1, 2)
+      1-2组-1-(2) → (1-2组-1, 2)
+    """
+    s = str(folder_name or "").strip()
+    if not s:
+        return "", None
+    m = _FOLDER_DUP_SUFFIX_RE.match(s)
+    if m:
+        base = str(m.group("base") or "").strip()
+        n = int(m.group("n"))
+        if base and n >= 2:
+            return base, n
+    return s, None
+
+
+def camera_storage_slug_for_folder(paths: AppPaths, folder_name: str) -> tuple[str, str]:
+    """视频文件夹名 → (机位标识, 输出存储 slug)。"""
+    base_label, dup_n = parse_camera_folder_name(folder_name)
+    if not base_label:
+        raise ValueError("文件夹名不能为空")
+    base_slug = camera_storage_slug(base_label)
+    if dup_n is not None:
+        return base_label, f"{base_slug}-({dup_n})"
+    return base_label, allocate_camera_storage_slug(paths, base_label)
+
+
 def _bucket_dir_has_content(bucket_dir: Path) -> bool:
     """机位 json/video 子目录是否已有数据（忽略 . 开头文件）。"""
     if not bucket_dir.is_dir():
