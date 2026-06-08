@@ -67,6 +67,7 @@ def build_collect_config_snapshot(
     camera_slug: str = "",
     batch_id: str = "",
     annotation_source: str = "",
+    skeleton_only: bool = False,
 ) -> dict[str, Any]:
     """采集任务配置快照，写入 meta 与批处理清单，便于与结果数据关联。"""
     return {
@@ -86,6 +87,7 @@ def build_collect_config_snapshot(
         "camera_slug": camera_slug or None,
         "batch_id": batch_id or None,
         "annotation_source": annotation_source or None,
+        "skeleton_only": bool(skeleton_only),
     }
 
 
@@ -184,6 +186,9 @@ def run_job(
         )
         record_id = record_id_from_pose_path(pose_path)
         has_skeleton = collect_result_has_skeleton(data)
+        collision_computed = bool(
+            annotation_path and annotation_path.is_file() and data.get("collision", {}).get("enabled")
+        )
         saved_annotation: Path | None = None
         if annotation_path and annotation_path.is_file():
             playback_ann = persist_playback_annotation(
@@ -221,6 +226,7 @@ def run_job(
             "det_model": data.get("det_model"),
             "frame_count": data.get("frame_count", 0),
             "has_skeleton": has_skeleton,
+            "collision_computed": collision_computed,
             "elapsed_sec": data.get("elapsed_sec"),
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "save_video": bool(save_video),
@@ -235,9 +241,11 @@ def run_job(
         elif data.get("annotation"):
             meta["has_annotation"] = True
             meta["collision_enabled"] = True
+            meta["collision_computed"] = True
         else:
             meta["has_annotation"] = False
             meta["collision_enabled"] = False
+            meta["collision_computed"] = False
         if saved_video_path and saved_video_path.is_file():
             meta["video_file"] = saved_video_path.name
             meta["video_url"] = f"/api/records/{record_id}/video"
@@ -254,7 +262,7 @@ def run_job(
             try:
                 if not has_skeleton:
                     ensure_no_collision_review_completed(locator, event_count=0)
-                else:
+                elif meta.get("collision_computed"):
                     ensure_no_collision_review_completed(
                         locator, event_count=len(load_events(locator))
                     )
@@ -286,6 +294,7 @@ def run_job(
             has_video=meta.get("has_video", False),
             has_annotation=meta.get("has_annotation", False),
             collision_enabled=meta.get("collision_enabled", False),
+            collision_computed=meta.get("collision_computed", False),
             video_url=meta.get("video_url"),
             storage=meta.get("storage") or STORAGE_V2_PARQUET,
         )

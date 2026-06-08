@@ -122,8 +122,10 @@ function renderRecordItem(s) {
   const badges = [];
   if (s.frame_count != null) badges.push(`${s.frame_count} 帧`);
   if (s.has_video) badges.push("视频");
-  if (s.has_stored_annotation || s.collision_enabled) badges.push("标注");
-  if (s.collision_enabled) badges.push("碰撞");
+  const collisionComputed = s.collision_computed ?? s.collision_enabled;
+  if (s.has_stored_annotation || collisionComputed) badges.push("标注");
+  if (collisionComputed) badges.push("碰撞");
+  else badges.push('<span class="record-badge collision-pending" title="采集时未启用碰撞检测，可在标注页补标后重算">碰撞未计算</span>');
   const badgeHtml = badges.map((b) => `<span class="record-badge">${b}</span>`).join("");
   return `
       <li class="record-item record-item-compact" data-record-id="${esc(s.record_id)}" data-display-name="${esc(name)}" data-pose-file="${esc(jsonFile)}" data-has-video="${s.has_video ? "1" : "0"}" data-search="${esc(recordSearchBlob(s))}">

@@ -370,6 +370,12 @@ def _parse_event_total(review: dict[str, Any]) -> int | None:
         return None
 
 
+def _collision_computed_from_meta(meta: dict[str, Any], collision_enabled: bool) -> bool:
+    if "collision_computed" in meta:
+        return bool(meta.get("collision_computed"))
+    return collision_enabled
+
+
 def sync_event_review_for_list(locator) -> tuple[dict[str, Any], str]:
     """列表/元数据：无碰撞记录写入 event_review.json，状态与已复核一样常驻磁盘。"""
     review = load_event_review(locator)
@@ -381,6 +387,21 @@ def sync_event_review_for_list(locator) -> tuple[dict[str, Any], str]:
             pass
         status = resolve_event_review_status(review, event_count=0)
         return review, status
+
+    header: dict[str, Any] = {}
+    collision = meta.get("collision")
+    if collision is None:
+        try:
+            header = load_pose_header(locator)
+            collision = header.get("collision")
+        except (FileNotFoundError, json.JSONDecodeError, ValueError, OSError):
+            collision = None
+    collision_enabled = isinstance(collision, dict) and bool(collision.get("enabled"))
+    if not _collision_computed_from_meta(meta, collision_enabled):
+        cached_total = _parse_event_total(review)
+        status = resolve_event_review_status(review, event_count=cached_total)
+        return review, status
+
     cached_total = _parse_event_total(review)
     if is_persisted_review_terminal(review):
         status = persisted_event_review_status(review)
@@ -415,6 +436,7 @@ def record_summary_for_list(locator, paths: AppPaths | None = None) -> dict[str,
 
     collision = meta.get("collision") if meta.get("collision") is not None else header.get("collision")
     collision_enabled = isinstance(collision, dict) and bool(collision.get("enabled"))
+    collision_computed = _collision_computed_from_meta(meta, collision_enabled)
     frame_count = meta.get("frame_count") if meta.get("frame_count") is not None else header.get("frame_count")
 
     camera_slug = str(meta.get("camera_slug") or "").strip()
@@ -449,6 +471,7 @@ def record_summary_for_list(locator, paths: AppPaths | None = None) -> dict[str,
         "has_video": has_video,
         "has_stored_annotation": _has_annotation_fast(locator, video_stem, paths),
         "collision_enabled": collision_enabled,
+        "collision_computed": collision_computed,
         "event_review_status": review_status,
         "event_review_label": event_review_status_label(review_status),
         "event_review_verified_count": len(review.get("verified_true") or [])

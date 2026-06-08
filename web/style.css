@@ -696,6 +696,13 @@ h2 {
   color: #94a3b8;
 }
 
+.record-badge.collision-pending {
+  color: #fcd34d;
+  font-weight: 600;
+  border: 1px solid #854d0e;
+  background: rgba(66, 32, 6, 0.55);
+}
+
 .record-group-meta .record-badge {
   margin-right: 0.45rem;
 }

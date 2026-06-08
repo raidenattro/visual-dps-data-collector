@@ -857,6 +857,7 @@ async def collect_video(
     alarm_min_consecutive_frames: int = Form(0),
     alarm_cooldown_frames: int = Form(0),
     camera_label: str = Form(""),
+    skeleton_only: str = Form(""),
 ) -> dict[str, Any]:
     if not file.filename:
         raise HTTPException(400, "未选择文件")
@@ -913,6 +914,10 @@ async def collect_video(
         save_video if str(save_video).strip() else None,
         default=settings.save_video,
     )
+    skeleton_only_flag = parse_save_video_flag(
+        skeleton_only if str(skeleton_only).strip() else None,
+        default=False,
+    )
 
     upload_ann_path: Path | None = None
     camera_match_label: str | None = None
@@ -928,22 +933,33 @@ async def collect_video(
         with open(upload_ann_path, "wb") as out:
             shutil.copyfileobj(annotation.file, out)
 
-    try:
-        annotation_path, camera_match_label, resolved_slug = resolve_collect_annotation(
-            tmp_dir,
-            paths,
-            video_stem=video_stem,
-            camera_label=camera_label,
-            upload_ann_path=upload_ann_path,
-        )
-        if resolved_slug and camera_match_label:
-            camera_match_slug = resolved_slug
-    except HTTPException:
+    if skeleton_only_flag and upload_ann_path:
         shutil.rmtree(tmp_dir, ignore_errors=True)
-        raise
+        raise HTTPException(400, "仅计算骨架模式下请勿上传标注 JSON")
+
+    if skeleton_only_flag:
+        annotation_path = None
+        camera_match_label = cam_norm or None
+        if cam_norm:
+            cam_slug = allocate_camera_storage_slug(paths, cam_norm)
+            camera_match_slug = cam_slug
+    else:
+        try:
+            annotation_path, camera_match_label, resolved_slug = resolve_collect_annotation(
+                tmp_dir,
+                paths,
+                video_stem=video_stem,
+                camera_label=camera_label,
+                upload_ann_path=upload_ann_path,
+            )
+            if resolved_slug and camera_match_label:
+                camera_match_slug = resolved_slug
+        except HTTPException:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise
 
     cam_for_storage = camera_match_label or cam_norm
-    if cam_for_storage:
+    if cam_for_storage and not cam_slug:
         cam_slug = allocate_camera_storage_slug(paths, cam_for_storage)
         camera_match_slug = cam_slug
     pose_path = default_pose_json_path(
@@ -957,6 +973,8 @@ async def collect_video(
 
     if upload_ann_path:
         ann_source = "upload"
+    elif skeleton_only_flag:
+        ann_source = "skeleton_only"
     elif annotation_path is not None and upload_ann_path is None:
         ann_source = "reflection" if (camera_match_label or cam_norm) else "stored"
     else:
@@ -977,6 +995,7 @@ async def collect_video(
         camera_label=camera_match_label or cam_norm,
         camera_slug=camera_match_slug or cam_slug,
         annotation_source=ann_source,
+        skeleton_only=skeleton_only_flag,
     )
 
     set_job(job_id, {
@@ -1021,6 +1040,8 @@ async def collect_video(
         "pose_file": pose_path.name,
         "save_video": save_video_flag,
         "has_annotation": annotation_path is not None,
+        "collision_computed": annotation_path is not None and not skeleton_only_flag,
+        "skeleton_only": skeleton_only_flag,
         "video_stem": video_stem,
         "annotation_auto": annotation_path is not None and upload_ann_path is None,
         "alarm_min_consecutive_frames": settings.alarm_min_consecutive_frames,
@@ -1049,6 +1070,7 @@ async def collect_batch(
     save_video: str = Form(""),
     alarm_min_consecutive_frames: int = Form(0),
     alarm_cooldown_frames: int = Form(0),
+    skeleton_only: str = Form(""),
 ) -> dict[str, Any]:
     """同一机位文件夹内多视频顺序批处理，结果写入 json_dir/{camera_slug}/。"""
     cam = normalize_corner_label(camera_label) if normalize_corner_label else str(camera_label or "").strip()
@@ -1095,17 +1117,24 @@ async def collect_batch(
     tmp_dir = paths.upload_dir / f"batch_{batch_id}"
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
-    try:
-        annotation_path, _, _ = resolve_collect_annotation(
-            tmp_dir,
-            paths,
-            video_stem=sanitize_file_stem(Path(video_files[0].filename or "video").stem),
-            camera_label=cam,
-            upload_ann_path=None,
-        )
-    except HTTPException:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-        raise
+    skeleton_only_flag = parse_save_video_flag(
+        skeleton_only if str(skeleton_only).strip() else None,
+        default=False,
+    )
+
+    annotation_path: Path | None = None
+    if not skeleton_only_flag:
+        try:
+            annotation_path, _, _ = resolve_collect_annotation(
+                tmp_dir,
+                paths,
+                video_stem=sanitize_file_stem(Path(video_files[0].filename or "video").stem),
+                camera_label=cam,
+                upload_ann_path=None,
+            )
+        except HTTPException:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise
 
     batch_items: list[tuple[Path, str, str]] = []
     for i, uf in enumerate(video_files):
@@ -1147,7 +1176,8 @@ async def collect_batch(
         camera_label=cam,
         camera_slug=cam_slug,
         batch_id=batch_id,
-        annotation_source="reflection" if annotation_path else "",
+        annotation_source="skeleton_only" if skeleton_only_flag else ("reflection" if annotation_path else ""),
+        skeleton_only=skeleton_only_flag,
     )
 
     set_job(batch_id, {

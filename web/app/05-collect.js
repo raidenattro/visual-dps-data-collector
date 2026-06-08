@@ -215,8 +215,27 @@ async function resolveCollectAnnotationSource(file, annFile) {
   };
 }
 
+function isCollectSkeletonOnly() {
+  return !!$("#collect-skeleton-only")?.checked;
+}
+
+function setCollectSkeletonOnlyUi() {
+  const sk = isCollectSkeletonOnly();
+  $("#collect-annotation-wrap")?.classList.toggle("hidden", sk);
+  $("#collect-annotation-status")?.classList.toggle("hidden", sk);
+  document.querySelector("fieldset.collision-config")?.classList.toggle("hidden", sk);
+  if (sk && collectAnnotationStatus) {
+    collectAnnotationStatus.innerHTML = "";
+  }
+}
+
 async function refreshCollectAnnotationHint() {
   if (!collectAnnotationStatus) return;
+  if (isCollectSkeletonOnly()) {
+    collectAnnotationStatus.classList.remove("hidden");
+    collectAnnotationStatus.innerHTML = "ℹ️ 仅计算骨架：无需标注 JSON，采集后回放列表将显示「碰撞未计算」。";
+    return;
+  }
   const annFile = $("#collect-annotation")?.files?.[0];
   if (isCollectBatchMode()) {
     collectAnnotationStatus.classList.remove("hidden");
@@ -301,6 +320,11 @@ $("#collect-camera-label")?.addEventListener("change", () => {
 $("#collect-annotation")?.addEventListener("change", () => {
   void refreshCollectAnnotationHint();
 });
+$("#collect-skeleton-only")?.addEventListener("change", () => {
+  setCollectSkeletonOnlyUi();
+  void refreshCollectAnnotationHint();
+});
+setCollectSkeletonOnlyUi();
 
 function showStatus(html, isError = false) {
   collectStatus.classList.remove("hidden", "error");
@@ -401,6 +425,7 @@ function readCollectFormParams() {
     pose_frame_interval: $("#collect-interval").value || "1",
     max_pose_frames: $("#collect-max").value || "0",
     save_video: $("#collect-save-video").checked ? "1" : "0",
+    skeleton_only: isCollectSkeletonOnly() ? "1" : "0",
     alarm_min_consecutive_frames: String(collisionCfg.alarm_min_consecutive_frames),
     alarm_cooldown_frames: String(collisionCfg.alarm_cooldown_frames),
   };
@@ -415,6 +440,7 @@ function appendCollectParams(fd, params) {
   fd.append("pose_frame_interval", params.pose_frame_interval);
   fd.append("max_pose_frames", params.max_pose_frames);
   fd.append("save_video", params.save_video);
+  fd.append("skeleton_only", params.skeleton_only);
   fd.append("alarm_min_consecutive_frames", params.alarm_min_consecutive_frames);
   fd.append("alarm_cooldown_frames", params.alarm_cooldown_frames);
 }
@@ -430,25 +456,34 @@ collectForm.addEventListener("submit", async (e) => {
   }
 
   const annFile = $("#collect-annotation").files[0];
-  const annCheck = await resolveCollectAnnotationSource(file, annFile);
-  if (!annCheck.ok) {
-    showStatus(`❌ ${annCheck.message}`, true);
-    void refreshCollectAnnotationHint();
-    return;
+  const skeletonOnly = isCollectSkeletonOnly();
+  let annCheck = { ok: true, source: "skeleton_only" };
+  if (!skeletonOnly) {
+    annCheck = await resolveCollectAnnotationSource(file, annFile);
+    if (!annCheck.ok) {
+      showStatus(`❌ ${annCheck.message}`, true);
+      void refreshCollectAnnotationHint();
+      return;
+    }
   }
 
   const fd = new FormData();
   fd.append("file", file);
   const params = readCollectFormParams();
   appendCollectParams(fd, params);
-  if (annFile) fd.append("annotation", annFile);
   const cameraLabel = getCollectCameraLabel();
-  if (cameraLabel && annCheck.source === "camera") fd.append("camera_label", cameraLabel);
+  if (!skeletonOnly) {
+    if (annFile) fd.append("annotation", annFile);
+    if (cameraLabel && annCheck.source === "camera") fd.append("camera_label", cameraLabel);
+  } else if (cameraLabel) {
+    fd.append("camera_label", cameraLabel);
+  }
 
   collectBtn.disabled = true;
   const savingVideo = $("#collect-save-video").checked;
-  const annNote =
-    annCheck.source === "camera"
+  const annNote = skeletonOnly
+    ? "（仅骨架）"
+    : annCheck.source === "camera"
       ? "（机位标注 + 碰撞事件）"
       : annCheck.source === "stored"
         ? "（已存标注 + 碰撞事件）"
@@ -468,14 +503,15 @@ collectForm.addEventListener("submit", async (e) => {
     const rid = job.record_id || body.record_id || job.job_id;
     collectResult.classList.remove("hidden");
     const hasVideo = job.has_video || savingVideo;
-    const hasAnn = job.has_annotation || body.has_annotation;
-    const annNote = body.annotation_auto
-      ? " · 已关联已存标注 · 碰撞已落盘"
-      : hasAnn
-        ? " · 碰撞已落盘"
-        : "";
+    const annNoteResult = skeletonOnly
+      ? " · 碰撞未计算"
+      : body.annotation_auto
+        ? " · 已关联已存标注 · 碰撞已落盘"
+        : job.has_annotation || body.has_annotation
+          ? " · 碰撞已落盘"
+          : "";
     collectResult.innerHTML = `
-      <p>✅ 已保存至 <code>localdata/json</code>${hasVideo ? " 与 <code>localdata/video</code>" : ""}${annNote}，共 <strong>${job.frame_count ?? "?"}</strong> 帧</p>
+      <p>✅ 已保存至 <code>localdata/json</code>${hasVideo ? " 与 <code>localdata/video</code>" : ""}${annNoteResult}，共 <strong>${job.frame_count ?? "?"}</strong> 帧</p>
       <p><a href="${job.pose_url}" download>下载 JSON</a> · 管理记录与骨架回放请到「回放」页</p>`;
     hideStatus();
     loadRecords();
@@ -492,23 +528,37 @@ collectBatchBtn?.addEventListener("click", async () => {
     showStatus("请选择包含视频的文件夹", true);
     return;
   }
-  const annCheck = await resolveCollectAnnotationForBatch();
-  if (!annCheck.ok) {
-    showStatus(`❌ ${annCheck.message}`, true);
-    return;
+  const skeletonOnly = isCollectSkeletonOnly();
+  let batchCamera = getCollectCameraLabel();
+  if (!skeletonOnly) {
+    const annCheck = await resolveCollectAnnotationForBatch();
+    if (!annCheck.ok) {
+      showStatus(`❌ ${annCheck.message}`, true);
+      return;
+    }
+    batchCamera = batchCamera || annCheck.camera || "";
+  } else {
+    if (!batchCamera) {
+      showStatus("批处理仅骨架模式仍需选择机位标识（用于子目录）", true);
+      return;
+    }
   }
 
   const fd = new FormData();
   for (const f of files) {
     fd.append("files", f, f.webkitRelativePath || f.name);
   }
-  fd.append("camera_label", getCollectCameraLabel() || annCheck.camera);
+  fd.append("camera_label", batchCamera);
   const params = readCollectFormParams();
   appendCollectParams(fd, params);
 
   collectBatchBtn.disabled = true;
   collectBtn.disabled = true;
-  showStatus(`上传并批处理 ${files.length} 个视频…`);
+  showStatus(
+    skeletonOnly
+      ? `上传并批处理 ${files.length} 个视频（仅骨架）…`
+      : `上传并批处理 ${files.length} 个视频…`
+  );
 
   try {
     const res = await fetch("/api/collect/batch", { method: "POST", body: fd });
