@@ -76,6 +76,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="visual-dps 标注 JSON；未指定则使用 annotations/{视频主名}.json（必填其一）",
     )
+    p.add_argument("--collision-method", default=None, help="wrist_point 或 hand_state")
     p.add_argument(
         "--no-save-video",
         action="store_true",
@@ -109,6 +110,7 @@ def main(argv: list[str] | None = None) -> int:
             "frame_rate": args.frame_rate,
             "save_video": save_video_cli,
             "det_variant": args.det_variant,
+            "collision_method": args.collision_method,
         },
     )
 
@@ -166,6 +168,8 @@ def main(argv: list[str] | None = None) -> int:
         annotation_path=annotation_path,
         alarm_min_consecutive_frames=settings.alarm_min_consecutive_frames,
         alarm_cooldown_frames=settings.alarm_cooldown_frames,
+        collision_method=settings.collision_method,
+        collision_params=settings.collision_params,
     )
     pose_path = Path(settings.output)
     ann_src = Path(annotation_path)

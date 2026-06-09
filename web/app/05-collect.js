@@ -426,8 +426,10 @@ function readCollectFormParams() {
     max_pose_frames: $("#collect-max").value || "0",
     save_video: $("#collect-save-video").checked ? "1" : "0",
     skeleton_only: isCollectSkeletonOnly() ? "1" : "0",
-    alarm_min_consecutive_frames: String(collisionCfg.alarm_min_consecutive_frames),
-    alarm_cooldown_frames: String(collisionCfg.alarm_cooldown_frames),
+    collision_method: collisionCfg.method || "wrist_point",
+    collision_params: JSON.stringify(collisionCfg),
+    alarm_min_consecutive_frames: String(collisionCfg.alarm_min_consecutive_frames ?? 3),
+    alarm_cooldown_frames: String(collisionCfg.alarm_cooldown_frames ?? collisionCfg.cooldown_frames ?? 6),
   };
 }
 
@@ -441,6 +443,8 @@ function appendCollectParams(fd, params) {
   fd.append("max_pose_frames", params.max_pose_frames);
   fd.append("save_video", params.save_video);
   fd.append("skeleton_only", params.skeleton_only);
+  fd.append("collision_method", params.collision_method);
+  fd.append("collision_params", params.collision_params);
   fd.append("alarm_min_consecutive_frames", params.alarm_min_consecutive_frames);
   fd.append("alarm_cooldown_frames", params.alarm_cooldown_frames);
 }

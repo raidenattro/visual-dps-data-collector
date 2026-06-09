@@ -34,6 +34,58 @@ function pointInPolygon(point, polygon) {
   return inside;
 }
 
+function distPointToSegment(p, a, b) {
+  const px = Number(p[0]), py = Number(p[1]);
+  const ax = Number(a[0]), ay = Number(a[1]);
+  const bx = Number(b[0]), by = Number(b[1]);
+  const dx = bx - ax, dy = by - ay;
+  const len2 = dx * dx + dy * dy || 1e-9;
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2));
+  const x = ax + t * dx, y = ay + t * dy;
+  return Math.hypot(px - x, py - y);
+}
+
+function pointToPolygonDistance(p, polygon) {
+  if (!Array.isArray(polygon) || polygon.length < 3) return Infinity;
+  let best = Infinity;
+  for (let i = 0; i < polygon.length; i++) {
+    best = Math.min(best, distPointToSegment(p, polygon[i], polygon[(i + 1) % polygon.length]));
+  }
+  return best;
+}
+
+function segmentsIntersect(a, b, c, d) {
+  const orient = (p, q, r) => (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
+  const onSeg = (p, q, r) =>
+    Math.min(p[0], r[0]) - 1e-6 <= q[0] && q[0] <= Math.max(p[0], r[0]) + 1e-6 &&
+    Math.min(p[1], r[1]) - 1e-6 <= q[1] && q[1] <= Math.max(p[1], r[1]) + 1e-6;
+  const o1 = orient(a, b, c), o2 = orient(a, b, d), o3 = orient(c, d, a), o4 = orient(c, d, b);
+  if ((o1 > 0) !== (o2 > 0) && (o3 > 0) !== (o4 > 0)) return true;
+  return (
+    Math.abs(o1) <= 1e-6 && onSeg(a, c, b) ||
+    Math.abs(o2) <= 1e-6 && onSeg(a, d, b) ||
+    Math.abs(o3) <= 1e-6 && onSeg(c, a, d) ||
+    Math.abs(o4) <= 1e-6 && onSeg(c, b, d)
+  );
+}
+
+function segmentIntersectsPolygon(a, b, polygon) {
+  if (pointInPolygon(a, polygon) || pointInPolygon(b, polygon)) return true;
+  for (let i = 0; i < polygon.length; i++) {
+    if (segmentsIntersect(a, b, polygon[i], polygon[(i + 1) % polygon.length])) return true;
+  }
+  return false;
+}
+
+function polygonArea(points) {
+  let area = 0;
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i], b = points[(i + 1) % points.length];
+    area += Number(a[0]) * Number(b[1]) - Number(b[0]) * Number(a[1]);
+  }
+  return Math.abs(area) / 2;
+}
+
 /** 回放时实时碰撞（与 event_engine/collision 逻辑一致：手腕 9/10，score>0.3） */
 class PlaybackCollisionTracker {
   constructor(minConsecutive = 3, cooldownFrames = 6) {
@@ -100,7 +152,7 @@ class PlaybackCollisionTracker {
           ]);
         }
         const token = boxCollisionToken(box);
-        return token ? { token, inferPts } : null;
+        return token ? { token, inferPts, scale: Math.sqrt(Math.max(1, polygonArea(inferPts))) } : null;
       })
       .filter(Boolean);
     this.boxCacheKey = key;
@@ -152,6 +204,132 @@ class PlaybackCollisionTracker {
   }
 }
 
+class PlaybackHandStateCollisionTracker extends PlaybackCollisionTracker {
+  constructor(cfg = {}) {
+    super(3, cfg.cooldown_frames || 30);
+    this.cfg = { ...COLLISION_METHOD_DEFAULTS.hand_state, ...cfg, method: "hand_state" };
+    this.states = new Map();
+    this.runtime = new Map();
+  }
+
+  reset() {
+    super.reset();
+    this.states = new Map();
+    this.runtime = new Map();
+  }
+
+  update(frame, inferW, inferH) {
+    const boxes = this.getBoxesInInferSpace(inferW, inferH);
+    if (!boxes.length) return { collisions: [], alarm_collisions: [] };
+    const frameIdx = Number(frame?.frame_idx ?? frame?.source_frame_idx ?? 0);
+    const active = new Set();
+    const alarms = new Set();
+    (frame?.persons || []).forEach((person, pIdx) => {
+      const trackId = person?.person_track_id ?? person?.person_id ?? pIdx;
+      const kpts = person?.keypoints || [];
+      [
+        ["left", 7, 9],
+        ["right", 8, 10],
+      ].forEach(([hand, elbowI, wristI]) => {
+        const key = `${trackId}:${hand}`;
+        const signal = this.observeHand(key, kpts, Number(elbowI), Number(wristI), boxes);
+        const result = this.updateState(key, signal, frameIdx);
+        result.active.forEach((t) => active.add(t));
+        result.alarms.forEach((t) => alarms.add(t));
+      });
+    });
+    return { collisions: [...active], alarm_collisions: [...alarms] };
+  }
+
+  observeHand(key, kpts, elbowI, wristI, boxes) {
+    const elbow = kpts[elbowI];
+    const wrist = kpts[wristI];
+    if (!elbow || !wrist || elbow.length < 3 || wrist.length < 3) return { obs: "UNKNOWN" };
+    const e = [Number(elbow[0]), Number(elbow[1]), Number(elbow[2])];
+    const w = [Number(wrist[0]), Number(wrist[1]), Number(wrist[2])];
+    if (w[2] < this.cfg.wrist_score_min || e[2] < this.cfg.elbow_score_min) return { obs: "UNKNOWN" };
+    const rt = this.runtime.get(key) || {};
+    const scale = this.personScale(kpts);
+    const forearmLen = Math.max(1e-6, Math.hypot(w[0] - e[0], w[1] - e[1]));
+    const jump = rt.prevWrist ? Math.hypot(w[0] - rt.prevWrist[0], w[1] - rt.prevWrist[1]) / scale : 0;
+    const ratio = rt.forearmLen ? forearmLen / rt.forearmLen : 1;
+    const jumpBad = jump > this.cfg.jump_max;
+    const limbBad = ratio < this.cfg.forearm_min_ratio || ratio > this.cfg.forearm_max_ratio;
+    if (!jumpBad) {
+      this.runtime.set(key, {
+        prevWrist: [w[0], w[1]],
+        forearmLen: rt.forearmLen ? rt.forearmLen * 0.75 + forearmLen * 0.25 : forearmLen,
+      });
+    }
+    if (jumpBad || limbBad) return { obs: "UNKNOWN" };
+    const scored = boxes.map((box) => {
+      const wristIn = pointInPolygon([w[0], w[1]], box.inferPts);
+      const forearmHit = segmentIntersectsPolygon([e[0], e[1]], [w[0], w[1]], box.inferPts);
+      const near = pointToPolygonDistance([w[0], w[1]], box.inferPts) <= box.scale * this.cfg.near_edge_ratio;
+      const score = 0.55 * Number(wristIn) + 0.30 * Number(forearmHit) + 0.15 * Number(near);
+      return { token: box.token, score };
+    }).sort((a, b) => b.score - a.score);
+    const best = scored[0];
+    if (!best) return { obs: "NO_HIT" };
+    const second = scored[1]?.score ?? -1;
+    if (best.score >= this.cfg.hit_threshold && best.score - second >= this.cfg.box_margin) {
+      return { obs: "HIT", token: best.token, score: best.score };
+    }
+    if (best.score >= this.cfg.hit_threshold) return { obs: "UNKNOWN", token: best.token };
+    return { obs: "NO_HIT" };
+  }
+
+  personScale(kpts) {
+    const pts = (kpts || []).filter((k) => k && k.length >= 3 && Number(k[2]) > 0.2);
+    if (!pts.length) return 100;
+    const xs = pts.map((p) => Number(p[0]));
+    const ys = pts.map((p) => Number(p[1]));
+    return Math.max(20, Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+  }
+
+  updateState(key, signal, frameIdx) {
+    const st = this.states.get(key) || { state: "IDLE", token: "", history: [], stateFrame: 0, cooldownUntil: 0 };
+    st.history.push(signal);
+    st.history = st.history.slice(-16);
+    const active = new Set();
+    const alarms = new Set();
+    if (st.state === "COOLDOWN") {
+      if (frameIdx >= st.cooldownUntil) st.state = "IDLE";
+      else {
+        this.states.set(key, st);
+        return { active, alarms };
+      }
+    }
+    if (st.state === "IDLE") {
+      if (signal.obs === "HIT") Object.assign(st, { state: "ENTER_PENDING", token: signal.token, stateFrame: frameIdx });
+    } else if (st.state === "ENTER_PENDING") {
+      active.add(st.token);
+      const win = st.history.slice(-this.cfg.enter_window_frames);
+      const same = win.filter((s) => s.obs === "HIT" && s.token === st.token).length;
+      const other = win.filter((s) => s.obs === "HIT" && s.token && s.token !== st.token).length;
+      if (same >= this.cfg.enter_min_hits && other <= 1) Object.assign(st, { state: "INSIDE", stateFrame: frameIdx });
+      else if (frameIdx - st.stateFrame > this.cfg.enter_timeout_frames) Object.assign(st, { state: "IDLE", token: "", history: [] });
+    } else if (st.state === "INSIDE") {
+      active.add(st.token);
+      if (frameIdx - st.stateFrame > this.cfg.max_inside_frames) Object.assign(st, { state: "IDLE", token: "", history: [] });
+      else if (signal.obs !== "UNKNOWN" && !(signal.obs === "HIT" && signal.token === st.token)) Object.assign(st, { state: "EXIT_PENDING", stateFrame: frameIdx });
+    } else if (st.state === "EXIT_PENDING") {
+      active.add(st.token);
+      if (signal.obs === "HIT" && signal.token === st.token) Object.assign(st, { state: "INSIDE", stateFrame: frameIdx });
+      else {
+        const win = st.history.slice(-this.cfg.exit_window_frames);
+        const releases = win.filter((s) => s.obs !== "UNKNOWN" && !(s.obs === "HIT" && s.token === st.token)).length;
+        if (releases >= this.cfg.exit_min_releases) {
+          alarms.add(st.token);
+          Object.assign(st, { state: "COOLDOWN", cooldownUntil: frameIdx + this.cfg.cooldown_frames, stateFrame: frameIdx });
+        } else if (frameIdx - st.stateFrame > this.cfg.exit_timeout_frames) Object.assign(st, { state: "IDLE", token: "", history: [] });
+      }
+    }
+    this.states.set(key, st);
+    return { active, alarms };
+  }
+}
+
 let playbackCollisionTracker = null;
 
 function resetPlaybackCollisionTracker() {
@@ -161,10 +339,9 @@ function resetPlaybackCollisionTracker() {
 function getPlaybackCollisionTracker() {
   if (!playbackCollisionTracker) {
     const cfg = getEffectiveCollisionConfig();
-    playbackCollisionTracker = new PlaybackCollisionTracker(
-      cfg.alarm_min_consecutive_frames,
-      cfg.alarm_cooldown_frames
-    );
+    playbackCollisionTracker = normalizeCollisionMethod(cfg.method) === "hand_state"
+      ? new PlaybackHandStateCollisionTracker(cfg)
+      : new PlaybackCollisionTracker(cfg.alarm_min_consecutive_frames, cfg.alarm_cooldown_frames);
   }
   return playbackCollisionTracker;
 }

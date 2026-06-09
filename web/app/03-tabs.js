@@ -24,11 +24,3 @@ tabs.forEach((btn) => {
 $("#collect-fps")?.addEventListener("input", () => {
   $("#collect-fps").dataset.userTouched = "1";
 });
-$("#collect-alarm-min")?.addEventListener("change", () => {
-  saveCollisionConfigToStorage(readCollisionConfigFromForm());
-  resetPlaybackCollisionTracker();
-});
-$("#collect-alarm-cooldown")?.addEventListener("change", () => {
-  saveCollisionConfigToStorage(readCollisionConfigFromForm());
-  resetPlaybackCollisionTracker();
-});

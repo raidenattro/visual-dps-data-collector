@@ -63,6 +63,11 @@ from api.constants import VIDEO_MIME
 from api.job_store import get_job, set_job
 from annotation_store import annotation_path_for_video_stem
 from api.collision_recompute_service import recompute_records_collisions
+from event_engine.collision_methods import (
+    build_collision_params,
+    default_collision_params,
+    normalize_collision_method,
+)
 from api.record_service import (
     annotation_frame_size,
     annotation_path_for_record,
@@ -90,6 +95,19 @@ router = APIRouter()
 
 def _parse_record_ids_param(raw: str) -> list[str]:
     return [p.strip() for p in str(raw or "").replace(";", ",").split(",") if p.strip()]
+
+
+def _parse_collision_params_form(raw: str) -> dict[str, Any]:
+    text = str(raw or "").strip()
+    if not text:
+        return {}
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(400, f"collision_params 不是有效 JSON: {exc}") from exc
+    if not isinstance(data, dict):
+        raise HTTPException(400, "collision_params 必须是 JSON object")
+    return data
 
 
 def _annotation_save_message(saved_stem: str, requested_stem: str, *, preserved: bool) -> str:
@@ -128,11 +146,40 @@ def get_inference_config() -> dict[str, Any]:
     """采集页默认推理/碰撞参数（来自 config.json inference 节点）。"""
     cfg = load_config_file(resolve_config_path(None))
     inference = cfg.get("inference") if isinstance(cfg.get("inference"), dict) else {}
+    collision_cfg = inference.get("collision") if isinstance(inference.get("collision"), dict) else {}
+    method = normalize_collision_method(
+        inference.get("collision_method") or collision_cfg.get("method") or "wrist_point"
+    )
+    raw_collision_params = (
+        inference.get("collision_params") if isinstance(inference.get("collision_params"), dict) else collision_cfg
+    )
+    if isinstance(raw_collision_params, dict) and isinstance(raw_collision_params.get(method), dict):
+        raw_collision_params = raw_collision_params.get(method) or {}
+    current_params = build_collision_params(
+        method,
+        raw_collision_params,
+        alarm_min_consecutive_frames=max(
+            1, int(inference.get("alarm_min_consecutive_frames") or 3)
+        ),
+        alarm_cooldown_frames=max(1, int(inference.get("alarm_cooldown_frames") or 6)),
+    )
     return {
         "frame_rate": float(inference.get("frame_rate") or 0),
         "height": int(inference.get("height") or 480),
         "pose_frame_interval": int(inference.get("pose_frame_interval") or 1),
         "max_pose_frames": int(inference.get("max_pose_frames") or 0),
+        "collision_method": method,
+        "collision_params": current_params,
+        "collision_methods": {
+            "wrist_point": {
+                "label": "手腕点连续帧",
+                "params": default_collision_params("wrist_point"),
+            },
+            "hand_state": {
+                "label": "同手同箱状态机",
+                "params": default_collision_params("hand_state"),
+            },
+        },
         "alarm_min_consecutive_frames": max(
             1, int(inference.get("alarm_min_consecutive_frames") or 3)
         ),
@@ -184,10 +231,21 @@ def lookup_reflection_camera(camera: str = "") -> dict[str, Any]:
 
 
 @router.get("/api/records")
-def list_records(summary: bool = True) -> list[dict[str, Any]]:
+def list_records(
+    summary: bool = True,
+    offset: int = 0,
+    limit: int = 0,
+) -> list[dict[str, Any]]:
+    """列出采集记录。默认返回全部；offset/limit 供前端分页拉取。"""
     paths = resolve_app_paths()
     paths.json_dir.mkdir(parents=True, exist_ok=True)
-    locators = iter_active_records(paths.json_dir)[:500]
+    locators = iter_active_records(paths.json_dir)
+    off = max(0, int(offset))
+    if off:
+        locators = locators[off:]
+    lim = int(limit)
+    if lim > 0:
+        locators = locators[:lim]
     if summary:
         items = [record_summary_for_list(loc, paths) for loc in locators]
     else:
@@ -473,6 +531,8 @@ async def recompute_record_collisions_api(
             ann_path,
             locate_record=locate_record_by_id,
             video_stem=ann_stem or ann_path.stem,
+            collision_method=payload.get("collision_method") or payload.get("method"),
+            collision_params=payload.get("collision_params") if isinstance(payload.get("collision_params"), dict) else None,
         )
     except (OSError, ValueError, RuntimeError) as exc:
         raise HTTPException(500, str(exc)) from exc
@@ -856,6 +916,8 @@ async def collect_video(
     save_video: str = Form(""),
     alarm_min_consecutive_frames: int = Form(0),
     alarm_cooldown_frames: int = Form(0),
+    collision_method: str = Form(""),
+    collision_params: str = Form(""),
     camera_label: str = Form(""),
     skeleton_only: str = Form(""),
 ) -> dict[str, Any]:
@@ -884,6 +946,8 @@ async def collect_video(
             "alarm_cooldown_frames": alarm_cooldown_frames
             if int(alarm_cooldown_frames) > 0
             else None,
+            "collision_method": collision_method or None,
+            "collision_params": _parse_collision_params_form(collision_params),
         },
     )
 
@@ -990,6 +1054,8 @@ async def collect_video(
         frame_rate=infer_frame_rate,
         max_pose_frames=max_f,
         save_video=save_video_flag,
+        collision_method=settings.collision_method,
+        collision_params=settings.collision_params,
         alarm_min_consecutive_frames=settings.alarm_min_consecutive_frames,
         alarm_cooldown_frames=settings.alarm_cooldown_frames,
         camera_label=camera_match_label or cam_norm,
@@ -1026,6 +1092,8 @@ async def collect_video(
         max_pose_frames=max_f,
         save_video=save_video_flag,
         annotation_path=annotation_path,
+        collision_method=settings.collision_method,
+        collision_params=settings.collision_params,
         alarm_min_consecutive_frames=settings.alarm_min_consecutive_frames,
         alarm_cooldown_frames=settings.alarm_cooldown_frames,
         camera_label=camera_match_label or cam_norm,
@@ -1046,6 +1114,8 @@ async def collect_video(
         "annotation_auto": annotation_path is not None and upload_ann_path is None,
         "alarm_min_consecutive_frames": settings.alarm_min_consecutive_frames,
         "alarm_cooldown_frames": settings.alarm_cooldown_frames,
+        "collision_method": settings.collision_method,
+        "collision_params": settings.collision_params,
     }
     if camera_match_label or cam_norm:
         resp["camera_label"] = camera_match_label or cam_norm
@@ -1070,6 +1140,8 @@ async def collect_batch(
     save_video: str = Form(""),
     alarm_min_consecutive_frames: int = Form(0),
     alarm_cooldown_frames: int = Form(0),
+    collision_method: str = Form(""),
+    collision_params: str = Form(""),
     skeleton_only: str = Form(""),
 ) -> dict[str, Any]:
     """同一机位文件夹内多视频顺序批处理，结果写入 json_dir/{camera_slug}/。"""
@@ -1109,6 +1181,8 @@ async def collect_batch(
             "alarm_cooldown_frames": alarm_cooldown_frames
             if int(alarm_cooldown_frames) > 0
             else None,
+            "collision_method": collision_method or None,
+            "collision_params": _parse_collision_params_form(collision_params),
         },
     )
 
@@ -1171,6 +1245,8 @@ async def collect_batch(
         frame_rate=infer_frame_rate,
         max_pose_frames=max_f,
         save_video=save_video_flag,
+        collision_method=settings.collision_method,
+        collision_params=settings.collision_params,
         alarm_min_consecutive_frames=settings.alarm_min_consecutive_frames,
         alarm_cooldown_frames=settings.alarm_cooldown_frames,
         camera_label=cam,
@@ -1212,6 +1288,8 @@ async def collect_batch(
         frame_rate=infer_frame_rate,
         max_pose_frames=max_f,
         save_video=save_video_flag,
+        collision_method=settings.collision_method,
+        collision_params=settings.collision_params,
         alarm_min_consecutive_frames=settings.alarm_min_consecutive_frames,
         alarm_cooldown_frames=settings.alarm_cooldown_frames,
     )

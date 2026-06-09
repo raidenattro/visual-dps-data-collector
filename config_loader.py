@@ -249,6 +249,8 @@ class CollectSettings:
     frame_rate: float
     max_pose_frames: int | None
     save_video: bool
+    collision_method: str
+    collision_params: dict[str, Any]
     alarm_min_consecutive_frames: int
     alarm_cooldown_frames: int
 
@@ -575,6 +577,28 @@ def build_settings(*, config_path: Path, cli: dict[str, Any]) -> CollectSettings
             12,
         ),
     )
+    collision_cfg = inference.get("collision") if isinstance(inference.get("collision"), dict) else {}
+    collision_method = str(
+        cli.get("collision_method")
+        or inference.get("collision_method")
+        or inference.get("collision_method_name")
+        or collision_cfg.get("method")
+        or ""
+    ).strip() or "wrist_point"
+    collision_params: dict[str, Any] = {}
+    if isinstance(collision_cfg, dict):
+        collision_params.update(collision_cfg)
+    if isinstance(inference.get("collision_params"), dict):
+        raw_params = inference.get("collision_params") or {}
+        if isinstance(raw_params.get(collision_method), dict):
+            collision_params.update(raw_params.get(collision_method) or {})
+        else:
+            collision_params.update(raw_params)
+    if isinstance(cli.get("collision_params"), dict):
+        collision_params.update(cli.get("collision_params") or {})
+    collision_params["method"] = collision_method
+    collision_params["alarm_min_consecutive_frames"] = alarm_min
+    collision_params["alarm_cooldown_frames"] = alarm_cooldown
 
     return CollectSettings(
         config_path=config_path.resolve(),
@@ -593,6 +617,8 @@ def build_settings(*, config_path: Path, cli: dict[str, Any]) -> CollectSettings
         frame_rate=frame_rate,
         max_pose_frames=max_pose_frames,
         save_video=save_video,
+        collision_method=collision_method,
+        collision_params=collision_params,
         alarm_min_consecutive_frames=alarm_min,
         alarm_cooldown_frames=alarm_cooldown,
     )

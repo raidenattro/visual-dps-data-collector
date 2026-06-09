@@ -323,18 +323,46 @@ function renderPlaybackRecordsList(items) {
   if (keepId) highlightPlaybackRecordInList(keepId);
 }
 
+/** 分页拉取全部记录（避免服务端/单次响应条数上限） */
+async function fetchAllRecordSummaries({ onProgress = null } = {}) {
+  const pageSize = 500;
+  const all = [];
+  for (let offset = 0; ; offset += pageSize) {
+    const res = await fetch(
+      `/api/records?summary=1&offset=${offset}&limit=${pageSize}`
+    );
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || res.statusText || "加载记录失败");
+    }
+    const batch = await res.json();
+    if (!Array.isArray(batch) || batch.length === 0) break;
+    all.push(...batch);
+    if (typeof onProgress === "function") onProgress(all.length);
+    if (batch.length < pageSize) break;
+  }
+  return all;
+}
+
 async function loadRecords({ quiet = false } = {}) {
   const list = $("#session-list");
   if (!quiet && !playbackRecordsCache.length) {
     list.innerHTML = "<p class='hint playback-records-empty'>加载记录中…</p>";
   }
   try {
-    const res = await fetch("/api/records?summary=1");
-    const items = await res.json();
+    const items = await fetchAllRecordSummaries({
+      onProgress: (n) => {
+        if (quiet || playbackRecordsCache.length) return;
+        if (list) {
+          list.innerHTML = `<p class='hint playback-records-empty'>加载记录中…已获取 ${n} 条</p>`;
+        }
+      },
+    });
     playbackRecordsCache = items;
     renderPlaybackRecordsList(items);
-  } catch {
-    list.innerHTML = "<p class='hint playback-records-empty'>无法加载列表</p>";
+  } catch (err) {
+    const msg = err?.message ? `无法加载列表：${err.message}` : "无法加载列表";
+    if (list) list.innerHTML = `<p class='hint playback-records-empty'>${msg}</p>`;
   }
 }
 

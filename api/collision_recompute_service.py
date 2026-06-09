@@ -13,7 +13,7 @@ from event_engine.annotation_boxes import (
     load_annotation_config,
     load_scaled_boxes,
 )
-from event_engine.collision import CollisionProcessor
+from event_engine.collision_methods import build_collision_params, create_collision_processor
 from pose_store import (
     STORAGE_V1_JSON,
     STORAGE_V2_PARQUET,
@@ -43,14 +43,20 @@ def _infer_size_from_frames(frames: list[dict[str, Any]], manifest: dict[str, An
     return 640, 480
 
 
-def _collision_params(manifest: dict[str, Any]) -> tuple[int, int, float]:
+def _collision_params(manifest: dict[str, Any]) -> tuple[dict[str, Any], float]:
     collision_cfg = manifest.get("collision") if isinstance(manifest.get("collision"), dict) else {}
     alarm_min = int(collision_cfg.get("alarm_min_consecutive_frames") or 3)
     alarm_cd = int(collision_cfg.get("alarm_cooldown_frames") or 6)
     fps = float(manifest.get("fps") or 15.0)
     if fps <= 0:
         fps = 15.0
-    return alarm_min, alarm_cd, fps
+    params = build_collision_params(
+        collision_cfg.get("method") or "wrist_point",
+        collision_cfg,
+        alarm_min_consecutive_frames=alarm_min,
+        alarm_cooldown_frames=alarm_cd,
+    )
+    return params, fps
 
 
 def _build_annotation_meta(
@@ -80,6 +86,8 @@ def recompute_record_collisions(
     video_stem: str = "",
     alarm_min_consecutive_frames: int | None = None,
     alarm_cooldown_frames: int | None = None,
+    collision_method: str | None = None,
+    collision_params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """不重跑骨架推理，仅按新 ROI 重算 collisions / alarm_collisions。"""
     if not annotation_path.is_file():
@@ -95,16 +103,21 @@ def recompute_record_collisions(
     if not scaled_boxes:
         raise ValueError(f"标注无有效货框: {annotation_path.name}")
 
-    alarm_min, alarm_cd, fps = _collision_params(manifest)
+    params, fps = _collision_params(manifest)
     if alarm_min_consecutive_frames is not None:
-        alarm_min = max(1, int(alarm_min_consecutive_frames))
+        params["alarm_min_consecutive_frames"] = max(1, int(alarm_min_consecutive_frames))
     if alarm_cooldown_frames is not None:
-        alarm_cd = max(1, int(alarm_cooldown_frames))
+        params["alarm_cooldown_frames"] = max(1, int(alarm_cooldown_frames))
+    if collision_method:
+        params["method"] = collision_method
+    if isinstance(collision_params, dict):
+        params.update(collision_params)
+    params = build_collision_params(params.get("method"), params)
 
-    processor = CollisionProcessor(
+    processor = create_collision_processor(
         scaled_boxes,
-        alarm_min_consecutive_frames=alarm_min,
-        alarm_cooldown_frames=alarm_cd,
+        method=params.get("method"),
+        params=params,
         video_fps=fps,
     )
 
@@ -125,8 +138,7 @@ def recompute_record_collisions(
     annotation_meta = _build_annotation_meta(annotation_path, infer_w=infer_w, infer_h=infer_h)
     collision_meta = {
         "enabled": True,
-        "alarm_min_consecutive_frames": alarm_min,
-        "alarm_cooldown_frames": alarm_cd,
+        **params,
         "recomputed_at": datetime.now(timezone.utc).isoformat(),
         "recomputed_from_annotation": annotation_path.name,
         "skeleton_reused": True,
@@ -197,6 +209,8 @@ def recompute_records_collisions(
     video_stem: str = "",
     alarm_min_consecutive_frames: int | None = None,
     alarm_cooldown_frames: int | None = None,
+    collision_method: str | None = None,
+    collision_params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     results: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
@@ -216,6 +230,8 @@ def recompute_records_collisions(
                     video_stem=video_stem,
                     alarm_min_consecutive_frames=alarm_min_consecutive_frames,
                     alarm_cooldown_frames=alarm_cooldown_frames,
+                    collision_method=collision_method,
+                    collision_params=collision_params,
                 )
             )
         except (OSError, ValueError, FileNotFoundError, RuntimeError) as exc:

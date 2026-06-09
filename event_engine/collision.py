@@ -122,7 +122,7 @@ class CollisionProcessor:
                     contour = box.get("orig_contour")
                     if contour is None:
                         continue
-                    if cv2.pointPolygonTest(contour, (wx, wy), False) >= 0:
+                    if _point_in_contour(contour, (wx, wy)):
                         token = box_collision_token(box)
                         if token:
                             active_collisions.append(token)
@@ -152,3 +152,23 @@ class CollisionProcessor:
             "skeletons": skeletons_data,
             "frame_idx": frame_idx,
         }
+
+
+def _point_in_contour(contour, point: tuple[float, float]) -> bool:
+    if hasattr(cv2, "pointPolygonTest"):
+        return bool(cv2.pointPolygonTest(contour, point, False) >= 0)
+    try:
+        pts = contour.reshape((-1, 2)).tolist()
+    except Exception:
+        return False
+    x, y = point
+    inside = False
+    for i, a in enumerate(pts):
+        b = pts[(i + 1) % len(pts)]
+        xi, yi = float(a[0]), float(a[1])
+        xj, yj = float(b[0]), float(b[1])
+        if (yi > y) != (yj > y):
+            x_cross = (xj - xi) * (y - yi) / ((yj - yi) or 1e-12) + xi
+            if x < x_cross:
+                inside = not inside
+    return inside

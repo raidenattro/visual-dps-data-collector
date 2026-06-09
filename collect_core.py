@@ -19,12 +19,16 @@ try:
         load_annotation_config,
         load_scaled_boxes,
     )
-    from event_engine.collision import CollisionProcessor
+    from event_engine.collision_methods import (
+        build_collision_params,
+        create_collision_processor,
+    )
 except ImportError:
     boxes_for_json_export = None  # type: ignore
     load_annotation_config = None  # type: ignore
     load_scaled_boxes = None  # type: ignore
-    CollisionProcessor = None  # type: ignore
+    build_collision_params = None  # type: ignore
+    create_collision_processor = None  # type: ignore
 
 ProgressCallback = Callable[[int, int], None]
 
@@ -144,6 +148,8 @@ def collect_from_video(
     annotation_path: str | Path | None = None,
     alarm_min_consecutive_frames: int = 3,
     alarm_cooldown_frames: int = 12,
+    collision_method: str = "wrist_point",
+    collision_params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
@@ -161,19 +167,26 @@ def collect_from_video(
 
     collect_frame_rate = max(0.0, float(frame_rate))
 
-    collision_processor: CollisionProcessor | None = None
+    collision_processor = None
+    effective_collision_params: dict[str, Any] | None = None
     annotation_meta: dict[str, Any] | None = None
     infer_w_init = int(resize[0]) if resize else int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
     infer_h_init = int(resize[1]) if resize else int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
-    if annotation_path and load_scaled_boxes and CollisionProcessor:
+    if annotation_path and load_scaled_boxes and create_collision_processor and build_collision_params:
         ann_path = Path(annotation_path)
         if ann_path.is_file():
             scaled_boxes = load_scaled_boxes(ann_path, max(1, infer_w_init), max(1, infer_h_init))
             if scaled_boxes:
-                collision_processor = CollisionProcessor(
-                    scaled_boxes,
+                effective_collision_params = build_collision_params(
+                    collision_method,
+                    collision_params,
                     alarm_min_consecutive_frames=alarm_min_consecutive_frames,
                     alarm_cooldown_frames=alarm_cooldown_frames,
+                )
+                collision_processor = create_collision_processor(
+                    scaled_boxes,
+                    method=effective_collision_params.get("method"),
+                    params=effective_collision_params,
                     video_fps=fps,
                 )
                 ann_cfg = load_annotation_config(ann_path)
@@ -187,7 +200,10 @@ def collect_from_video(
                     "boxes": boxes_for_json_export(scaled_boxes),
                     "box_count": len(scaled_boxes),
                 }
-                print(f"ℹ️ 碰撞检测: 已加载 {len(scaled_boxes)} 个货框（{ann_path.name}）")
+                print(
+                    f"ℹ️ 碰撞检测: method={effective_collision_params.get('method')}，"
+                    f"已加载 {len(scaled_boxes)} 个货框（{ann_path.name}）"
+                )
             else:
                 print(f"⚠️ 标注 JSON 无有效货框: {ann_path}")
 
@@ -256,10 +272,11 @@ def collect_from_video(
     }
     if annotation_meta is not None:
         result["annotation"] = annotation_meta
+        collision_meta = dict(effective_collision_params or {})
+        collision_meta.setdefault("method", collision_method)
         result["collision"] = {
             "enabled": True,
-            "alarm_min_consecutive_frames": alarm_min_consecutive_frames,
-            "alarm_cooldown_frames": alarm_cooldown_frames,
+            **collision_meta,
         }
     return result
 
@@ -299,6 +316,8 @@ def run_collect_job(
     annotation_path: str | Path | None = None,
     alarm_min_consecutive_frames: int = 3,
     alarm_cooldown_frames: int = 12,
+    collision_method: str = "wrist_point",
+    collision_params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     video_path = validate_video_path(video_path)
     resize = _resolve_collect_resize(video_path, width, height)
@@ -330,6 +349,8 @@ def run_collect_job(
         annotation_path=annotation_path,
         alarm_min_consecutive_frames=alarm_min_consecutive_frames,
         alarm_cooldown_frames=alarm_cooldown_frames,
+        collision_method=collision_method,
+        collision_params=collision_params,
     )
     data["collected_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     data["elapsed_sec"] = round(time.perf_counter() - t0, 3)

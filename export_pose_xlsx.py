@@ -16,7 +16,7 @@ from event_engine.annotation_boxes import (
     load_scaled_boxes,
 )
 from event_engine.box_identity import box_collision_token
-from event_engine.collision import CollisionProcessor
+from event_engine.collision_methods import build_collision_params, create_collision_processor
 
 # 关键点中文名（与 COCO17 顺序一致，便于表头阅读）
 COCO17_KEYPOINT_LABELS_ZH = (
@@ -197,16 +197,25 @@ def enrich_frames_with_collision(
 
     collision_cfg = pose_data.get("collision") or {}
     if isinstance(collision_cfg, dict):
-        alarm_min = int(collision_cfg.get("alarm_min_consecutive_frames") or alarm_min_consecutive_frames)
-        alarm_cd = int(collision_cfg.get("alarm_cooldown_frames") or alarm_cooldown_frames)
+        params = build_collision_params(
+            collision_cfg.get("method") or "wrist_point",
+            collision_cfg,
+            alarm_min_consecutive_frames=int(
+                collision_cfg.get("alarm_min_consecutive_frames") or alarm_min_consecutive_frames
+            ),
+            alarm_cooldown_frames=int(collision_cfg.get("alarm_cooldown_frames") or alarm_cooldown_frames),
+        )
     else:
-        alarm_min = alarm_min_consecutive_frames
-        alarm_cd = alarm_cooldown_frames
+        params = build_collision_params(
+            "wrist_point",
+            alarm_min_consecutive_frames=alarm_min_consecutive_frames,
+            alarm_cooldown_frames=alarm_cooldown_frames,
+        )
 
-    processor = CollisionProcessor(
+    processor = create_collision_processor(
         scaled_boxes,
-        alarm_min_consecutive_frames=alarm_min,
-        alarm_cooldown_frames=alarm_cd,
+        method=params.get("method"),
+        params=params,
         video_fps=fps,
     )
 

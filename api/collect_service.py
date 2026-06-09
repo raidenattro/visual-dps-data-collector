@@ -61,6 +61,8 @@ def build_collect_config_snapshot(
     frame_rate: float,
     max_pose_frames: int | None,
     save_video: bool,
+    collision_method: str,
+    collision_params: dict[str, Any],
     alarm_min_consecutive_frames: int,
     alarm_cooldown_frames: int,
     camera_label: str = "",
@@ -81,6 +83,8 @@ def build_collect_config_snapshot(
         "frame_rate": float(frame_rate),
         "max_pose_frames": int(max_pose_frames) if max_pose_frames is not None else 0,
         "save_video": bool(save_video),
+        "collision_method": collision_method,
+        "collision_params": collision_params,
         "alarm_min_consecutive_frames": int(alarm_min_consecutive_frames),
         "alarm_cooldown_frames": int(alarm_cooldown_frames),
         "camera_label": camera_label or None,
@@ -112,6 +116,8 @@ def run_job(
     max_pose_frames: int | None,
     save_video: bool,
     annotation_path: Path | None = None,
+    collision_method: str = "wrist_point",
+    collision_params: dict[str, Any] | None = None,
     alarm_min_consecutive_frames: int = 3,
     alarm_cooldown_frames: int = 6,
     camera_label: str = "",
@@ -183,6 +189,8 @@ def run_job(
             annotation_path=str(annotation_path) if annotation_path else None,
             alarm_min_consecutive_frames=alarm_min,
             alarm_cooldown_frames=alarm_cd,
+            collision_method=collision_method,
+            collision_params=collision_params,
         )
         record_id = record_id_from_pose_path(pose_path)
         has_skeleton = collect_result_has_skeleton(data)
@@ -387,6 +395,8 @@ def run_batch_job(
     save_video: bool,
     alarm_min_consecutive_frames: int,
     alarm_cooldown_frames: int,
+    collision_method: str,
+    collision_params: dict[str, Any],
 ) -> None:
     total = len(items)
     results: list[dict[str, Any]] = []
@@ -459,6 +469,8 @@ def run_batch_job(
                 max_pose_frames=max_pose_frames,
                 save_video=save_video,
                 annotation_path=annotation_path,
+                collision_method=collision_method,
+                collision_params=collision_params,
                 alarm_min_consecutive_frames=alarm_min_consecutive_frames,
                 alarm_cooldown_frames=alarm_cooldown_frames,
                 camera_label=camera_label,

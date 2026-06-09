@@ -133,10 +133,19 @@
         </label>
         <p id="collect-annotation-status" class="annotation-status hint hidden" role="status"></p>
         <fieldset class="collision-config">
-          <legend class="legend-with-tip">碰撞检测（inference，与 visual-dps 一致）
-            <button type="button" class="field-tip" data-tip="瞬时碰撞：手腕（COCO 9/10）score>0.3 进入货框 → collisions；连续命中且过冷却 → alarm_collisions。默认来自 config.json；回放补算也用此处参数。">?</button>
+          <legend class="legend-with-tip">碰撞检测（inference）
+            <button type="button" class="field-tip" data-tip="可切换碰撞逻辑。手腕点连续帧为旧逻辑；同手同箱状态机需先确认稳定命中同一货箱，再确认离开锁定货箱后输出告警。">?</button>
           </legend>
-          <div class="row">
+          <label class="field-block">
+            <span class="label-with-tip">collision_method
+              <button type="button" class="field-tip" data-tip="wrist_point：旧版手腕点进入货框并连续命中。hand_state：同一只手锁定同一货箱，完成命中-离开闭环后告警。">?</button>
+            </span>
+            <select id="collect-collision-method">
+              <option value="wrist_point">手腕点连续帧</option>
+              <option value="hand_state">同手同箱状态机</option>
+            </select>
+          </label>
+          <div class="row collision-param-group" data-method="wrist_point">
             <label>
               <span class="label-with-tip">alarm_min_consecutive_frames
                 <button type="button" class="field-tip" data-tip="手腕在货框内连续命中达到该帧数后，才触发告警（alarm）。">?</button>
@@ -148,6 +157,76 @@
                 <button type="button" class="field-tip" data-tip="同一货框两次告警之间的最小帧间隔，用于抑制重复告警。">?</button>
               </span>
               <input type="number" id="collect-alarm-cooldown" value="6" min="1" step="1" />
+            </label>
+          </div>
+          <div class="row collision-param-group hidden" data-method="hand_state">
+            <label>
+              <span class="label-with-tip">enter_window_frames
+                <button type="button" class="field-tip" data-tip="拿取确认窗口：最近多少帧内统计同箱命中。">?</button>
+              </span>
+              <input type="number" id="collect-enter-window" value="6" min="1" step="1" />
+            </label>
+            <label>
+              <span class="label-with-tip">enter_min_hits
+                <button type="button" class="field-tip" data-tip="拿取确认窗口内至少命中锁定箱多少帧。">?</button>
+              </span>
+              <input type="number" id="collect-enter-min-hits" value="3" min="1" step="1" />
+            </label>
+          </div>
+          <div class="row collision-param-group hidden" data-method="hand_state">
+            <label>
+              <span class="label-with-tip">exit_window_frames
+                <button type="button" class="field-tip" data-tip="取出确认窗口：最近多少帧内统计离开锁定箱。">?</button>
+              </span>
+              <input type="number" id="collect-exit-window" value="8" min="1" step="1" />
+            </label>
+            <label>
+              <span class="label-with-tip">exit_min_releases
+                <button type="button" class="field-tip" data-tip="取出确认窗口内至少多少帧离开锁定箱。">?</button>
+              </span>
+              <input type="number" id="collect-exit-min-releases" value="5" min="1" step="1" />
+            </label>
+          </div>
+          <div class="row collision-param-group hidden" data-method="hand_state">
+            <label>
+              <span class="label-with-tip">max_inside_frames
+                <button type="button" class="field-tip" data-tip="确认拿取后，超过该帧数仍未确认取出则丢弃候选。">?</button>
+              </span>
+              <input type="number" id="collect-max-inside" value="75" min="1" step="1" />
+            </label>
+            <label>
+              <span class="label-with-tip">cooldown_frames
+                <button type="button" class="field-tip" data-tip="完成一次上报后，同手同箱冷却帧数。">?</button>
+              </span>
+              <input type="number" id="collect-state-cooldown" value="30" min="1" step="1" />
+            </label>
+          </div>
+          <div class="row collision-param-group hidden" data-method="hand_state">
+            <label>
+              <span class="label-with-tip">hit_threshold
+                <button type="button" class="field-tip" data-tip="一帧命中某货箱所需的最低证据分。">?</button>
+              </span>
+              <input type="number" id="collect-hit-threshold" value="0.55" min="0" max="1" step="0.01" />
+            </label>
+            <label>
+              <span class="label-with-tip">box_margin
+                <button type="button" class="field-tip" data-tip="最佳货箱分数需比第二货箱高出该值，低于该值视为相邻箱不确定。">?</button>
+              </span>
+              <input type="number" id="collect-box-margin" value="0.15" min="0" max="1" step="0.01" />
+            </label>
+          </div>
+          <div class="row collision-param-group hidden" data-method="hand_state">
+            <label>
+              <span class="label-with-tip">wrist_score_min
+                <button type="button" class="field-tip" data-tip="手腕关键点低于该置信度时，本帧视为未知，不推动状态。">?</button>
+              </span>
+              <input type="number" id="collect-wrist-score-min" value="0.45" min="0" max="1" step="0.01" />
+            </label>
+            <label>
+              <span class="label-with-tip">jump_max
+                <button type="button" class="field-tip" data-tip="手腕相邻有效帧位移 / 人体尺度超过该值时，判为跳变。">?</button>
+              </span>
+              <input type="number" id="collect-jump-max" value="0.45" min="0" step="0.01" />
             </label>
           </div>
         </fieldset>
@@ -388,7 +467,7 @@
   <script src="app/03-tabs.js?v=34"></script>
   <script src="app/04-collision-config.js?v=34"></script>
   <script src="app/05-collect.js?v=40"></script>
-  <script src="app/06-records.js?v=40"></script>
+  <script src="app/06-records.js?v=41"></script>
   <script src="app/07-playback-stage.js?v=35"></script>
   <script src="app/08-event-review.js?v=38"></script>
   <script src="app/09-playback-events.js?v=38"></script>

@@ -27,8 +27,29 @@
         "height": 480,
         "pose_frame_interval": 1,
         "max_pose_frames": 0,
+        "collision_method": "wrist_point",
         "alarm_min_consecutive_frames": 3,
-        "alarm_cooldown_frames": 6
+        "alarm_cooldown_frames": 6,
+        "collision_params": {
+            "hand_state": {
+                "enter_window_frames": 6,
+                "enter_min_hits": 3,
+                "enter_timeout_frames": 12,
+                "exit_window_frames": 8,
+                "exit_min_releases": 5,
+                "exit_timeout_frames": 20,
+                "max_inside_frames": 75,
+                "cooldown_frames": 30,
+                "hit_threshold": 0.55,
+                "box_margin": 0.15,
+                "wrist_score_min": 0.45,
+                "elbow_score_min": 0.35,
+                "jump_max": 0.45,
+                "forearm_min_ratio": 0.5,
+                "forearm_max_ratio": 1.8,
+                "near_edge_ratio": 0.05
+            }
+        }
     },
     "source": {
         "enabled": false,

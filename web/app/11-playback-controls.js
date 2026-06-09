@@ -223,6 +223,7 @@ seekBar.addEventListener("input", async () => {
 bindStageLayoutWatch();
 initPlaybackSpeedControl();
 initEventReviewControls();
+bindCollisionConfigControls();
 loadRecords();
 initPlaybackRecordFilter();
 void loadInferenceConfigDefaults();
