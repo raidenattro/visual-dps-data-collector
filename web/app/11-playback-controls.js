@@ -187,6 +187,7 @@ function initEventReviewControls() {
 }
 
 videoEl.addEventListener("seeked", () => {
+  playbackEventLinkExact = false;
   lastRenderedFrameIdx = -1;
   tickPoseFrameIdx = -1;
   resetPlaybackCollisionTracker();
@@ -205,6 +206,7 @@ window.addEventListener("beforeunload", () => {
 });
 
 seekBar.addEventListener("input", async () => {
+  playbackEventLinkExact = false;
   lastRenderedFrameIdx = -1;
   tickPoseFrameIdx = -1;
   resetPlaybackCollisionTracker();

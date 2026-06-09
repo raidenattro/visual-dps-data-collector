@@ -197,6 +197,18 @@ function syncActiveEventFromPlaybackPosition(opts = {}) {
   if (!playbackEvents.length) return;
   const timeSec = opts.timeSec ?? getCurrentPlaybackTimeSec();
   const frameIdx = opts.frameIdx ?? getCurrentPlaybackFrameIdx();
+
+  // 复核显式跳转后，同帧多条事件时不要被「同帧优先/最近」覆盖当前选中
+  if (!opts.force && playbackEventLinkExact && activeEventKey) {
+    const pinned = getActiveEvent();
+    if (pinned) {
+      const pinnedFi = parseInt(pinned.frame_idx, 10) || 0;
+      const fi = frameIdx != null ? parseInt(frameIdx, 10) || 0 : null;
+      if (fi != null && fi === pinnedFi) return;
+      if (isExactEventAtPosition(pinned, timeSec, frameIdx)) return;
+    }
+  }
+
   const ev = findEventForPlaybackPosition(timeSec, frameIdx);
   if (!ev) return;
   const key = eventRowKey(ev);
@@ -219,7 +231,7 @@ function updateEventMarkerActiveState() {
   });
 }
 
-async function seekToTimestamp(timeSec, frameIdx = null) {
+async function seekToTimestamp(timeSec, frameIdx = null, opts = {}) {
   lastRenderedFrameIdx = -1;
   tickPoseFrameIdx = -1;
   resetPlaybackCollisionTracker();
@@ -229,7 +241,9 @@ async function seekToTimestamp(timeSec, frameIdx = null) {
     seekBar.value = String((videoEl.currentTime / videoEl.duration) * 1000);
     timeLabel.textContent = formatTime(videoEl.currentTime);
     await renderAtTime(videoEl.currentTime);
-    syncActiveEventFromPlaybackPosition({ timeSec: videoEl.currentTime });
+    if (!opts.skipEventSync) {
+      syncActiveEventFromPlaybackPosition({ timeSec: videoEl.currentTime, frameIdx });
+    }
     return;
   }
 
@@ -248,7 +262,9 @@ async function seekToTimestamp(timeSec, frameIdx = null) {
       timeLabel.textContent = formatTime(t);
     }
   }
-  syncActiveEventFromPlaybackPosition({ timeSec: t, frameIdx: hit?.frameIdx ?? frameIdx });
+  if (!opts.skipEventSync) {
+    syncActiveEventFromPlaybackPosition({ timeSec: t, frameIdx: hit?.frameIdx ?? frameIdx });
+  }
 }
 
 async function seekToEvent(ev, { keepReviewBack = false } = {}) {
@@ -262,7 +278,7 @@ async function seekToEvent(ev, { keepReviewBack = false } = {}) {
   if ($("#event-review-list-details")?.open) renderEventReviewTable();
   updateEventMarkerActiveState();
   videoEl.pause();
-  await seekToTimestamp(ev.timestamp_sec, ev.frame_idx);
+  await seekToTimestamp(ev.timestamp_sec, ev.frame_idx, { skipEventSync: true });
 }
 
 function clearPlaybackEvents() {

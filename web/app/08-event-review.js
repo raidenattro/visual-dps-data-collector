@@ -328,11 +328,24 @@ function navigateReviewEvent(delta) {
     }
   }
 
-  let idx = getActiveGlobalIndex();
-  if (idx < 0) idx = 0;
-  idx = Math.max(0, Math.min(playbackEvents.length - 1, idx + delta));
+  const filterMode = eventFilterSelect?.value || "all";
+  const useFiltered = filterMode !== "all";
+  const list = useFiltered ? filteredPlaybackEvents() : playbackEvents;
+  if (!list.length) return;
+
+  let idx;
+  if (useFiltered) {
+    idx = curKey ? list.findIndex((e) => eventRowKey(e) === curKey) : -1;
+    if (idx < 0) idx = delta > 0 ? -1 : list.length;
+    idx = Math.max(0, Math.min(list.length - 1, idx + delta));
+  } else {
+    idx = getActiveGlobalIndex();
+    if (idx < 0) idx = 0;
+    idx = Math.max(0, Math.min(playbackEvents.length - 1, idx + delta));
+  }
+
   reviewBackKey = null;
-  void seekToEvent(playbackEvents[idx]);
+  void seekToEvent(useFiltered ? list[idx] : playbackEvents[idx]);
 }
 
 function scrollActiveEventRowIntoView() {
@@ -527,15 +540,14 @@ async function confirmTrueAndNext() {
   const mode = eventFilterSelect?.value || "all";
   if (mode === "unreviewed") {
     const newList = filteredPlaybackEvents();
-    if (!newList.length) {
+    if (!newList.length || idx >= newList.length) {
       updateReviewDock();
       renderEventReviewTable();
       renderEventMarkers();
       setEventReviewSaveStatus("未标真事件已全部复核", "");
       return;
     }
-    const nextEv = newList[Math.min(idx, newList.length - 1)];
-    await seekToEvent(nextEv);
+    await seekToEvent(newList[idx]);
     return;
   }
 
