@@ -462,6 +462,192 @@ h2 {
   cursor: pointer;
 }
 
+main:has(#panel-playback.active) {
+  max-width: min(1720px, 100%);
+}
+
+.playback-layout {
+  display: grid;
+  grid-template-columns: minmax(248px, 300px) minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: stretch;
+}
+
+.playback-layout:has(.playback-events-panel:not(.hidden)) {
+  grid-template-columns: minmax(248px, 300px) minmax(0, 1fr) minmax(300px, 380px);
+}
+
+.playback-layout-side {
+  min-width: 0;
+  min-height: 0;
+}
+
+.playback-layout-left {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: calc(100vh - 9.5rem);
+  overflow: hidden;
+}
+
+.playback-layout-left .playback-records-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0;
+}
+
+.playback-layout-left .playback-records-toolbar,
+.playback-layout-left .playback-records-filter {
+  flex-shrink: 0;
+}
+
+.playback-layout-left .playback-records-filter input[type="search"] {
+  max-width: none;
+}
+
+.playback-layout-left .playback-records-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+}
+
+.playback-layout-left .playback-import-details {
+  flex-shrink: 0;
+  margin: 0;
+}
+
+/* 左侧记录行：两行信息 + 底栏操作，避免单行挤在一起 */
+.playback-layout-left .record-item-compact {
+  flex-direction: column;
+  align-items: stretch;
+  padding: 0.55rem 0.45rem !important;
+  gap: 0.4rem !important;
+}
+
+.playback-layout-left .record-main-compact {
+  flex-wrap: wrap !important;
+  gap: 0.3rem 0.45rem;
+  overflow: visible;
+}
+
+.playback-layout-left .record-main-compact .record-name {
+  flex: 1 1 100%;
+  max-width: 100%;
+  white-space: normal;
+  word-break: break-word;
+  font-size: 0.88rem;
+  line-height: 1.35;
+}
+
+.playback-layout-left .record-meta-inline {
+  flex: 1 1 100%;
+  white-space: normal;
+  line-height: 1.45;
+  font-size: 0.78rem;
+}
+
+.playback-layout-left .record-meta-inline .record-badge {
+  display: inline-block;
+  margin: 0 0.35rem 0.2rem 0;
+}
+
+.playback-layout-left .record-actions-compact {
+  align-self: flex-end;
+  gap: 0.4rem !important;
+}
+
+.playback-layout-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.playback-layout-main .stage-wrap {
+  flex-shrink: 0;
+}
+
+.playback-layout-main .playback-transport {
+  flex-shrink: 0;
+}
+
+.playback-layout-right {
+  max-height: calc(100vh - 9.5rem);
+  overflow: hidden;
+}
+
+.playback-layout-right .playback-events-panel {
+  height: 100%;
+  max-height: calc(100vh - 9.5rem);
+  margin-top: 0;
+  overflow: hidden;
+}
+
+.playback-layout-right .playback-events-panel:not(.hidden) {
+  display: flex;
+}
+
+.playback-layout-right .event-review-dock {
+  flex-shrink: 0;
+}
+
+.playback-layout-right .event-review-actions {
+  grid-template-columns: 1fr 1fr;
+}
+
+.playback-layout-right .btn-review-true,
+.playback-layout-right .btn-review-complete {
+  grid-column: 1 / -1;
+}
+
+.playback-layout-right .event-review-list-details {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.playback-layout-right .event-review-list-details[open] {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.playback-layout-right .event-review-table-wrap {
+  flex: 1;
+  min-height: 8rem;
+  max-height: none;
+}
+
+@media (max-width: 1100px) {
+  .playback-layout,
+  .playback-layout:has(.playback-events-panel:not(.hidden)) {
+    grid-template-columns: 1fr;
+  }
+
+  .playback-layout-left,
+  .playback-layout-right {
+    max-height: none;
+  }
+
+  .playback-layout-left .playback-records-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: min(280px, 36vh);
+  }
+
+  .playback-layout-right .playback-events-panel {
+    max-height: none;
+  }
+
+  .playback-layout-right .event-review-table-wrap {
+    max-height: min(28vh, 220px);
+  }
+}
+
 .playback-records-panel {
   margin-bottom: 0.75rem;
 }

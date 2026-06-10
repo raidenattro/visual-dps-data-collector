@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>骨架采集与回放</title>
-  <link rel="stylesheet" href="style.css?v=32" />
+  <link rel="stylesheet" href="style.css?v=37" />
 </head>
 <body>
   <header>
@@ -247,136 +247,145 @@
     </section>
 
     <section id="panel-playback" class="panel">
-      <div class="playback-records-panel">
-        <div class="playback-records-toolbar">
-          <h2 class="playback-records-heading heading-with-tip">
-            已保存记录
-            <button type="button" class="field-tip" data-tip="先选机位目录，再选记录；单击选中后点「加载并回放」或双击行直接加载。无碰撞计算时显示「碰撞未计算」标记。">?</button>
-          </h2>
-          <button type="button" id="playback-load-record" class="primary-btn" disabled>加载并回放</button>
-        </div>
-        <div class="playback-records-filter">
-          <select id="playback-pose-tier" title="按 RTMPose 模型层筛选记录">
-            <option value="rtmpose-t" selected>RTMPose-T</option>
-            <option value="rtmpose-s">RTMPose-S</option>
-            <option value="rtmpose-m">RTMPose-M</option>
-          </select>
-          <input type="search" id="playback-record-filter" placeholder="搜索名称 / 路径…" autocomplete="off" />
-          <span id="playback-record-count" class="hint"></span>
-        </div>
-        <div id="session-list" class="playback-records-list"></div>
-      </div>
-
-      <details class="playback-import-details">
-        <summary>手动导入 JSON / 视频</summary>
-        <div class="card playback-import-card">
-          <label>
-            <span class="label-with-tip">骨架 JSON
-              <button type="button" class="field-tip" data-tip="手动导入 pose JSON 进行回放（无已保存记录时）。导入后可再选标注与视频。">?</button>
-            </span>
-            <input type="file" id="playback-json" accept=".json,application/json" />
-          </label>
-          <label>
-            <span class="label-with-tip">标注 JSON（可选）
-              <button type="button" class="field-tip" data-tip="若 pose JSON 内无 annotation.boxes，可在此补充货框标注，用于叠加货位与碰撞/告警计算。">?</button>
-            </span>
-            <input type="file" id="playback-annotation" accept=".json,application/json" />
-          </label>
-          <label>
-            <span class="label-with-tip">替换视频（可选）
-              <button type="button" class="field-tip" data-tip="记录无配套视频或需用本地文件替换时选择。不选则仅播放骨骼叠加。">?</button>
-            </span>
-            <input type="file" id="playback-video" accept="video/*" />
-          </label>
-        </div>
-      </details>
-
-      <div class="stage-wrap">
-        <video id="playback-video-el" playsinline preload="metadata"></video>
-        <canvas id="playback-canvas"></canvas>
-      </div>
-      <div class="playback-transport">
-        <div class="controls">
-          <button type="button" id="play-btn">播放</button>
-          <button type="button" id="pause-btn">暂停</button>
-          <button type="button" id="end-playback-btn">停止回放</button>
-          <label class="playback-speed-label">
-            倍速
-            <select id="playback-speed" title="播放倍速">
-              <option value="0.5">0.5×</option>
-              <option value="0.75">0.75×</option>
-              <option value="1" selected>1×</option>
-              <option value="1.25">1.25×</option>
-              <option value="1.5">1.5×</option>
-              <option value="2">2×</option>
-              <option value="3">3×</option>
-              <option value="4">4×</option>
-              <option value="5">5×</option>
-              <option value="6">6×</option>
-              <option value="8">8×</option>
-            </select>
-          </label>
-          <a id="playback-export-xlsx" class="btn-link hidden" href="#" download>导出 Excel</a>
-          <span id="time-label">0:00</span>
-        </div>
-        <div class="seek-stack">
-          <div id="seek-event-markers" class="seek-event-markers" aria-hidden="true"></div>
-          <input type="range" id="seek-bar" min="0" max="1000" value="0" />
-        </div>
-        <div id="playback-events-panel" class="playback-events-panel hidden">
-          <div class="playback-events-head">
-            <strong>事件复核</strong>
-            <label class="event-filter-label">
-              队列
-              <select id="event-filter">
-                <option value="unreviewed" selected>未标真</option>
-                <option value="all">全部</option>
-                <option value="verified">已标真</option>
-                <option value="alarm">告警</option>
-                <option value="collision">碰撞</option>
+      <div class="playback-layout">
+        <aside class="playback-layout-side playback-layout-left">
+          <div class="playback-records-panel">
+            <div class="playback-records-toolbar">
+              <h2 class="playback-records-heading heading-with-tip">
+                已保存记录
+                <button type="button" class="field-tip" data-tip="先选机位目录，再选记录；单击选中后点「加载并回放」或双击行直接加载。无碰撞计算时显示「碰撞未计算」标记。">?</button>
+              </h2>
+              <button type="button" id="playback-load-record" class="primary-btn" disabled>加载并回放</button>
+            </div>
+            <div class="playback-records-filter">
+              <select id="playback-pose-tier" title="按 RTMPose 模型层筛选记录">
+                <option value="rtmpose-t" selected>RTMPose-T</option>
+                <option value="rtmpose-s">RTMPose-S</option>
+                <option value="rtmpose-m">RTMPose-M</option>
               </select>
-            </label>
-            <span id="event-count-label" class="hint">—</span>
+              <input type="search" id="playback-record-filter" placeholder="搜索名称 / 路径…" autocomplete="off" />
+              <span id="playback-record-count" class="hint"></span>
+            </div>
+            <div id="session-list" class="playback-records-list"></div>
           </div>
-          <div id="event-review-dock" class="event-review-dock">
-            <div class="event-review-dock-top">
-              <span id="event-review-position" class="event-review-position">—</span>
-              <span id="event-save-status" class="event-save-status hint" aria-live="polite"></span>
-            </div>
-            <div id="event-review-current" class="event-review-current">
-              <span id="event-review-badge" class="event-badge collision">—</span>
-              <span id="event-review-meta" class="event-review-meta">请选择或等待加载事件</span>
-              <span id="event-review-verified-tag" class="event-review-verified-tag hidden">已标真</span>
-            </div>
-            <div class="event-review-actions">
-              <button type="button" id="event-prev-btn" class="btn-review-nav" title="快捷键 ↑">‹ 上一条</button>
-              <button type="button" id="event-mark-true-next-btn" class="btn-review-true" title="快捷键 Y">✓ 标为真 · 下一条</button>
-              <button type="button" id="event-skip-next-btn" class="btn-review-skip" title="快捷键 N">下一条 ›</button>
-              <button type="button" id="event-unmark-btn" class="btn-review-unmark" title="快捷键 U">取消标真</button>
-              <button type="button" id="event-review-complete-btn" class="btn-review-complete">标记复核完成</button>
-            </div>
-            <p class="event-review-kbd-hint">Y 标真并下一条 · N 下一条 · U 取消 · ↑↓ 切换（自动定位画面，无需点跳转）</p>
-          </div>
-          <details id="event-review-list-details" class="event-review-list-details">
-            <summary id="event-review-list-summary">全部事件列表</summary>
-            <div class="event-review-table-wrap">
-              <table class="event-review-table">
-                <thead>
-                  <tr>
-                    <th class="col-verify" scope="col">真</th>
-                    <th class="col-type" scope="col">类型</th>
-                    <th class="col-time" scope="col">时间</th>
-                    <th class="col-frame" scope="col">帧</th>
-                    <th class="col-tokens" scope="col">货框</th>
-                  </tr>
-                </thead>
-                <tbody id="event-jump-list"></tbody>
-              </table>
+
+          <details class="playback-import-details">
+            <summary>手动导入 JSON / 视频</summary>
+            <div class="card playback-import-card">
+              <label>
+                <span class="label-with-tip">骨架 JSON
+                  <button type="button" class="field-tip" data-tip="手动导入 pose JSON 进行回放（无已保存记录时）。导入后可再选标注与视频。">?</button>
+                </span>
+                <input type="file" id="playback-json" accept=".json,application/json" />
+              </label>
+              <label>
+                <span class="label-with-tip">标注 JSON（可选）
+                  <button type="button" class="field-tip" data-tip="若 pose JSON 内无 annotation.boxes，可在此补充货框标注，用于叠加货位与碰撞/告警计算。">?</button>
+                </span>
+                <input type="file" id="playback-annotation" accept=".json,application/json" />
+              </label>
+              <label>
+                <span class="label-with-tip">替换视频（可选）
+                  <button type="button" class="field-tip" data-tip="记录无配套视频或需用本地文件替换时选择。不选则仅播放骨骼叠加。">?</button>
+                </span>
+                <input type="file" id="playback-video" accept="video/*" />
+              </label>
             </div>
           </details>
+        </aside>
+
+        <div class="playback-layout-main">
+          <div class="stage-wrap">
+            <video id="playback-video-el" playsinline preload="metadata"></video>
+            <canvas id="playback-canvas"></canvas>
+          </div>
+          <div class="playback-transport">
+            <div class="controls">
+              <button type="button" id="play-btn">播放</button>
+              <button type="button" id="pause-btn">暂停</button>
+              <button type="button" id="end-playback-btn">停止回放</button>
+              <label class="playback-speed-label">
+                倍速
+                <select id="playback-speed" title="播放倍速">
+                  <option value="0.5">0.5×</option>
+                  <option value="0.75">0.75×</option>
+                  <option value="1" selected>1×</option>
+                  <option value="1.25">1.25×</option>
+                  <option value="1.5">1.5×</option>
+                  <option value="2">2×</option>
+                  <option value="3">3×</option>
+                  <option value="4">4×</option>
+                  <option value="5">5×</option>
+                  <option value="6">6×</option>
+                  <option value="8">8×</option>
+                </select>
+              </label>
+              <a id="playback-export-xlsx" class="btn-link hidden" href="#" download>导出 Excel</a>
+              <span id="time-label">0:00</span>
+            </div>
+            <div class="seek-stack">
+              <div id="seek-event-markers" class="seek-event-markers" aria-hidden="true"></div>
+              <input type="range" id="seek-bar" min="0" max="1000" value="0" />
+            </div>
+          </div>
+          <p id="playback-info" class="hint"></p>
         </div>
+
+        <aside class="playback-layout-side playback-layout-right">
+          <div id="playback-events-panel" class="playback-events-panel hidden">
+            <div class="playback-events-head">
+              <strong>事件复核</strong>
+              <label class="event-filter-label">
+                队列
+                <select id="event-filter">
+                  <option value="unreviewed" selected>未标真</option>
+                  <option value="all">全部</option>
+                  <option value="verified">已标真</option>
+                  <option value="alarm">告警</option>
+                  <option value="collision">碰撞</option>
+                </select>
+              </label>
+              <span id="event-count-label" class="hint">—</span>
+            </div>
+            <div id="event-review-dock" class="event-review-dock">
+              <div class="event-review-dock-top">
+                <span id="event-review-position" class="event-review-position">—</span>
+                <span id="event-save-status" class="event-save-status hint" aria-live="polite"></span>
+              </div>
+              <div id="event-review-current" class="event-review-current">
+                <span id="event-review-badge" class="event-badge collision">—</span>
+                <span id="event-review-meta" class="event-review-meta">请选择或等待加载事件</span>
+                <span id="event-review-verified-tag" class="event-review-verified-tag hidden">已标真</span>
+              </div>
+              <div class="event-review-actions">
+                <button type="button" id="event-prev-btn" class="btn-review-nav" title="快捷键 ↑">‹ 上一条</button>
+                <button type="button" id="event-mark-true-next-btn" class="btn-review-true" title="快捷键 Y">✓ 标为真 · 下一条</button>
+                <button type="button" id="event-skip-next-btn" class="btn-review-skip" title="快捷键 N">下一条 ›</button>
+                <button type="button" id="event-unmark-btn" class="btn-review-unmark" title="快捷键 U">取消标真</button>
+                <button type="button" id="event-review-complete-btn" class="btn-review-complete">标记复核完成</button>
+              </div>
+              <p class="event-review-kbd-hint">Y 标真并下一条 · N 下一条 · U 取消 · ↑↓ 切换（自动定位画面，无需点跳转）</p>
+            </div>
+            <details id="event-review-list-details" class="event-review-list-details">
+              <summary id="event-review-list-summary">全部事件列表</summary>
+              <div class="event-review-table-wrap">
+                <table class="event-review-table">
+                  <thead>
+                    <tr>
+                      <th class="col-verify" scope="col">真</th>
+                      <th class="col-type" scope="col">类型</th>
+                      <th class="col-time" scope="col">时间</th>
+                      <th class="col-frame" scope="col">帧</th>
+                      <th class="col-tokens" scope="col">货框</th>
+                    </tr>
+                  </thead>
+                  <tbody id="event-jump-list"></tbody>
+                </table>
+              </div>
+            </details>
+          </div>
+        </aside>
       </div>
-      <p id="playback-info" class="hint"></p>
     </section>
   </main>
 
