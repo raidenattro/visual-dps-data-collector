@@ -187,11 +187,15 @@ function initEventReviewControls() {
 }
 
 videoEl.addEventListener("seeked", () => {
-  playbackEventLinkExact = false;
+  const pinnedEventNav = playbackEventLinkExact && activeEventKey;
+  if (!pinnedEventNav) {
+    playbackEventLinkExact = false;
+  }
   lastRenderedFrameIdx = -1;
   tickPoseFrameIdx = -1;
   resetPlaybackCollisionTracker();
   void renderAtTime(videoEl.currentTime).then(() => {
+    if (pinnedEventNav) return;
     syncActiveEventFromPlaybackPosition({ timeSec: videoEl.currentTime });
   });
 });
