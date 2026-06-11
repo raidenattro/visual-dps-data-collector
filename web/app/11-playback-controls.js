@@ -3,6 +3,7 @@
 $("#playback-json").addEventListener("change", async (e) => {
   const file = e.target.files[0];
   if (!file) return;
+  await prepareEventReviewRecordSwitch();
   await cleanupPlaybackVideo();
   clearVideoElement();
   poseData = JSON.parse(await file.text());

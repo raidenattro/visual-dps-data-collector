@@ -3,10 +3,24 @@
 /** 复核 PATCH 串行队列，避免连按 Y 导致并发 toggle 互相覆盖 */
 let eventReviewSaveChain = Promise.resolve();
 
+function drainEventReviewSaveQueue() {
+  return eventReviewSaveChain;
+}
+
 function runSerializedEventReviewSave(task) {
   const run = eventReviewSaveChain.then(() => task());
   eventReviewSaveChain = run.catch(() => {});
   return run;
+}
+
+/** 切换/关闭记录前：等待队列中 PATCH 落盘，并作废已切换记录后的过期 UI 响应 */
+async function prepareEventReviewRecordSwitch() {
+  if (eventReviewSaveTimer) {
+    clearTimeout(eventReviewSaveTimer);
+    eventReviewSaveTimer = null;
+  }
+  await drainEventReviewSaveQueue();
+  eventReviewSaveSeq++;
 }
 
 /** 与后端 event_signature 一致 */
@@ -181,9 +195,12 @@ function buildVerifiedTruePayload() {
   return playbackEvents.filter((e) => isEventVerified(e)).map((e) => eventToReviewPayload(e));
 }
 
-function applyEventReviewResponse(body, seq) {
+function applyEventReviewResponse(body, seq, forRecordId = currentRecordId) {
   if (seq !== eventReviewSaveSeq) return false;
-  if (Array.isArray(body.events)) {
+  const savedFor = String(body?.record_id || forRecordId || "").trim();
+  const applyUi = !!savedFor && savedFor === currentRecordId;
+
+  if (applyUi && Array.isArray(body.events)) {
     const prevKey = activeEventKey;
     playbackEvents = body.events;
     syncVerifiedKeysFromEvents(playbackEvents, body.event_review);
@@ -192,9 +209,25 @@ function applyEventReviewResponse(body, seq) {
       activeEventKey = prevKey;
     }
   }
+
+  if (savedFor) {
+    const st =
+      body.event_review_status ||
+      body.event_review?.status ||
+      (body.event_review?.verified_true?.length || body.event_review?.updated_at
+        ? "in_progress"
+        : null);
+    if (st) {
+      applyEventReviewPatchFromBody(body, savedFor);
+    }
+  }
+
+  if (!applyUi) {
+    return true;
+  }
+
   currentEventReviewStatus =
     body.event_review_status || body.event_review?.status || currentEventReviewStatus || "in_progress";
-  applyEventReviewPatchFromBody(body);
   const n = countVerifiedEvents();
   setEventReviewSaveStatus(`已保存 · 标真 ${n} 条`);
   refreshEventCountLabel();
@@ -206,19 +239,25 @@ function applyEventReviewResponse(body, seq) {
 
 /** 单条标真/取消：服务端 toggle，避免全量 verified_true 覆盖误删 */
 async function persistEventReviewToggle(ev, wantVerified) {
-  if (!currentRecordId || !ev) return false;
+  const recordId = currentRecordId;
+  if (!recordId || !ev) return false;
+  const eventPayload = eventToReviewPayload(ev);
+  const eventTotal = playbackEvents.length;
+  const seq = ++eventReviewSaveSeq;
   return runSerializedEventReviewSave(async () => {
-    const seq = ++eventReviewSaveSeq;
-    setEventReviewSaveStatus(`标真 ${countVerifiedEvents()} 条 · 保存中…`, "pending");
+    const showUi = recordId === currentRecordId;
+    if (showUi) {
+      setEventReviewSaveStatus(`标真 ${countVerifiedEvents()} 条 · 保存中…`, "pending");
+    }
     try {
-      const res = await fetch(recordApiUrl(currentRecordId, "/event-review"), {
+      const res = await fetch(recordApiUrl(recordId, "/event-review"), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "toggle",
-          event: eventToReviewPayload(ev),
+          event: eventPayload,
           verified_true: !!wantVerified,
-          event_total: playbackEvents.length,
+          event_total: eventTotal,
         }),
       });
       if (!res.ok) {
@@ -226,27 +265,31 @@ async function persistEventReviewToggle(ev, wantVerified) {
         throw new Error(err.detail || `保存失败 (${res.status})`);
       }
       const body = await res.json();
-      return applyEventReviewResponse(body, seq);
+      return applyEventReviewResponse(body, seq, recordId);
     } catch (err) {
       if (seq !== eventReviewSaveSeq) return false;
-      setEventReviewSaveStatus(err.message || "保存失败", "error");
+      if (recordId === currentRecordId) {
+        setEventReviewSaveStatus(err.message || "保存失败", "error");
+      }
       return false;
     }
   });
 }
 
 async function saveEventReviewNow() {
-  if (!currentRecordId) return;
+  const recordId = currentRecordId;
+  if (!recordId) return;
+  const verified_true = buildVerifiedTruePayload();
+  const eventTotal = playbackEvents.length;
+  const seq = ++eventReviewSaveSeq;
   return runSerializedEventReviewSave(async () => {
-    const seq = ++eventReviewSaveSeq;
-    const verified_true = buildVerifiedTruePayload();
     try {
-      const res = await fetch(recordApiUrl(currentRecordId, "/event-review"), {
+      const res = await fetch(recordApiUrl(recordId, "/event-review"), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           verified_true,
-          event_total: playbackEvents.length,
+          event_total: eventTotal,
         }),
       });
       if (!res.ok) {
@@ -254,29 +297,37 @@ async function saveEventReviewNow() {
         throw new Error(err.detail || `保存失败 (${res.status})`);
       }
       const body = await res.json();
-      applyEventReviewResponse(body, seq);
+      applyEventReviewResponse(body, seq, recordId);
     } catch (err) {
       if (seq !== eventReviewSaveSeq) return;
-      setEventReviewSaveStatus(err.message || "保存失败", "error");
+      if (recordId === currentRecordId) {
+        setEventReviewSaveStatus(err.message || "保存失败", "error");
+      }
     }
   });
 }
 
 async function markEventReviewCompleted() {
-  if (!currentRecordId) {
+  const recordId = currentRecordId;
+  if (!recordId) {
     setEventReviewSaveStatus("请从记录列表打开回放后再完成复核", "error");
     return;
   }
+  const verified_true = buildVerifiedTruePayload();
+  const eventTotal = playbackEvents.length;
+  const seq = ++eventReviewSaveSeq;
   return runSerializedEventReviewSave(async () => {
-    setEventReviewSaveStatus("正在标记已复核…", "pending");
+    if (recordId === currentRecordId) {
+      setEventReviewSaveStatus("正在标记已复核…", "pending");
+    }
     try {
-      const res = await fetch(recordApiUrl(currentRecordId, "/event-review"), {
+      const res = await fetch(recordApiUrl(recordId, "/event-review"), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           status: "completed",
-          event_total: playbackEvents.length,
-          verified_true: buildVerifiedTruePayload(),
+          event_total: eventTotal,
+          verified_true,
         }),
       });
       if (!res.ok) {
@@ -284,12 +335,12 @@ async function markEventReviewCompleted() {
         throw new Error(err.detail || `操作失败 (${res.status})`);
       }
       const body = await res.json();
-      const seq = ++eventReviewSaveSeq;
-      applyEventReviewResponse(body, seq);
-      currentEventReviewStatus = body.event_review_status || "completed";
-      patchPlaybackRecordReviewStatus(currentRecordId, "completed", "已复核");
-      setEventReviewSaveStatus("已标记为复核完成");
-      updateReviewDock();
+      applyEventReviewResponse(body, seq, recordId);
+      if (recordId === currentRecordId) {
+        currentEventReviewStatus = body.event_review_status || "completed";
+        setEventReviewSaveStatus("已标记为复核完成");
+        updateReviewDock();
+      }
       await loadRecords({ quiet: true });
     } catch (err) {
       setEventReviewSaveStatus(err.message || "操作失败", "error");

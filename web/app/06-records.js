@@ -100,15 +100,15 @@ function patchPlaybackRecordReviewStatus(recordId, status, label = "") {
   if (changed) renderPlaybackRecordsList(playbackRecordsCache);
 }
 
-function applyEventReviewPatchFromBody(body) {
-  if (!currentRecordId || !body) return;
+function applyEventReviewPatchFromBody(body, recordId = currentRecordId) {
+  if (!recordId || !body) return;
   const st =
     body.event_review_status ||
     body.event_review?.status ||
     (body.event_review?.verified_true?.length || body.event_review?.updated_at ? "in_progress" : null);
   if (!st) return;
   patchPlaybackRecordReviewStatus(
-    currentRecordId,
+    recordId,
     st,
     body.event_review_label || reviewStatusLabel(st)
   );
@@ -236,6 +236,7 @@ function bindRecordListEvents(list) {
           throw new Error(err.detail || res.statusText || "删除失败");
         }
         if (currentRecordId === rid) {
+          await prepareEventReviewRecordSwitch();
           finishPlaybackSession();
           currentRecordId = null;
         }
@@ -448,6 +449,7 @@ async function startVideoPlayback(hintPrefix = "") {
 }
 
 async function openRecordReplay(recordId, displayName = "", jsonFileName = "", expectVideo = false) {
+  await prepareEventReviewRecordSwitch();
   tabs.forEach((b) => b.classList.toggle("active", b.dataset.tab === "playback"));
   Object.values(panels).forEach((p) => p.classList.remove("active"));
   panels.playback.classList.add("active");
