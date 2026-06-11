@@ -148,7 +148,7 @@ function initEventReviewControls() {
   $("#event-prev-btn")?.addEventListener("click", () => navigateReviewEvent(-1));
   $("#event-skip-next-btn")?.addEventListener("click", () => void skipToNextEvent());
   $("#event-mark-true-next-btn")?.addEventListener("click", () => void confirmTrueAndNext());
-  $("#event-unmark-btn")?.addEventListener("click", () => void markActiveEventVerified(false));
+  $("#event-unmark-btn")?.addEventListener("click", () => void unmarkTrueAndNext());
   $("#event-review-complete-btn")?.addEventListener("click", () => void markEventReviewCompleted());
 
   $("#event-review-list-details")?.addEventListener("toggle", (e) => {
@@ -175,7 +175,7 @@ function initEventReviewControls() {
       void skipToNextEvent();
     } else if (e.key === "u" || e.key === "U") {
       e.preventDefault();
-      void markActiveEventVerified(false);
+      void unmarkTrueAndNext();
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
       navigateReviewEvent(1);

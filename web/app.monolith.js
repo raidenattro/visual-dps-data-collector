@@ -1282,9 +1282,6 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
     if (f0 && (f0.w !== frameW || f0.h !== frameH)) {
       hint += ` JSON 推理 ${f0.w}×${f0.h}，将自动对齐。`;
     }
-    if (playbackEvents.length) {
-      hint += " · 已定位待复核事件，用「标为真 · 下一条」或 Y 键快速复核";
-    }
     setPlaybackInfo(hint);
     redrawCurrentFrame();
     if (!playbackEvents.length) {

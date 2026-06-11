@@ -560,16 +560,44 @@ async function confirmTrueAndNext() {
   }
 }
 
+async function unmarkTrueAndNext() {
+  const ev = getActiveEvent();
+  if (!ev) {
+    setEventReviewSaveStatus("请先在列表或进度条上选择一条事件", "");
+    return;
+  }
+  if (isEventVerified(ev)) {
+    if (!currentRecordId) {
+      setEventReviewSaveStatus("导入 JSON 无法保存，请从记录列表打开", "error");
+      return;
+    }
+    setEventVerified(ev, false);
+    updateReviewDock();
+    if ($("#event-review-list-details")?.open) renderEventReviewTable();
+    renderEventMarkers();
+    const ok = await persistEventReviewToggle(ev, false);
+    if (!ok) {
+      setEventVerified(ev, true);
+      updateReviewDock();
+      if ($("#event-review-list-details")?.open) renderEventReviewTable();
+      renderEventMarkers();
+      return;
+    }
+    if (eventRowKey(ev) === reviewBackKey) {
+      reviewBackKey = null;
+    }
+  } else {
+    setEventReviewSaveStatus("当前选中事件未标真", "");
+  }
+  navigateReviewEvent(1);
+}
+
 async function skipToNextEvent() {
   navigateReviewEvent(1);
 }
 
 async function beginEventReview() {
   if (!playbackEvents.length) return;
-  const hasUnreviewed = playbackEvents.some((e) => !isEventVerified(e));
-  if (hasUnreviewed && eventFilterSelect) {
-    eventFilterSelect.value = "unreviewed";
-  }
   const first = filteredPlaybackEvents()[0];
   if (first) await seekToEvent(first);
   else updateReviewDock();
