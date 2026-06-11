@@ -83,3 +83,5 @@ desktop.ini
 # --- 本机覆盖配置（可选，若后续增加 config.local.json）---
 config.local.json
 config.*.local.json
+
+localdata/data.db

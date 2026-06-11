@@ -499,11 +499,11 @@ main:has(#panel-playback.active) {
 }
 
 .playback-layout-left .playback-records-toolbar,
-.playback-layout-left .playback-records-filter {
+.playback-layout-left .playback-records-filters {
   flex-shrink: 0;
 }
 
-.playback-layout-left .playback-records-filter input[type="search"] {
+.playback-layout-left .playback-records-search-filter input[type="search"] {
   max-width: none;
 }
 
@@ -651,15 +651,20 @@ main:has(#panel-playback.active) {
   margin-bottom: 0.75rem;
 }
 
-.playback-records-filter {
+.playback-records-filters {
   display: flex;
-  align-items: center;
-  gap: 0.75rem;
+  flex-direction: column;
+  gap: 0.35rem;
   margin-bottom: 0.5rem;
 }
 
-.playback-records-filter select,
-.playback-records-filter input[type="search"] {
+.playback-records-tier-filter select,
+.playback-records-review-filter select,
+.playback-records-verified-filter select,
+.playback-records-search-filter input[type="search"],
+.playback-records-tag-filter input[type="search"] {
+  margin-top: 0;
+  width: 100%;
   padding: 0.4rem 0.65rem;
   border: 1px solid #334155;
   border-radius: 6px;
@@ -668,14 +673,87 @@ main:has(#panel-playback.active) {
   font-size: 0.88rem;
 }
 
-.playback-records-filter select {
-  flex-shrink: 0;
+.playback-records-tier-filter select,
+.playback-records-review-filter select,
+.playback-records-verified-filter select {
+  width: 100%;
 }
 
-.playback-records-filter input[type="search"] {
-  flex: 1;
-  min-width: 0;
-  max-width: 20rem;
+.playback-records-search-filter input[type="search"] {
+  font-size: 0.84rem;
+}
+
+.playback-records-tag-filter {
+  margin-bottom: 0;
+}
+
+.playback-records-count {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.3;
+}
+
+
+.record-tags-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.35rem;
+  width: 100%;
+}
+
+.record-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.1rem 0.35rem 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: #1e3a5f;
+  border: 1px solid #3b82f6;
+  color: #bfdbfe;
+  font-size: 0.72rem;
+  line-height: 1.3;
+}
+
+.record-tag-text {
+  max-width: 8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.record-tag-remove {
+  border: none;
+  background: transparent;
+  color: #93c5fd;
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 0 0.1rem;
+}
+
+.record-tag-remove:hover {
+  color: #fecaca;
+}
+
+.record-tag-add-btn {
+  border: 1px dashed #475569;
+  background: transparent;
+  color: #94a3b8;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 0.72rem;
+  padding: 0.12rem 0.45rem;
+  line-height: 1.3;
+}
+
+.record-tag-add-btn:hover {
+  border-color: #64748b;
+  color: #cbd5e1;
+}
+
+.playback-layout-left .record-tags-inline {
+  flex: 1 1 100%;
 }
 
 .playback-records-list {

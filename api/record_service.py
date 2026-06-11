@@ -49,6 +49,7 @@ from pose_store import (
 
 from api.naming import display_name_from_pose_file
 from api.reflection_service import REFLECTION_OK, load_reflection_or_http, normalize_corner_label
+from record_tag_store import get_tags_map
 
 def json_archive_dir() -> Path:
     return resolve_app_paths().json_dir / "archive"
@@ -517,7 +518,22 @@ def record_summary_for_list(locator, paths: AppPaths | None = None) -> dict[str,
         "pose_file": pose_file,
         "pose_label": pose_label,
         "summary": True,
+        "tags": [],
     }
+
+
+def attach_tags_to_summaries(items: list[dict[str, Any]]) -> None:
+    """批量合并 SQLite 标签，避免列表接口 N+1 查询。"""
+    if not items:
+        return
+    record_ids = [str(item.get("record_id") or "").strip() for item in items]
+    record_ids = [rid for rid in record_ids if rid]
+    if not record_ids:
+        return
+    tag_map = get_tags_map(record_ids)
+    for item in items:
+        rid = str(item.get("record_id") or "").strip()
+        item["tags"] = tag_map.get(rid, [])
 
 
 def record_meta_for_list(locator) -> dict[str, Any]:

@@ -67,6 +67,7 @@ from api.collision_recompute_service import recompute_records_collisions
 from api.record_service import (
     annotation_frame_size,
     annotation_path_for_record,
+    attach_tags_to_summaries,
     find_records_for_annotation_stem,
     locate_record_by_id,
     meta_path_for_record,
@@ -78,6 +79,21 @@ from api.record_service import (
     resolve_annotation_path_for_record,
     video_path_for_record,
     video_path_for_video_stem,
+)
+from record_index_store import (
+    delete_record_index,
+    import_event_reviews_to_index,
+    list_record_summaries,
+    refresh_record_summary,
+    sync_record_summaries,
+)
+from record_tag_store import (
+    delete_record_tags,
+    get_tags_for_record,
+    list_tags_with_counts,
+    normalize_tag_name,
+    patch_record_tags,
+    record_ids_with_all_tags,
 )
 from api.reflection_service import (
     REFLECTION_OK,
@@ -184,28 +200,95 @@ def lookup_reflection_camera(camera: str = "") -> dict[str, Any]:
     }
 
 
+def _parse_tags_query(raw: str) -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for part in str(raw or "").replace("，", ",").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            name = normalize_tag_name(part)
+        except ValueError:
+            continue
+        key = name.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        names.append(name)
+    return names
+
+
+@router.get("/api/tags")
+def list_record_tags() -> dict[str, Any]:
+    """全部标签及关联记录数。"""
+    return {"tags": list_tags_with_counts()}
+
+
+@router.post("/api/records/import-event-reviews")
+def import_event_reviews_api(pose_tier: str = "") -> dict[str, Any]:
+    """从已有 event_review.json 导入复核状态到 data.db 索引（不写回 JSON）。"""
+    paths = resolve_app_paths()
+    tier_filter = str(pose_tier or "").strip().lower() or None
+    stats = import_event_reviews_to_index(paths, pose_tier=tier_filter)
+    return {"ok": True, **stats}
+
+
+def _parse_has_verified_query(raw: str) -> bool | None:
+    text = str(raw or "").strip().lower()
+    if not text or text in {"all", "any"}:
+        return None
+    if text in {"1", "true", "yes", "y", "has", "verified"}:
+        return True
+    if text in {"0", "false", "no", "n", "none", "unverified"}:
+        return False
+    return None
+
+
 @router.get("/api/records")
 def list_records(
     summary: bool = True,
     offset: int = 0,
     limit: int = 0,
     pose_tier: str = "",
+    tags: str = "",
+    review_status: str = "",
+    has_verified: str = "",
 ) -> list[dict[str, Any]]:
-    """列出采集记录。pose_tier 过滤 rtmpose-t/s/m；offset/limit 供前端分页拉取。"""
+    """列出采集记录。pose_tier 过滤 rtmpose-t/s/m；tags 逗号分隔多标签（需全部匹配）。"""
     paths = resolve_app_paths()
     paths.json_dir.mkdir(parents=True, exist_ok=True)
     tier_filter = str(pose_tier or "").strip().lower() or None
-    locators = iter_active_records(paths.json_dir, pose_tier=tier_filter)
+    tag_filter = _parse_tags_query(tags)
+    review_filter = str(review_status or "").strip().lower() or None
+    verified_filter = _parse_has_verified_query(has_verified)
     off = max(0, int(offset))
+    lim = int(limit)
+
+    if summary:
+        sync_record_summaries(paths, tier_filter)
+        allowed_ids = record_ids_with_all_tags(tag_filter) if tag_filter else None
+        items = list_record_summaries(
+            pose_tier=tier_filter,
+            offset=off,
+            limit=lim,
+            allowed_ids=allowed_ids,
+            review_status=review_filter,
+            has_verified=verified_filter,
+        )
+        attach_tags_to_summaries(items)
+        return items
+
+    locators = list(iter_active_records(paths.json_dir, pose_tier=tier_filter))
+    if tag_filter:
+        allowed = record_ids_with_all_tags(tag_filter)
+        locators = [loc for loc in locators if loc.record_id in allowed]
     if off:
         locators = locators[off:]
-    lim = int(limit)
     if lim > 0:
         locators = locators[:lim]
-    if summary:
-        items = [record_summary_for_list(loc, paths) for loc in locators]
-    else:
-        items = [record_meta_for_list(loc) for loc in locators]
+    items = [record_meta_for_list(loc) for loc in locators]
+    attach_tags_to_summaries(items)
     return items
 
 
@@ -252,9 +335,42 @@ def delete_record_api(record_id: str) -> dict[str, Any]:
             locator,
             video_path=video_path,
         )
+        delete_record_tags(rid)
+        delete_record_index(rid)
     except OSError as exc:
         raise HTTPException(500, f"删除失败: {exc}") from exc
     return result
+
+
+@router.get("/api/records/{record_id:path}/tags")
+def get_record_tags_api(record_id: str) -> dict[str, Any]:
+    rid = str(record_id or "").strip()
+    if not rid:
+        raise HTTPException(400, "record_id 无效")
+    locator = locate_record_by_id(rid, include_archive=False)
+    if not locator:
+        raise HTTPException(404, "记录不存在")
+    return {"record_id": rid, "tags": get_tags_for_record(rid)}
+
+
+@router.patch("/api/records/{record_id:path}/tags")
+def patch_record_tags_api(
+    record_id: str,
+    body: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    rid = str(record_id or "").strip()
+    if not rid:
+        raise HTTPException(400, "record_id 无效")
+    locator = locate_record_by_id(rid, include_archive=False)
+    if not locator:
+        raise HTTPException(404, "记录不存在")
+    add_raw = body.get("add") if isinstance(body.get("add"), list) else []
+    remove_raw = body.get("remove") if isinstance(body.get("remove"), list) else []
+    try:
+        tags = patch_record_tags(rid, add=add_raw, remove=remove_raw)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"record_id": rid, "tags": tags}
 
 
 @router.get("/api/records/{record_id:path}/video")
@@ -643,6 +759,7 @@ def patch_record_event_review(record_id: str, body: dict[str, Any] = Body(...)) 
         saved = load_event_review(locator)
         events = enrich_events_with_review(load_events(locator), locator)
         review_status = resolve_event_review_status(saved, event_count=len(events))
+        refresh_record_summary(record_id)
         return JSONResponse(
             {
                 "status": "ok",
@@ -708,6 +825,7 @@ def patch_record_event_review(record_id: str, body: dict[str, Any] = Body(...)) 
             raise HTTPException(500, f"保存复核失败: {exc}") from exc
         saved = load_event_review(locator)
         review_status = resolve_event_review_status(saved, event_count=0)
+        refresh_record_summary(record_id)
         return JSONResponse(
             {
                 "status": "ok",
@@ -744,6 +862,7 @@ def patch_record_event_review(record_id: str, body: dict[str, Any] = Body(...)) 
     events = enrich_events_with_review(all_events, locator)
     saved = load_event_review(locator)
     review_status = resolve_event_review_status(saved, event_count=len(events))
+    refresh_record_summary(record_id)
     return JSONResponse(
         {
             "status": "ok",
