@@ -1294,6 +1294,7 @@ main:has(#panel-playback.active) {
   font-size: 0.8rem;
 }
 
+
 .event-save-status {
   display: block;
   min-height: 1.35em;
@@ -1398,16 +1399,23 @@ main:has(#panel-playback.active) {
 
 .event-review-actions {
   display: grid;
-  grid-template-columns: minmax(5rem, auto) 1fr 1fr minmax(5.5rem, auto) minmax(6.5rem, auto);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.45rem;
+  align-items: stretch;
 }
 
 .event-review-actions button {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.5rem;
   border-radius: 6px;
   cursor: pointer;
   border: 1px solid transparent;
-  font-size: 0.9rem;
-  padding: 0.55rem 0.65rem;
+  font-size: 0.88rem;
+  line-height: 1.2;
+  padding: 0.5rem 0.45rem;
   white-space: nowrap;
 }
 
@@ -1415,9 +1423,7 @@ main:has(#panel-playback.active) {
   background: #16a34a;
   color: #fff;
   border-color: #15803d;
-  font-size: 1rem !important;
   font-weight: 600;
-  padding: 0.65rem 0.75rem !important;
 }
 
 .btn-review-true:hover {
@@ -1438,7 +1444,34 @@ main:has(#panel-playback.active) {
   background: #475569;
 }
 
+.btn-review-bulk-true {
+  background: rgba(22, 163, 74, 0.18);
+  color: #86efac;
+  border-color: #15803d;
+}
+
+.btn-review-bulk-true:hover:not(:disabled) {
+  background: rgba(22, 163, 74, 0.32);
+}
+
+.btn-review-bulk-unmark {
+  background: #334155;
+  color: #e2e8f0;
+  border-color: #475569;
+}
+
+.btn-review-bulk-unmark:hover:not(:disabled) {
+  background: #475569;
+}
+
+.btn-review-bulk-true:disabled,
+.btn-review-bulk-unmark:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .btn-review-complete {
+  grid-column: 1 / -1;
   background: #1d4ed8;
   color: #fff;
   border-color: #1e40af;

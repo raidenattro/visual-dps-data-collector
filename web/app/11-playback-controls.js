@@ -153,6 +153,8 @@ function initEventReviewControls() {
   $("#event-skip-next-btn")?.addEventListener("click", () => void skipToNextEvent());
   $("#event-mark-true-next-btn")?.addEventListener("click", () => void confirmTrueAndNext());
   $("#event-unmark-btn")?.addEventListener("click", () => void unmarkTrueAndNext());
+  $("#event-mark-all-true-btn")?.addEventListener("click", () => void markAllEventsVerified(true));
+  $("#event-unmark-all-btn")?.addEventListener("click", () => void markAllEventsVerified(false));
   $("#event-review-complete-btn")?.addEventListener("click", () => void markEventReviewCompleted());
 
   $("#event-review-list-details")?.addEventListener("toggle", (e) => {

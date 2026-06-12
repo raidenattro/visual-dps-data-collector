@@ -276,13 +276,15 @@ async function persistEventReviewToggle(ev, wantVerified) {
   });
 }
 
-async function saveEventReviewNow() {
+async function persistEventReviewVerifiedList(verified_true, statusMessage = "保存中…") {
   const recordId = currentRecordId;
-  if (!recordId) return;
-  const verified_true = buildVerifiedTruePayload();
+  if (!recordId) return false;
   const eventTotal = playbackEvents.length;
   const seq = ++eventReviewSaveSeq;
   return runSerializedEventReviewSave(async () => {
+    if (recordId === currentRecordId) {
+      setEventReviewSaveStatus(statusMessage, "pending");
+    }
     try {
       const res = await fetch(recordApiUrl(recordId, "/event-review"), {
         method: "PATCH",
@@ -297,14 +299,86 @@ async function saveEventReviewNow() {
         throw new Error(err.detail || `保存失败 (${res.status})`);
       }
       const body = await res.json();
-      applyEventReviewResponse(body, seq, recordId);
+      return applyEventReviewResponse(body, seq, recordId);
     } catch (err) {
-      if (seq !== eventReviewSaveSeq) return;
+      if (seq !== eventReviewSaveSeq) return false;
       if (recordId === currentRecordId) {
         setEventReviewSaveStatus(err.message || "保存失败", "error");
       }
+      return false;
     }
   });
+}
+
+async function saveEventReviewNow() {
+  const verified_true = buildVerifiedTruePayload();
+  await persistEventReviewVerifiedList(verified_true);
+}
+
+function restoreVerifiedSnapshot(snapshot) {
+  verifiedTrueKeys.clear();
+  snapshot.forEach((key) => verifiedTrueKeys.add(key));
+  applyVerifiedFlagsToEvents();
+}
+
+async function markAllEventsVerified(verified) {
+  if (!currentRecordId) {
+    setEventReviewSaveStatus("导入 JSON 无法保存，请从记录列表打开", "error");
+    return;
+  }
+  const total = playbackEvents.length;
+  if (!total) {
+    setEventReviewSaveStatus("无事件可操作", "");
+    return;
+  }
+
+  const verifiedN = countVerifiedEvents();
+  if (verified) {
+    if (verifiedN >= total) {
+      setEventReviewSaveStatus("全部事件已标真", "");
+      return;
+    }
+    if (
+      !window.confirm(
+        `确定将本记录全部 ${total} 条事件标为真？\n\n确认后将一次性写入服务端；之后仍可用「全部取消标真」或逐条调整。`
+      )
+    ) {
+      return;
+    }
+  } else {
+    if (verifiedN <= 0) {
+      setEventReviewSaveStatus("暂无已标真事件", "");
+      return;
+    }
+    if (
+      !window.confirm(
+        `确定取消本记录全部 ${verifiedN} 条已标真？\n\n确认后将清空标真状态，需重新标真。`
+      )
+    ) {
+      return;
+    }
+  }
+
+  const snapshot = new Set(verifiedTrueKeys);
+  playbackEvents.forEach((ev) => setEventVerified(ev, verified));
+  updateReviewDock();
+  if ($("#event-review-list-details")?.open) renderEventReviewTable();
+  renderEventMarkers();
+
+  const verified_true = verified ? playbackEvents.map((e) => eventToReviewPayload(e)) : [];
+  const statusMessage = verified ? `全部标真 ${total} 条 · 保存中…` : "取消全部标真 · 保存中…";
+  const ok = await persistEventReviewVerifiedList(verified_true, statusMessage);
+  if (!ok) {
+    restoreVerifiedSnapshot(snapshot);
+    updateReviewDock();
+    if ($("#event-review-list-details")?.open) renderEventReviewTable();
+    renderEventMarkers();
+    return;
+  }
+  setEventReviewSaveStatus(
+    verified ? `已全部标真 · 共 ${total} 条` : "已取消全部标真",
+    ""
+  );
 }
 
 async function markEventReviewCompleted() {
@@ -496,6 +570,18 @@ function updateReviewDock() {
             ? " · 复核中"
             : "";
     summaryEl.textContent = `全部事件列表（${playbackEvents.length} 条，已标真 ${verifiedN}${reviewNote}）`;
+  }
+
+  const markAllBtn = $("#event-mark-all-true-btn");
+  const unmarkAllBtn = $("#event-unmark-all-btn");
+  const totalEvents = playbackEvents.length;
+  const verifiedCount = countVerifiedEvents();
+  const canBulkSave = !!currentRecordId && totalEvents > 0;
+  if (markAllBtn) {
+    markAllBtn.disabled = !canBulkSave || verifiedCount >= totalEvents;
+  }
+  if (unmarkAllBtn) {
+    unmarkAllBtn.disabled = !canBulkSave || verifiedCount <= 0;
   }
 
   const completeBtn = $("#event-review-complete-btn");
