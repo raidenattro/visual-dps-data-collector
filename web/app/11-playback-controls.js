@@ -146,14 +146,20 @@ eventFilterSelect?.addEventListener("change", () => {
 });
 
 function initEventReviewControls() {
+  bindEventReviewListScrollSync();
+  scheduleEventReviewListScrollHeight();
+
   $("#event-prev-btn")?.addEventListener("click", () => navigateReviewEvent(-1));
   $("#event-skip-next-btn")?.addEventListener("click", () => void skipToNextEvent());
   $("#event-mark-true-next-btn")?.addEventListener("click", () => void confirmTrueAndNext());
   $("#event-unmark-btn")?.addEventListener("click", () => void unmarkTrueAndNext());
+  $("#event-mark-all-true-btn")?.addEventListener("click", () => void markAllEventsVerified(true));
+  $("#event-unmark-all-btn")?.addEventListener("click", () => void markAllEventsVerified(false));
   $("#event-review-complete-btn")?.addEventListener("click", () => void markEventReviewCompleted());
 
   $("#event-review-list-details")?.addEventListener("toggle", (e) => {
     if (e.target.open) renderEventReviewTable();
+    scheduleEventReviewListScrollHeight();
   });
 
   document.addEventListener("keydown", (e) => {

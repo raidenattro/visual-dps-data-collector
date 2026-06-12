@@ -622,6 +622,24 @@ def event_review_path(locator: RecordLocator) -> Path:
     return locator.path.with_suffix(".event_review.json")
 
 
+def events_to_verified_entries(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """将 load_events 结果转为 event_review.verified_true 条目（去重）。"""
+    verified: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        norm = normalize_review_entry(ev)
+        if not norm:
+            continue
+        sig = event_signature(norm["event_type"], norm["frame_idx"], norm["box_tokens"])
+        if sig in seen:
+            continue
+        seen.add(sig)
+        verified.append(norm)
+    return verified
+
+
 def normalize_review_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
     if not isinstance(entry, dict):
         return None

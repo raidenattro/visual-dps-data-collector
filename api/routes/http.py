@@ -37,6 +37,7 @@ from pose_store import (
     normalize_review_entry,
     delete_record,
     enrich_events_with_review,
+    events_to_verified_entries,
     event_review_write_lock,
     event_signature,
     iter_active_records,
@@ -715,7 +716,7 @@ def get_record_event_review(record_id: str) -> JSONResponse:
 
 @router.patch("/api/records/{record_id:path}/event-review")
 def patch_record_event_review(record_id: str, body: dict[str, Any] = Body(...)) -> JSONResponse:
-    """更新人工复核：verified_true / toggle / status=completed。"""
+    """更新人工复核：verified_true / toggle / set_all_verified / status=completed。"""
     locator = locate_record_by_id(record_id)
     if not locator:
         raise HTTPException(404, "记录不存在")
@@ -784,7 +785,22 @@ def _patch_record_event_review_locked(
         )
 
     action = str(body.get("action") or "").strip().lower()
-    if action == "toggle":
+    light_response = False
+    all_events: list[dict[str, Any]] | None = None
+
+    if action == "set_all_verified":
+        light_response = True
+        if "mark_all" not in body:
+            raise HTTPException(400, "set_all_verified 须包含 mark_all 布尔值")
+        if bool(body.get("mark_all")):
+            try:
+                all_events = load_events(locator)
+            except RuntimeError as exc:
+                raise HTTPException(500, str(exc)) from exc
+            verified = events_to_verified_entries(all_events)
+        else:
+            verified = []
+    elif action == "toggle":
         entry = body.get("event")
         if not isinstance(entry, dict):
             raise HTTPException(400, "toggle 须包含 event 对象")
@@ -816,14 +832,27 @@ def _patch_record_event_review_locked(
             seen.add(sig)
             verified.append(norm)
     else:
-        raise HTTPException(400, "请提供 verified_true、action=toggle 或 status=completed")
+        raise HTTPException(400, "请提供 verified_true、action=toggle、action=set_all_verified 或 status=completed")
 
-    try:
-        all_events = load_events(locator)
-    except RuntimeError as exc:
-        raise HTTPException(500, str(exc)) from exc
+    event_total_hint: int | None = None
+    if body.get("event_total") is not None:
+        try:
+            event_total_hint = max(0, int(body.get("event_total")))
+        except (TypeError, ValueError):
+            event_total_hint = None
 
-    if not all_events:
+    if all_events is None:
+        if light_response and action == "set_all_verified" and not bool(body.get("mark_all")):
+            all_events = []
+        else:
+            try:
+                all_events = load_events(locator)
+            except RuntimeError as exc:
+                raise HTTPException(500, str(exc)) from exc
+
+    effective_event_count = len(all_events) if all_events else (event_total_hint or 0)
+
+    if effective_event_count == 0 and not verified:
         event_total_empty = 0
         if body.get("event_total") is not None:
             try:
@@ -881,14 +910,7 @@ def _patch_record_event_review_locked(
         )
 
     next_status = "in_progress"
-    event_total: int | None = None
-    if body.get("event_total") is not None:
-        try:
-            event_total = max(0, int(body.get("event_total")))
-        except (TypeError, ValueError):
-            event_total = None
-    if event_total is None:
-        event_total = len(all_events)
+    event_total = event_total_hint if event_total_hint is not None else len(all_events)
 
     try:
         path = save_event_review(
@@ -900,22 +922,23 @@ def _patch_record_event_review_locked(
     except OSError as exc:
         raise HTTPException(500, f"保存复核失败: {exc}") from exc
 
-    events = enrich_events_with_review(all_events, locator)
     saved = load_event_review(locator)
-    review_status = resolve_event_review_status(saved, event_count=len(events))
+    review_status = resolve_event_review_status(saved, event_count=event_total)
     refresh_record_summary(record_id)
-    return JSONResponse(
-        {
-            "status": "ok",
-            "record_id": record_id,
-            "path": str(path),
-            "verified_true_count": len(saved.get("verified_true") or []),
-            "event_review_status": review_status,
-            "event_review_label": event_review_status_label(review_status),
-            "event_review": saved,
-            "events": events,
-        }
-    )
+    payload: dict[str, Any] = {
+        "status": "ok",
+        "record_id": record_id,
+        "path": str(path),
+        "verified_true_count": len(saved.get("verified_true") or []),
+        "event_review_status": review_status,
+        "event_review_label": event_review_status_label(review_status),
+        "event_review": saved,
+    }
+    if light_response:
+        payload["light"] = True
+    else:
+        payload["events"] = enrich_events_with_review(all_events, locator)
+    return JSONResponse(payload)
 
 
 @router.get("/api/records/{record_id:path}/timeline")
