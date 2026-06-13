@@ -118,7 +118,7 @@ async function ensureFrameChunkLoaded(frameIdx) {
 }
 
 function getDisplayLayout() {
-  const wrap = stageWrap || document.querySelector(".stage-wrap");
+  const wrap = stageWrap || document.querySelector(".playback-layout-main .stage-wrap");
   if (!wrap) return computeContainLayout(640, 480, 640, 480);
   const rect = wrap.getBoundingClientRect();
   const { frameW, frameH } = getVideoFrameSize();

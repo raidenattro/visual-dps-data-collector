@@ -34,17 +34,69 @@ function eventRowKey(ev) {
   return `${eventType}:${frameIdx}:${tokens.join(",")}`;
 }
 
+function getEventsOnFrame(frameIdx) {
+  const fi = parseInt(frameIdx, 10) || 0;
+  return playbackEvents.filter((e) => (parseInt(e.frame_idx, 10) || 0) === fi);
+}
+
+function countFrameConfirmedBoxes(frameIdx) {
+  return getEventsOnFrame(frameIdx).filter((e) => getEventConfirmedBox(e)).length;
+}
+
+function isAnnotationBoxToken(token) {
+  const hit = String(token || "").trim();
+  if (!hit || !annotationBoxes.length) return false;
+  return annotationBoxes.some((box) => boxCollisionToken(box) === hit);
+}
+
+function getEventConfirmedBox(ev) {
+  if (!ev) return "";
+  const key = eventRowKey(ev);
+  const saved = String(ev.confirmed_box_token || "").trim();
+  if (saved) return saved;
+  const pending = pendingConfirmedBoxByKey.get(key);
+  return pending ? String(pending).trim() : "";
+}
+
 function eventToReviewPayload(ev) {
   const tokens = [...(ev.box_tokens || [])]
     .map((t) => String(t).trim())
     .filter((t) => t.length > 0);
   const frameIdx = parseInt(ev.frame_idx, 10) || 0;
-  return {
+  const payload = {
     event_type: String(ev.event_type || "").trim(),
     frame_idx: frameIdx,
     source_frame_idx: parseInt(ev.source_frame_idx ?? ev.frame_idx, 10) || frameIdx,
     box_tokens: tokens,
   };
+  let confirmed = getEventConfirmedBox(ev);
+  const frameEvents = getEventsOnFrame(ev.frame_idx);
+  if (!confirmed && tokens.length === 1 && frameEvents.length === 1) {
+    confirmed = tokens[0];
+  }
+  if (confirmed) {
+    payload.confirmed_box_token = confirmed;
+  }
+  return payload;
+}
+
+function syncConfirmedBoxFromReview(reviewPayload, events = playbackEvents) {
+  const list = reviewPayload?.verified_true;
+  if (!Array.isArray(list)) return;
+  const byKey = new Map();
+  for (const item of list) {
+    if (!item || typeof item !== "object") continue;
+    const token = String(item.confirmed_box_token || "").trim();
+    if (!token) continue;
+    byKey.set(eventRowKey(item), token);
+  }
+  (events || []).forEach((ev) => {
+    const key = eventRowKey(ev);
+    if (byKey.has(key)) {
+      ev.confirmed_box_token = byKey.get(key);
+      pendingConfirmedBoxByKey.delete(key);
+    }
+  });
 }
 
 function buildEventsFromFrames(frames) {
@@ -146,6 +198,7 @@ function syncVerifiedKeysFromEvents(events, reviewPayload = null) {
       verifiedTrueKeys.add(key);
     }
   }
+  syncConfirmedBoxFromReview(reviewPayload, events);
 }
 
 function applyVerifiedFlagsToEvents() {
@@ -157,7 +210,11 @@ function applyVerifiedFlagsToEvents() {
 function setEventVerified(ev, verified) {
   const key = eventRowKey(ev);
   if (verified) verifiedTrueKeys.add(key);
-  else verifiedTrueKeys.delete(key);
+  else {
+    verifiedTrueKeys.delete(key);
+    delete ev.confirmed_box_token;
+    pendingConfirmedBoxByKey.delete(key);
+  }
   ev.verified_true = !!verified;
   if (!verified && isReviewTerminalStatus(currentEventReviewStatus)) {
     currentEventReviewStatus = "in_progress";
@@ -248,6 +305,89 @@ function applyEventReviewResponse(body, seq, forRecordId = currentRecordId, opti
 }
 
 /** 单条标真/取消：服务端 toggle，避免全量 verified_true 覆盖误删 */
+async function persistEventReviewConfirmedBox(ev, confirmedBoxToken) {
+  const recordId = currentRecordId;
+  if (!recordId || !ev || !confirmedBoxToken) return false;
+  const eventPayload = eventToReviewPayload(ev);
+  eventPayload.confirmed_box_token = confirmedBoxToken;
+  const eventTotal = playbackEvents.length;
+  const seq = ++eventReviewSaveSeq;
+  return runSerializedEventReviewSave(async () => {
+    const showUi = recordId === currentRecordId;
+    if (showUi) setEventReviewSaveStatus("保存货框确认…", "pending");
+    try {
+      const res = await fetch(recordApiUrl(recordId, "/event-review"), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "set_confirmed_box",
+          event: eventPayload,
+          confirmed_box_token: confirmedBoxToken,
+          event_total: eventTotal,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `保存失败 (${res.status})`);
+      }
+      const body = await res.json();
+      return applyEventReviewResponse(body, seq, recordId, {
+        statusMessage: `已确认货框 ${confirmedBoxToken}`,
+      });
+    } catch (err) {
+      if (seq !== eventReviewSaveSeq) return false;
+      if (recordId === currentRecordId) {
+        setEventReviewSaveStatus(err.message || "保存失败", "error");
+      }
+      return false;
+    }
+  });
+}
+
+async function selectConfirmedBoxForEvent(ev, token) {
+  if (!ev || !token) return;
+  const hit = String(token).trim();
+  if (!isAnnotationBoxToken(hit)) {
+    setEventReviewSaveStatus(`货框 ${hit} 不在标注列表中`, "error");
+    return;
+  }
+  const key = eventRowKey(ev);
+  const frameEvents = getEventsOnFrame(ev.frame_idx);
+  for (const other of frameEvents) {
+    const otherKey = eventRowKey(other);
+    if (otherKey === key) continue;
+    if (getEventConfirmedBox(other) === hit) {
+      setEventReviewSaveStatus(
+        `货框 ${hit} 已被本帧第 ${frameEvents.findIndex((e) => eventRowKey(e) === otherKey) + 1} 条事件占用`,
+        "error"
+      );
+      return;
+    }
+  }
+  ev.confirmed_box_token = hit;
+  pendingConfirmedBoxByKey.set(key, hit);
+  updateReviewDock();
+  if (typeof updateStageBoxPickMode === "function") updateStageBoxPickMode();
+  redrawCurrentFrame();
+  if (isEventVerified(ev) && currentRecordId) {
+    await persistEventReviewConfirmedBox(ev, hit);
+  } else {
+    const frameN = frameEvents.length;
+    const confirmedN = countFrameConfirmedBoxes(ev.frame_idx);
+    const frameHint = frameN > 1 ? ` · 本帧 ${confirmedN}/${frameN}` : "";
+    setEventReviewSaveStatus(`已选货框 ${hit}${frameHint}（标真时一并保存）`, "");
+  }
+  if (frameEvents.length > 1) {
+    const nextNeed = frameEvents.find((item) => {
+      const itemKey = eventRowKey(item);
+      return itemKey !== key && !getEventConfirmedBox(item);
+    });
+    if (nextNeed) {
+      await seekToEvent(nextNeed, { keepReviewBack: true });
+    }
+  }
+}
+
 async function persistEventReviewToggle(ev, wantVerified) {
   const recordId = currentRecordId;
   if (!recordId || !ev) return false;
@@ -470,6 +610,9 @@ function filteredPlaybackEvents() {
   if (mode === "all") return playbackEvents;
   if (mode === "verified") return playbackEvents.filter((e) => isEventVerified(e));
   if (mode === "unreviewed") return playbackEvents.filter((e) => !isEventVerified(e));
+  if (mode === "needs_box") {
+    return playbackEvents.filter((e) => (e.box_tokens || []).length > 0 && !getEventConfirmedBox(e));
+  }
   if (mode === "alarm" || mode === "collision") {
     return playbackEvents.filter((e) => e.event_type === mode);
   }
@@ -652,6 +795,7 @@ function updateReviewDock() {
       tokensEl.setAttribute("aria-hidden", "true");
     }
     verifiedTag?.classList.add("hidden");
+    finishUpdateReviewDock();
     return;
   }
 
@@ -663,7 +807,7 @@ function updateReviewDock() {
       tokensEl.setAttribute("aria-hidden", "true");
     }
     verifiedTag?.classList.add("hidden");
-    scheduleEventReviewListScrollHeight();
+    finishUpdateReviewDock();
     return;
   }
 
@@ -680,7 +824,10 @@ function updateReviewDock() {
     }
   }
 
-  if (!ev) return;
+  if (!ev) {
+    finishUpdateReviewDock();
+    return;
+  }
   const typeLabel = ev.event_type === "alarm" ? "告警" : "碰撞";
   if (badgeEl) {
     badgeEl.textContent = typeLabel;
@@ -691,14 +838,47 @@ function updateReviewDock() {
   }
   if (tokensEl) {
     const tokenText = formatEventTokens(ev.box_tokens);
-    tokensEl.textContent = tokenText || "\u00a0";
-    tokensEl.setAttribute("aria-hidden", tokenText ? "false" : "true");
-    if (tokenText) tokensEl.title = tokenText;
+    const confirmed = getEventConfirmedBox(ev);
+    const displayText = confirmed ? `${tokenText} → 已确认 ${confirmed}` : tokenText;
+    tokensEl.textContent = displayText || "\u00a0";
+    tokensEl.setAttribute("aria-hidden", displayText ? "false" : "true");
+    if (displayText) tokensEl.title = displayText;
     else tokensEl.removeAttribute("title");
+  }
+  const boxConfirmEl = $("#event-review-box-confirm");
+  if (boxConfirmEl) {
+    const confirmed = getEventConfirmedBox(ev);
+    const frameEvents = getEventsOnFrame(ev.frame_idx);
+    const frameN = frameEvents.length;
+    const confirmedN = countFrameConfirmedBoxes(ev.frame_idx);
+    if (!annotationBoxes.length) {
+      boxConfirmEl.textContent = "加载标注后可点击画面任意货架货框";
+      boxConfirmEl.classList.remove("is-confirmed");
+    } else if (frameN > 1) {
+      const frameNote = `本帧 ${frameN} 条事件 · 已确认货框 ${confirmedN}/${frameN}`;
+      if (confirmed) {
+        boxConfirmEl.textContent = `${frameNote} · 当前事件：${confirmed}`;
+        boxConfirmEl.classList.add("is-confirmed");
+      } else {
+        boxConfirmEl.textContent = `${frameNote} · 请点击画面为当前事件选择货框（不可重复）`;
+        boxConfirmEl.classList.remove("is-confirmed");
+      }
+    } else if (confirmed) {
+      boxConfirmEl.textContent = `已确认货框：${confirmed}`;
+      boxConfirmEl.classList.add("is-confirmed");
+    } else {
+      boxConfirmEl.textContent = "请点击画面任意货架货框确认编号";
+      boxConfirmEl.classList.remove("is-confirmed");
+    }
   }
   if (verifiedTag) {
     verifiedTag.classList.toggle("hidden", !isEventVerified(ev));
   }
+  finishUpdateReviewDock();
+}
+
+function finishUpdateReviewDock() {
+  if (typeof updateStageBoxPickMode === "function") updateStageBoxPickMode();
   scheduleEventReviewListScrollHeight();
 }
 
@@ -752,7 +932,7 @@ function renderEventReviewTable(list = null) {
         <td class="col-type"><span class="event-badge ${ev.event_type}">${typeLabel}</span></td>
         <td class="col-time">${formatTime(ev.timestamp_sec)}</td>
         <td class="col-frame">${ev.frame_idx}</td>
-        <td class="col-tokens" title="${formatEventTokens(ev.box_tokens)}">${formatEventTokens(ev.box_tokens)}</td>
+        <td class="col-tokens" title="${formatEventTokens(ev.box_tokens)}">${formatEventTokens(ev.box_tokens)}${getEventConfirmedBox(ev) ? ` → ${getEventConfirmedBox(ev)}` : ""}</td>
       </tr>`;
     })
     .join("");
@@ -960,6 +1140,7 @@ function renderEventReviewList() {
     eventJumpList.innerHTML = "";
   }
   renderEventMarkers();
+  if (typeof updateStageBoxPickMode === "function") updateStageBoxPickMode();
   scheduleEventReviewListScrollHeight();
 }
 

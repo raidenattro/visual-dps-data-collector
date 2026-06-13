@@ -157,6 +157,25 @@ function initEventReviewControls() {
   $("#event-unmark-all-btn")?.addEventListener("click", () => void markAllEventsVerified(false));
   $("#event-review-complete-btn")?.addEventListener("click", () => void markEventReviewCompleted());
 
+  canvas?.addEventListener("click", (e) => {
+    if (!eventsPanel || eventsPanel.classList.contains("hidden")) return;
+    if (!annotationBoxes.length) {
+      setEventReviewSaveStatus("请先加载标注 JSON", "error");
+      return;
+    }
+    const ev = getActiveEvent() ?? getActiveFilteredEvent();
+    if (!ev) {
+      setEventReviewSaveStatus("请先在右侧选择一条碰撞/告警事件", "");
+      return;
+    }
+    const hit = hitTestAnnotationBoxAtClient(e.clientX, e.clientY);
+    if (!hit) {
+      setEventReviewSaveStatus("未点中货框，请点击画面中的货架货框", "");
+      return;
+    }
+    void selectConfirmedBoxForEvent(ev, hit);
+  });
+
   $("#event-review-list-details")?.addEventListener("toggle", (e) => {
     if (e.target.open) renderEventReviewTable();
     scheduleEventReviewListScrollHeight();

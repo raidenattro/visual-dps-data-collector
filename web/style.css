@@ -1141,6 +1141,11 @@ main:has(#panel-playback.active) {
   pointer-events: none;
 }
 
+.stage-wrap--box-pick #playback-canvas {
+  pointer-events: auto;
+  cursor: crosshair;
+}
+
 .controls {
   display: flex;
   align-items: center;
@@ -1367,6 +1372,17 @@ main:has(#panel-playback.active) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.event-review-box-confirm {
+  margin: 0.35rem 0 0;
+  font-size: 0.82rem;
+  color: #94a3b8;
+  line-height: 1.35;
+}
+
+.event-review-box-confirm.is-confirmed {
+  color: #c4b5fd;
 }
 
 .event-review-tokens {

@@ -320,7 +320,88 @@ function syncCanvasSize() {
   return { cw: cssW, ch: cssH };
 }
 
-function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null) {
+/** 复核时当前帧所有事件的货框高亮上下文 */
+function getReviewBoxHighlightContext() {
+  if (typeof getActiveEvent !== "function") return null;
+  if (!eventsPanel || eventsPanel.classList.contains("hidden")) return null;
+  const ev = getActiveEvent();
+  if (!ev) return null;
+  const frameIdx = parseInt(ev.frame_idx, 10) || 0;
+  const frameEvents = typeof getEventsOnFrame === "function" ? getEventsOnFrame(frameIdx) : [ev];
+  const activeKey = eventRowKey(ev);
+  const confirmedByToken = new Map();
+  frameEvents.forEach((item, idx) => {
+    const c =
+      typeof getEventConfirmedBox === "function" ? getEventConfirmedBox(item) : "";
+    if (!c) return;
+    confirmedByToken.set(c, {
+      eventKey: eventRowKey(item),
+      eventIndex: idx + 1,
+      isActive: eventRowKey(item) === activeKey,
+    });
+  });
+  return {
+    frameEventCount: frameEvents.length,
+    activeEventKey: activeKey,
+    activeConfirmedBoxToken:
+      typeof getEventConfirmedBox === "function" ? getEventConfirmedBox(ev) : "",
+    confirmedByToken,
+  };
+}
+
+function collectAnnotationDisplayPolygons() {
+  if (!annotationBoxes.length) return [];
+  const pl = window.previewLayout;
+  if (!pl?.resolvePolygonFramePoints || !pl?.mapPointToDisplay) return [];
+
+  const { frameW, frameH } = getVideoFrameSize();
+  const layout = getDisplayLayout();
+  const annSize = getEffectiveAnnotationSize();
+  const hits = [];
+
+  annotationBoxes.forEach((box) => {
+    const poly = box.video_polygon;
+    if (!Array.isArray(poly) || poly.length < 3) return;
+    const framePts = pl.resolvePolygonFramePoints(
+      poly,
+      box.video_polygon_norm,
+      annSize,
+      frameW,
+      frameH
+    );
+    if (framePts.length < 3) return;
+    const token = boxCollisionToken(box);
+    if (!token) return;
+    const displayPts = framePts.map(([x, y]) => pl.mapPointToDisplay(x, y, layout));
+    hits.push({ token, displayPts });
+  });
+  return hits;
+}
+
+/** 画面坐标点击命中货框（返回 box token，自上而下取最上层） */
+function hitTestAnnotationBoxAtClient(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  const x = clientX - rect.left;
+  const y = clientY - rect.top;
+  const polys = collectAnnotationDisplayPolygons();
+  for (let i = polys.length - 1; i >= 0; i--) {
+    if (pointInPolygon([x, y], polys[i].displayPts)) return polys[i].token;
+  }
+  return null;
+}
+
+function updateStageBoxPickMode() {
+  const wrap = stageWrap || document.querySelector(".playback-layout-main .stage-wrap");
+  if (!wrap) return;
+  const canPick =
+    annotationBoxes.length > 0 &&
+    eventsPanel &&
+    !eventsPanel.classList.contains("hidden") &&
+    playbackEvents.length > 0;
+  wrap.classList.toggle("stage-wrap--box-pick", canPick);
+}
+
+function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null, reviewCtx = null) {
   if (!annotationBoxes.length) return;
   const pl = window.previewLayout;
   if (!pl?.resolvePolygonFramePoints || !pl?.mapPointToDisplay) return;
@@ -330,6 +411,7 @@ function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null) {
   const annSize = getEffectiveAnnotationSize();
   const { collisionSet, alarmSet } =
     collisionSets || getFrameCollisionSets(frame, inferW, inferH);
+  reviewCtx = reviewCtx ?? getReviewBoxHighlightContext();
 
   annotationBoxes.forEach((box) => {
     const poly = box.video_polygon;
@@ -345,8 +427,11 @@ function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null) {
     const token = boxCollisionToken(box);
     const isAlarm = alarmSet.has(token);
     const isHit = collisionSet.has(token);
-    ctx.strokeStyle = isAlarm ? "rgba(255, 71, 87, 0.95)" : isHit ? "rgba(255, 209, 102, 0.95)" : "rgba(0, 255, 0, 0.35)";
-    ctx.lineWidth = isAlarm || isHit ? 2.5 : 1.5;
+    const confirmedMeta = reviewCtx?.confirmedByToken?.get(token);
+    const isActiveConfirmed =
+      confirmedMeta?.isActive ||
+      (reviewCtx?.activeConfirmedBoxToken && reviewCtx.activeConfirmedBoxToken === token);
+
     ctx.beginPath();
     framePts.forEach(([x, y], i) => {
       const [dx, dy] = pl.mapPointToDisplay(x, y, layout);
@@ -354,6 +439,52 @@ function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null) {
       else ctx.lineTo(dx, dy);
     });
     ctx.closePath();
+
+    const drawConfirmedLabel = (label, fillColor, strokeColor) => {
+      ctx.fillStyle = fillColor;
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = 3.5;
+      ctx.fill();
+      ctx.stroke();
+      const displayPts = framePts.map(([x, y]) => pl.mapPointToDisplay(x, y, layout));
+      const cx = displayPts.reduce((sum, pt) => sum + pt[0], 0) / displayPts.length;
+      const cy = displayPts.reduce((sum, pt) => sum + pt[1], 0) / displayPts.length;
+      ctx.font = "bold 13px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      const tw = ctx.measureText(label).width;
+      ctx.fillStyle = "rgba(15, 23, 42, 0.82)";
+      ctx.fillRect(cx - tw / 2 - 6, cy - 10, tw + 12, 20);
+      ctx.fillStyle = "#f8fafc";
+      ctx.fillText(label, cx, cy);
+    };
+
+    if (confirmedMeta) {
+      if (isActiveConfirmed) {
+        drawConfirmedLabel(`✓ ${token}`, "rgba(168, 85, 247, 0.32)", "rgba(192, 132, 252, 1)");
+      } else {
+        drawConfirmedLabel(
+          `#${confirmedMeta.eventIndex} ${token}`,
+          "rgba(245, 158, 11, 0.28)",
+          "rgba(251, 191, 36, 1)"
+        );
+      }
+      return;
+    }
+
+    if (reviewCtx) {
+      ctx.strokeStyle = "rgba(52, 211, 153, 0.72)";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      return;
+    }
+
+    ctx.strokeStyle = isAlarm
+      ? "rgba(255, 71, 87, 0.95)"
+      : isHit
+        ? "rgba(255, 209, 102, 0.95)"
+        : "rgba(0, 255, 0, 0.35)";
+    ctx.lineWidth = isAlarm || isHit ? 2.5 : 1.5;
     ctx.stroke();
   });
 }

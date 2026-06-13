@@ -81,6 +81,7 @@ async function loadPlaybackEvents(recordId = null) {
   activeEventKey = null;
   playbackEventLinkExact = false;
   verifiedTrueKeys.clear();
+  pendingConfirmedBoxByKey.clear();
   reviewBackKey = null;
   currentEventReviewStatus = "not_started";
   setEventReviewSaveStatus("");
@@ -222,6 +223,7 @@ function syncActiveEventFromPlaybackPosition(opts = {}) {
   updateReviewDock();
   if ($("#event-review-list-details")?.open) renderEventReviewTable();
   updateEventMarkerActiveState();
+  if (typeof updateStageBoxPickMode === "function") updateStageBoxPickMode();
 }
 
 function updateEventMarkerActiveState() {
@@ -287,6 +289,7 @@ function clearPlaybackEvents() {
   activeEventKey = null;
   playbackEventLinkExact = false;
   verifiedTrueKeys.clear();
+  pendingConfirmedBoxByKey.clear();
   reviewBackKey = null;
   if (eventReviewSaveTimer) {
     clearTimeout(eventReviewSaveTimer);

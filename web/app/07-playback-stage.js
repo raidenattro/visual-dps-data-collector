@@ -11,7 +11,7 @@ const eventFilterSelect = $("#event-filter");
 const eventCountLabel = $("#event-count-label");
 const eventsPanel = $("#playback-events-panel");
 const playbackSpeedSelect = $("#playback-speed");
-const stageWrap = document.querySelector(".stage-wrap");
+const stageWrap = document.querySelector(".playback-layout-main .stage-wrap");
 /** 当前播放倍速（1 = 原速） */
 let playbackSpeed = 1;
 

@@ -812,9 +812,39 @@ def _patch_record_event_review_locked(
         if want is None:
             want = sig not in by_sig
         if bool(want):
-            by_sig[sig] = norm
+            entry_norm = dict(norm)
+            confirmed = str(entry.get("confirmed_box_token") or "").strip()
+            if confirmed:
+                entry_norm["confirmed_box_token"] = confirmed
+            elif len(norm["box_tokens"]) == 1:
+                entry_norm["confirmed_box_token"] = norm["box_tokens"][0]
+            else:
+                existing = by_sig.get(sig)
+                if isinstance(existing, dict):
+                    old_confirmed = str(existing.get("confirmed_box_token") or "").strip()
+                    if old_confirmed:
+                        entry_norm["confirmed_box_token"] = old_confirmed
+            by_sig[sig] = entry_norm
         else:
             by_sig.pop(sig, None)
+        verified = list(by_sig.values())
+    elif action == "set_confirmed_box":
+        light_response = True
+        entry = body.get("event")
+        if not isinstance(entry, dict):
+            raise HTTPException(400, "set_confirmed_box 须包含 event 对象")
+        norm = normalize_review_entry(entry)
+        if not norm:
+            raise HTTPException(400, "event 字段无效")
+        token = str(body.get("confirmed_box_token") or "").strip()
+        if not token:
+            raise HTTPException(400, "须提供 confirmed_box_token")
+        sig = event_signature(norm["event_type"], norm["frame_idx"], norm["box_tokens"])
+        if sig not in by_sig:
+            raise HTTPException(400, "该事件尚未标真，请先标真或标真时一并提交货框编号")
+        stored = dict(by_sig[sig])
+        stored["confirmed_box_token"] = token
+        by_sig[sig] = stored
         verified = list(by_sig.values())
     elif "verified_true" in body:
         raw_list = body.get("verified_true")
@@ -832,7 +862,10 @@ def _patch_record_event_review_locked(
             seen.add(sig)
             verified.append(norm)
     else:
-        raise HTTPException(400, "请提供 verified_true、action=toggle、action=set_all_verified 或 status=completed")
+        raise HTTPException(
+            400,
+            "请提供 verified_true、action=toggle、action=set_confirmed_box、action=set_all_verified 或 status=completed",
+        )
 
     event_total_hint: int | None = None
     if body.get("event_total") is not None:

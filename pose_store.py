@@ -659,12 +659,16 @@ def normalize_review_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
         source_frame_idx = int(entry.get("source_frame_idx") or frame_idx)
     except (TypeError, ValueError):
         source_frame_idx = frame_idx
-    return {
+    out: dict[str, Any] = {
         "event_type": event_type,
         "frame_idx": frame_idx,
         "source_frame_idx": source_frame_idx,
         "box_tokens": tokens,
     }
+    confirmed = str(entry.get("confirmed_box_token") or "").strip()
+    if confirmed:
+        out["confirmed_box_token"] = confirmed
+    return out
 
 
 def load_event_review_raw(locator: RecordLocator) -> dict[str, Any]:
@@ -941,11 +945,27 @@ def save_event_review(
     return path.resolve()
 
 
+def load_verified_review_by_signature(locator: RecordLocator) -> dict[str, dict[str, Any]]:
+    """已标真复核条目，按 event_signature 索引（含 confirmed_box_token）。"""
+    review = load_event_review(locator)
+    out: dict[str, dict[str, Any]] = {}
+    for item in review.get("verified_true") or []:
+        if not isinstance(item, dict):
+            continue
+        sig = event_signature(
+            str(item.get("event_type") or ""),
+            int(item.get("frame_idx") or 0),
+            item.get("box_tokens"),
+        )
+        out[sig] = item
+    return out
+
+
 def enrich_events_with_review(
     events: list[dict[str, Any]],
     locator: RecordLocator,
 ) -> list[dict[str, Any]]:
-    verified = load_verified_true_signatures(locator)
+    verified_by_sig = load_verified_review_by_signature(locator)
     out: list[dict[str, Any]] = []
     for ev in events:
         row = dict(ev)
@@ -954,7 +974,11 @@ def enrich_events_with_review(
             int(ev.get("frame_idx") or 0),
             ev.get("box_tokens"),
         )
-        row["verified_true"] = sig in verified
+        review_item = verified_by_sig.get(sig)
+        row["verified_true"] = review_item is not None
+        confirmed = str((review_item or {}).get("confirmed_box_token") or "").strip()
+        if confirmed:
+            row["confirmed_box_token"] = confirmed
         out.append(row)
     return out
 
