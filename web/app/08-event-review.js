@@ -124,12 +124,12 @@ function applyAutoConfirmedBoxOnVerify(ev) {
   boxAnnotationTouchedKeys.delete(key);
 }
 
-/** 复核画面：已确认 box 与检测参考 box（重置后 confirmed 为空，仍展示 box_tokens） */
+/** 复核画面：已确认 box 与检测参考 box（有事件即展示 box_tokens，无需标真） */
 function getEventReviewBoxLayers(ev) {
   const detection = normalizeBoxTokenList(ev?.box_tokens);
   const confirmed = getEventConfirmedBoxes(ev);
   let detectionRef = [];
-  if (isEventVerified(ev) && detection.length) {
+  if (detection.length) {
     detectionRef = confirmed.length
       ? detection.filter((t) => !confirmed.includes(t))
       : [...detection];
@@ -986,8 +986,8 @@ function updateReviewDock() {
     let displayText = tokenText;
     if (confirmed.length) {
       displayText = `${tokenText} → 已确认 ${formatConfirmedBoxes(confirmed)}`;
-    } else if (detectionRef.length && isEventVerified(ev)) {
-      displayText = `${tokenText} → 检测参考 ${formatConfirmedBoxes(detectionRef)}`;
+    } else if (detectionRef.length) {
+      displayText = `${tokenText} → 检测 ${formatConfirmedBoxes(detectionRef)}`;
     }
     tokensEl.textContent = displayText || "\u00a0";
     tokensEl.setAttribute("aria-hidden", displayText ? "false" : "true");
