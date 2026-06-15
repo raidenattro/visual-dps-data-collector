@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>骨架采集与回放</title>
-  <link rel="stylesheet" href="style.css?v=56" />
+  <link rel="stylesheet" href="style.css?v=57" />
 </head>
 <body>
   <header>
@@ -393,8 +393,11 @@
                 </div>
                 <div id="event-review-tokens" class="event-review-tokens" aria-hidden="true">&nbsp;</div>
                 <p id="event-review-box-confirm" class="event-review-box-confirm hint" aria-live="polite">
-                  点击画面中高亮货框以确认碰撞货箱
+                  点击画面货框可多选；标真默认写入全部检测框，可少选
                 </p>
+                <button type="button" id="event-reset-box-btn" class="btn-review-reset-box">
+                  重置box标注
+                </button>
               </div>
               <div class="event-review-actions">
                 <button type="button" id="event-prev-btn" class="btn-review-nav" title="快捷键 ↑">‹ 上一条</button>
@@ -405,7 +408,7 @@
                 <button type="button" id="event-unmark-all-btn" class="btn-review-bulk-unmark">全部取消标真</button>
                 <button type="button" id="event-review-complete-btn" class="btn-review-complete">标记复核完成</button>
               </div>
-              <p class="event-review-kbd-hint">标真=确有拣货/碰撞 · 点选货框=确认货箱 · Y 标真并下一条 · N 下一条 · U 取消标真 · ↑↓ 切换</p>
+              <p class="event-review-kbd-hint">标真=确有拣货 · 点选 box 可多选/再点取消 · 重置 box 可重标 · Y/N/U · ↑↓ 切换</p>
             </div>
             <details id="event-review-list-details" class="event-review-list-details">
               <summary id="event-review-list-summary">全部事件列表</summary>
@@ -437,7 +440,7 @@
   <script src="annotateGeometry.js"></script>
   <script src="annotateVisualMode.js"></script>
   <!-- 回放/采集主逻辑（由 app.monolith.js 拆分，按依赖顺序加载） -->
-  <script src="app/00-core.js?v=47"></script>
+  <script src="app/00-core.js?v=54"></script>
   <script src="app/01-layout-frames.js?v=48"></script>
   <script src="app/02-playback-selection.js?v=34"></script>
   <script src="app/03-tabs.js?v=34"></script>
@@ -445,10 +448,10 @@
   <script src="app/05-collect.js?v=40"></script>
   <script src="app/06-records.js?v=42"></script>
   <script src="app/07-playback-stage.js?v=48"></script>
-  <script src="app/08-event-review.js?v=51"></script>
-  <script src="app/09-playback-events.js?v=50"></script>
-  <script src="app/10-render-collision.js?v=50"></script>
-  <script src="app/11-playback-controls.js?v=49"></script>
+  <script src="app/08-event-review.js?v=55"></script>
+  <script src="app/09-playback-events.js?v=54"></script>
+  <script src="app/10-render-collision.js?v=55"></script>
+  <script src="app/11-playback-controls.js?v=54"></script>
   <script src="annotate.js?v=11"></script>
 </body>
 </html>

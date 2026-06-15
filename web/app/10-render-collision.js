@@ -320,41 +320,70 @@ function syncCanvasSize() {
   return { cw: cssW, ch: cssH };
 }
 
-/** 复核时当前帧所有事件的货框高亮上下文 */
-function getReviewBoxHighlightContext() {
-  if (typeof getActiveEvent !== "function") return null;
-  if (!eventsPanel || eventsPanel.classList.contains("hidden")) return null;
-  const ev = getActiveEvent();
-  if (!ev) return null;
-  const frameIdx = parseInt(ev.frame_idx, 10) || 0;
-  const frameEvents = typeof getEventsOnFrame === "function" ? getEventsOnFrame(frameIdx) : [ev];
-  const activeKey = eventRowKey(ev);
+/** 回放/复核时当前帧标真货框高亮（随播放帧变化） */
+function getReviewBoxHighlightContext(frameIdx = null) {
+  if (!playbackEvents?.length || !annotationBoxes.length) return null;
+
+  let fi =
+    frameIdx != null
+      ? parseInt(frameIdx, 10) || 0
+      : lastRenderedFrameIdx >= 1
+        ? lastRenderedFrameIdx
+        : typeof getCurrentPlaybackFrameIdx === "function"
+          ? getCurrentPlaybackFrameIdx()
+          : null;
+  if (fi == null) return null;
+
+  const frameEvents = typeof getEventsOnFrame === "function" ? getEventsOnFrame(fi) : [];
+  const picking = !!(eventsPanel && !eventsPanel.classList.contains("hidden"));
+  const activeEv = typeof getActiveEvent === "function" ? getActiveEvent() : null;
+  const activeKey = activeEv ? eventRowKey(activeEv) : null;
   const confirmedByToken = new Map();
+
   frameEvents.forEach((item, idx) => {
-    const c =
-      typeof getEventConfirmedBox === "function" ? getEventConfirmedBox(item) : "";
-    if (!c) return;
     const itemKey = eventRowKey(item);
-    const existing = confirmedByToken.get(c);
-    const meta = {
-      eventKey: itemKey,
-      eventIndex: idx + 1,
-      isActive: itemKey === activeKey,
-      isVerified: typeof isEventVerified === "function" ? isEventVerified(item) : false,
+    const verified = typeof isEventVerified === "function" ? isEventVerified(item) : false;
+    const manual =
+      typeof getEventConfirmedBoxes === "function" ? getEventConfirmedBoxes(item) : [];
+    const layers =
+      typeof getEventReviewBoxLayers === "function"
+        ? getEventReviewBoxLayers(item)
+        : { confirmed: manual, detectionRef: [] };
+    if (!verified && !manual.length && !layers.detectionRef.length && !picking) return;
+
+    const addToken = (token, isDetectionRef) => {
+      if (!token) return;
+      const meta = {
+        eventKey: itemKey,
+        eventIndex: idx + 1,
+        isActive: itemKey === activeKey,
+        isVerified: verified,
+        isManual: !isDetectionRef && manual.includes(token),
+        isDetectionRef: !!isDetectionRef,
+      };
+      const existing = confirmedByToken.get(token);
+      if (existing) {
+        existing.eventIndexLabel = `${existing.eventIndex},${idx + 1}`;
+        if (meta.isActive) existing.isActive = true;
+        if (meta.isVerified) existing.isVerified = true;
+        if (meta.isManual) existing.isManual = true;
+        if (meta.isDetectionRef && !existing.isManual) existing.isDetectionRef = true;
+      } else {
+        meta.eventIndexLabel = String(idx + 1);
+        confirmedByToken.set(token, meta);
+      }
     };
-    if (existing) {
-      existing.eventIndexLabel = `${existing.eventIndex},${idx + 1}`;
-      if (meta.isActive) existing.isActive = true;
-    } else {
-      meta.eventIndexLabel = String(idx + 1);
-      confirmedByToken.set(c, meta);
-    }
+
+    layers.confirmed.forEach((token) => addToken(token, false));
+    layers.detectionRef.forEach((token) => addToken(token, true));
   });
+
+  if (!confirmedByToken.size && !picking) return null;
+
   return {
-    frameEventCount: frameEvents.length,
-    activeEventKey: activeKey,
-    activeConfirmedBoxToken:
-      typeof getEventConfirmedBox === "function" ? getEventConfirmedBox(ev) : "",
+    frameIdx: fi,
+    picking,
+    activeKey,
     confirmedByToken,
   };
 }
@@ -421,7 +450,8 @@ function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null, review
   const annSize = getEffectiveAnnotationSize();
   const { collisionSet, alarmSet } =
     collisionSets || getFrameCollisionSets(frame, inferW, inferH);
-  reviewCtx = reviewCtx ?? getReviewBoxHighlightContext();
+  const frameIdx = frame?.frame_idx ?? frame?.source_frame_idx ?? lastRenderedFrameIdx;
+  reviewCtx = reviewCtx ?? getReviewBoxHighlightContext(frameIdx);
 
   annotationBoxes.forEach((box) => {
     const poly = box.video_polygon;
@@ -438,9 +468,7 @@ function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null, review
     const isAlarm = alarmSet.has(token);
     const isHit = collisionSet.has(token);
     const confirmedMeta = reviewCtx?.confirmedByToken?.get(token);
-    const isActiveConfirmed =
-      confirmedMeta?.isActive ||
-      (reviewCtx?.activeConfirmedBoxToken && reviewCtx.activeConfirmedBoxToken === token);
+    const isActiveConfirmed = !!(confirmedMeta?.isActive);
 
     ctx.beginPath();
     framePts.forEach(([x, y], i) => {
@@ -470,19 +498,51 @@ function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null, review
     };
 
     if (confirmedMeta) {
+      if (confirmedMeta.isDetectionRef && !confirmedMeta.isManual) {
+        const refLabel = `检测 ${token}`;
+        ctx.setLineDash([6, 4]);
+        if (isActiveConfirmed) {
+          ctx.strokeStyle = "rgba(251, 191, 36, 0.98)";
+          ctx.lineWidth = 2.5;
+          ctx.stroke();
+          ctx.setLineDash([]);
+          const displayPts = framePts.map(([x, y]) => pl.mapPointToDisplay(x, y, layout));
+          const cx = displayPts.reduce((sum, pt) => sum + pt[0], 0) / displayPts.length;
+          const cy = displayPts.reduce((sum, pt) => sum + pt[1], 0) / displayPts.length;
+          ctx.font = "bold 12px system-ui, sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          const tw = ctx.measureText(refLabel).width;
+          ctx.fillStyle = "rgba(15, 23, 42, 0.78)";
+          ctx.fillRect(cx - tw / 2 - 5, cy - 9, tw + 10, 18);
+          ctx.fillStyle = "#fde68a";
+          ctx.fillText(refLabel, cx, cy);
+        } else {
+          ctx.strokeStyle = "rgba(251, 191, 36, 0.65)";
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+        return;
+      }
+      const boxLabel = confirmedMeta.isVerified
+        ? confirmedMeta.isManual
+          ? `✓ ${token}`
+          : `✓ 标真 ${token}`
+        : `✓ ${token}`;
       if (isActiveConfirmed) {
-        drawConfirmedLabel(`✓ ${token}`, "rgba(168, 85, 247, 0.32)", "rgba(192, 132, 252, 1)");
+        drawConfirmedLabel(boxLabel, "rgba(168, 85, 247, 0.32)", "rgba(192, 132, 252, 1)");
       } else {
         drawConfirmedLabel(
-          `#${confirmedMeta.eventIndexLabel || confirmedMeta.eventIndex} ${token}`,
-          "rgba(245, 158, 11, 0.28)",
-          "rgba(251, 191, 36, 1)"
+          `#${confirmedMeta.eventIndexLabel || confirmedMeta.eventIndex} ${boxLabel}`,
+          "rgba(34, 197, 94, 0.22)",
+          "rgba(74, 222, 128, 0.95)"
         );
       }
       return;
     }
 
-    if (reviewCtx) {
+    if (reviewCtx?.picking) {
       ctx.strokeStyle = "rgba(52, 211, 153, 0.72)";
       ctx.lineWidth = 2;
       ctx.stroke();

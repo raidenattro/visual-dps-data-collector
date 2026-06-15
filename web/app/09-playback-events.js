@@ -81,7 +81,8 @@ async function loadPlaybackEvents(recordId = null) {
   activeEventKey = null;
   playbackEventLinkExact = false;
   verifiedTrueKeys.clear();
-  pendingConfirmedBoxByKey.clear();
+  pendingConfirmedBoxesByKey.clear();
+  boxAnnotationTouchedKeys.clear();
   eventReviewStatusEventKey = null;
   reviewBackKey = null;
   currentEventReviewStatus = "not_started";
@@ -127,6 +128,9 @@ async function loadPlaybackEvents(recordId = null) {
   }
 
   applyVerifiedFlagsToEvents();
+  playbackEvents.forEach((ev) => {
+    if (isEventVerified(ev)) applyAutoConfirmedBoxOnVerify(ev);
+  });
   renderEventReviewList();
 }
 
@@ -290,7 +294,8 @@ function clearPlaybackEvents() {
   activeEventKey = null;
   playbackEventLinkExact = false;
   verifiedTrueKeys.clear();
-  pendingConfirmedBoxByKey.clear();
+  pendingConfirmedBoxesByKey.clear();
+  boxAnnotationTouchedKeys.clear();
   eventReviewStatusEventKey = null;
   reviewBackKey = null;
   if (eventReviewSaveTimer) {

@@ -140,9 +140,20 @@ videoEl.addEventListener("loadedmetadata", () => {
 });
 
 eventFilterSelect?.addEventListener("change", () => {
-  const first = filteredPlaybackEvents()[0];
-  if (first) void seekToEvent(first);
-  else renderEventReviewList();
+  const list = filteredPlaybackEvents();
+  renderEventMarkers();
+  if ($("#event-review-list-details")?.open) {
+    renderEventReviewTable(list);
+  }
+  refreshEventCountLabel();
+  const first = list[0];
+  if (first) {
+    void seekToEvent(first);
+  } else {
+    activeEventKey = null;
+    playbackEventLinkExact = false;
+    updateReviewDock();
+  }
 });
 
 function initEventReviewControls() {
@@ -173,8 +184,10 @@ function initEventReviewControls() {
       setEventReviewSaveStatus("未点中货框，请点击画面中的货架货框", "");
       return;
     }
-    void selectConfirmedBoxForEvent(ev, hit);
+    void toggleConfirmedBoxForEvent(ev, hit);
   });
+
+  $("#event-reset-box-btn")?.addEventListener("click", () => void resetActiveEventBoxAnnotation());
 
   $("#event-review-list-details")?.addEventListener("toggle", (e) => {
     if (e.target.open) renderEventReviewTable();

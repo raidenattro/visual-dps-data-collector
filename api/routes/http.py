@@ -38,6 +38,7 @@ from pose_store import (
     delete_record,
     enrich_events_with_review,
     events_to_verified_entries,
+    extract_confirmed_box_tokens,
     event_review_write_lock,
     event_signature,
     iter_active_records,
@@ -813,17 +814,17 @@ def _patch_record_event_review_locked(
             want = sig not in by_sig
         if bool(want):
             entry_norm = dict(norm)
-            confirmed = str(entry.get("confirmed_box_token") or "").strip()
-            if confirmed:
-                entry_norm["confirmed_box_token"] = confirmed
-            elif len(norm["box_tokens"]) == 1:
-                entry_norm["confirmed_box_token"] = norm["box_tokens"][0]
+            confirmed_list = extract_confirmed_box_tokens(entry)
+            if confirmed_list:
+                entry_norm["confirmed_box_tokens"] = confirmed_list
             else:
                 existing = by_sig.get(sig)
                 if isinstance(existing, dict):
-                    old_confirmed = str(existing.get("confirmed_box_token") or "").strip()
-                    if old_confirmed:
-                        entry_norm["confirmed_box_token"] = old_confirmed
+                    old_list = extract_confirmed_box_tokens(existing)
+                    if old_list:
+                        entry_norm["confirmed_box_tokens"] = old_list
+                if "confirmed_box_tokens" not in entry_norm:
+                    entry_norm["confirmed_box_tokens"] = list(norm["box_tokens"])
             by_sig[sig] = entry_norm
         else:
             by_sig.pop(sig, None)
@@ -836,14 +837,23 @@ def _patch_record_event_review_locked(
         norm = normalize_review_entry(entry)
         if not norm:
             raise HTTPException(400, "event 字段无效")
-        token = str(body.get("confirmed_box_token") or "").strip()
-        if not token:
-            raise HTTPException(400, "须提供 confirmed_box_token")
+        if "confirmed_box_tokens" in body:
+            raw = body.get("confirmed_box_tokens")
+            if not isinstance(raw, list):
+                raise HTTPException(400, "confirmed_box_tokens 须为数组")
+            confirmed_list = [str(t).strip() for t in raw if str(t).strip()]
+        else:
+            token = str(body.get("confirmed_box_token") or "").strip()
+            confirmed_list = [token] if token else []
         sig = event_signature(norm["event_type"], norm["frame_idx"], norm["box_tokens"])
         if sig not in by_sig:
             raise HTTPException(400, "该事件尚未标真，请先标真或标真时一并提交货框编号")
         stored = dict(by_sig[sig])
-        stored["confirmed_box_token"] = token
+        if confirmed_list:
+            stored["confirmed_box_tokens"] = confirmed_list
+        else:
+            stored.pop("confirmed_box_tokens", None)
+        stored.pop("confirmed_box_token", None)
         by_sig[sig] = stored
         verified = list(by_sig.values())
     elif "verified_true" in body:

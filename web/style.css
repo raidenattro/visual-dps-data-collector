@@ -1385,6 +1385,27 @@ main:has(#panel-playback.active) {
   color: #c4b5fd;
 }
 
+.btn-review-reset-box {
+  margin-top: 0.45rem;
+  padding: 0.35rem 0.65rem;
+  font-size: 0.82rem;
+  color: #fca5a5;
+  background: rgba(127, 29, 29, 0.35);
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.btn-review-reset-box:hover:not(:disabled) {
+  background: rgba(153, 27, 27, 0.55);
+  color: #fff;
+}
+
+.btn-review-reset-box:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .event-review-tokens {
   min-height: 1.3rem;
   line-height: 1.3;

@@ -640,6 +640,17 @@ def events_to_verified_entries(events: list[dict[str, Any]]) -> list[dict[str, A
     return verified
 
 
+def extract_confirmed_box_tokens(entry: dict[str, Any]) -> list[str]:
+    """从复核条目读取已确认货框（兼容 confirmed_box_token 单值）。"""
+    raw_list = entry.get("confirmed_box_tokens")
+    if isinstance(raw_list, list):
+        tokens = [str(t).strip() for t in raw_list if str(t).strip()]
+        if tokens:
+            return tokens
+    single = str(entry.get("confirmed_box_token") or "").strip()
+    return [single] if single else []
+
+
 def normalize_review_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
     if not isinstance(entry, dict):
         return None
@@ -665,9 +676,9 @@ def normalize_review_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
         "source_frame_idx": source_frame_idx,
         "box_tokens": tokens,
     }
-    confirmed = str(entry.get("confirmed_box_token") or "").strip()
-    if confirmed:
-        out["confirmed_box_token"] = confirmed
+    confirmed_list = extract_confirmed_box_tokens(entry)
+    if confirmed_list:
+        out["confirmed_box_tokens"] = confirmed_list
     return out
 
 
@@ -976,9 +987,9 @@ def enrich_events_with_review(
         )
         review_item = verified_by_sig.get(sig)
         row["verified_true"] = review_item is not None
-        confirmed = str((review_item or {}).get("confirmed_box_token") or "").strip()
-        if confirmed:
-            row["confirmed_box_token"] = confirmed
+        confirmed_list = extract_confirmed_box_tokens(review_item or {})
+        if confirmed_list:
+            row["confirmed_box_tokens"] = confirmed_list
         out.append(row)
     return out
 

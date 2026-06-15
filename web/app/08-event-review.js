@@ -44,11 +44,11 @@ function getVerifiedEventsOnFrame(frameIdx) {
 }
 
 function countFrameConfirmedBoxes(frameIdx) {
-  return getEventsOnFrame(frameIdx).filter((e) => getEventConfirmedBox(e)).length;
+  return getEventsOnFrame(frameIdx).filter((e) => getEventConfirmedBoxes(e).length > 0).length;
 }
 
 function countVerifiedFrameConfirmedBoxes(frameIdx) {
-  return getVerifiedEventsOnFrame(frameIdx).filter((e) => getEventConfirmedBox(e)).length;
+  return getVerifiedEventsOnFrame(frameIdx).filter((e) => getEventConfirmedBoxes(e).length > 0).length;
 }
 
 function isAnnotationBoxToken(token) {
@@ -57,31 +57,94 @@ function isAnnotationBoxToken(token) {
   return annotationBoxes.some((box) => boxCollisionToken(box) === hit);
 }
 
-function getEventConfirmedBox(ev) {
-  if (!ev) return "";
-  const key = eventRowKey(ev);
-  const saved = String(ev.confirmed_box_token || "").trim();
-  if (saved) return saved;
-  const pending = pendingConfirmedBoxByKey.get(key);
-  return pending ? String(pending).trim() : "";
+function normalizeBoxTokenList(tokens) {
+  const seen = new Set();
+  const out = [];
+  (tokens || []).forEach((t) => {
+    const s = String(t).trim();
+    if (!s || seen.has(s)) return;
+    seen.add(s);
+    out.push(s);
+  });
+  return out;
 }
 
-/** 标真落盘用的货框：优先人工点选，单货框检测时自动取唯一 box_token */
-function resolveConfirmedBoxForSave(ev) {
-  const manual = getEventConfirmedBox(ev);
-  if (manual) return manual;
-  const tokens = [...(ev?.box_tokens || [])].map((t) => String(t).trim()).filter(Boolean);
-  if (tokens.length === 1) return tokens[0];
-  return "";
+function formatConfirmedBoxes(tokens) {
+  const list = normalizeBoxTokenList(tokens);
+  if (!list.length) return "";
+  if (list.length <= 2) return list.join(", ");
+  return `${list.slice(0, 2).join(", ")} +${list.length - 2}`;
+}
+
+function getEventConfirmedBoxes(ev) {
+  if (!ev) return [];
+  const key = eventRowKey(ev);
+  if (Array.isArray(ev.confirmed_box_tokens) && ev.confirmed_box_tokens.length) {
+    return normalizeBoxTokenList(ev.confirmed_box_tokens);
+  }
+  const legacy = String(ev.confirmed_box_token || "").trim();
+  if (legacy) return [legacy];
+  const pending = pendingConfirmedBoxesByKey.get(key);
+  return pending ? normalizeBoxTokenList(pending) : [];
+}
+
+function getEventConfirmedBox(ev) {
+  const boxes = getEventConfirmedBoxes(ev);
+  return boxes[0] || "";
+}
+
+function setEventConfirmedBoxes(ev, tokens) {
+  if (!ev) return;
+  const list = normalizeBoxTokenList(tokens);
+  const key = eventRowKey(ev);
+  boxAnnotationTouchedKeys.add(key);
+  if (list.length) {
+    ev.confirmed_box_tokens = [...list];
+    pendingConfirmedBoxesByKey.set(key, [...list]);
+  } else {
+    delete ev.confirmed_box_tokens;
+    pendingConfirmedBoxesByKey.delete(key);
+  }
+  delete ev.confirmed_box_token;
+}
+
+/** 标真落盘用的货框列表：优先人工点选，否则为空（标真时由 applyAuto 填充默认） */
+function resolveConfirmedBoxesForSave(ev) {
+  return getEventConfirmedBoxes(ev);
 }
 
 function applyAutoConfirmedBoxOnVerify(ev) {
   if (!ev) return;
-  const auto = resolveConfirmedBoxForSave(ev);
-  if (!auto) return;
   const key = eventRowKey(ev);
-  ev.confirmed_box_token = auto;
-  pendingConfirmedBoxByKey.set(key, auto);
+  if (boxAnnotationTouchedKeys.has(key)) return;
+  if (getEventConfirmedBoxes(ev).length) return;
+  const defaults = normalizeBoxTokenList(ev.box_tokens);
+  if (!defaults.length) return;
+  setEventConfirmedBoxes(ev, defaults);
+  boxAnnotationTouchedKeys.delete(key);
+}
+
+/** 复核画面：已确认 box 与检测参考 box（重置后 confirmed 为空，仍展示 box_tokens） */
+function getEventReviewBoxLayers(ev) {
+  const detection = normalizeBoxTokenList(ev?.box_tokens);
+  const confirmed = getEventConfirmedBoxes(ev);
+  let detectionRef = [];
+  if (isEventVerified(ev) && detection.length) {
+    detectionRef = confirmed.length
+      ? detection.filter((t) => !confirmed.includes(t))
+      : [...detection];
+  }
+  return { confirmed, detectionRef };
+}
+
+/** 回放画面上展示的货框 token（含检测参考） */
+function getEventDisplayBoxTokens(ev) {
+  if (!ev) return [];
+  const { confirmed, detectionRef } = getEventReviewBoxLayers(ev);
+  if (confirmed.length || detectionRef.length) {
+    return [...confirmed, ...detectionRef];
+  }
+  return getEventConfirmedBoxes(ev);
 }
 
 function eventToReviewPayload(ev) {
@@ -95,9 +158,9 @@ function eventToReviewPayload(ev) {
     source_frame_idx: parseInt(ev.source_frame_idx ?? ev.frame_idx, 10) || frameIdx,
     box_tokens: tokens,
   };
-  const confirmed = resolveConfirmedBoxForSave(ev);
-  if (confirmed) {
-    payload.confirmed_box_token = confirmed;
+  const confirmed = resolveConfirmedBoxesForSave(ev);
+  if (confirmed.length) {
+    payload.confirmed_box_tokens = confirmed;
   }
   return payload;
 }
@@ -108,15 +171,24 @@ function syncConfirmedBoxFromReview(reviewPayload, events = playbackEvents) {
   const byKey = new Map();
   for (const item of list) {
     if (!item || typeof item !== "object") continue;
-    const token = String(item.confirmed_box_token || "").trim();
-    if (!token) continue;
-    byKey.set(eventRowKey(item), token);
+    const key = eventRowKey(item);
+    const tokens = normalizeBoxTokenList(
+      item.confirmed_box_tokens || (item.confirmed_box_token ? [item.confirmed_box_token] : [])
+    );
+    byKey.set(key, tokens);
   }
   (events || []).forEach((ev) => {
     const key = eventRowKey(ev);
-    if (byKey.has(key)) {
-      ev.confirmed_box_token = byKey.get(key);
-      pendingConfirmedBoxByKey.delete(key);
+    if (!byKey.has(key)) return;
+    const tokens = byKey.get(key);
+    if (tokens.length) {
+      ev.confirmed_box_tokens = [...tokens];
+      delete ev.confirmed_box_token;
+      pendingConfirmedBoxesByKey.delete(key);
+    } else {
+      delete ev.confirmed_box_tokens;
+      delete ev.confirmed_box_token;
+      pendingConfirmedBoxesByKey.delete(key);
     }
   });
 }
@@ -236,8 +308,10 @@ function setEventVerified(ev, verified) {
     applyAutoConfirmedBoxOnVerify(ev);
   } else {
     verifiedTrueKeys.delete(key);
+    delete ev.confirmed_box_tokens;
     delete ev.confirmed_box_token;
-    pendingConfirmedBoxByKey.delete(key);
+    pendingConfirmedBoxesByKey.delete(key);
+    boxAnnotationTouchedKeys.delete(key);
   }
   ev.verified_true = !!verified;
   if (!verified && isReviewTerminalStatus(currentEventReviewStatus)) {
@@ -294,6 +368,12 @@ function applyEventReviewResponse(body, seq, forRecordId = currentRecordId, opti
     applyVerifiedFlagsToEvents();
   }
 
+  if (applyUi && !options.skipAutoConfirmBoxes) {
+    playbackEvents.forEach((ev) => {
+      if (isEventVerified(ev)) applyAutoConfirmedBoxOnVerify(ev);
+    });
+  }
+
   if (savedFor) {
     const st =
       body.event_review_status ||
@@ -325,15 +405,17 @@ function applyEventReviewResponse(body, seq, forRecordId = currentRecordId, opti
     if (options.patchMarkersOnly) patchEventMarkersVerifiedStates();
     else renderEventMarkers();
   }
+  if (applyUi && typeof redrawCurrentFrame === "function") redrawCurrentFrame();
   return true;
 }
 
 /** 单条标真/取消：服务端 toggle，避免全量 verified_true 覆盖误删 */
-async function persistEventReviewConfirmedBox(ev, confirmedBoxToken) {
+async function persistEventReviewConfirmedBoxes(ev, confirmedBoxTokens) {
   const recordId = currentRecordId;
-  if (!recordId || !ev || !confirmedBoxToken) return false;
+  if (!recordId || !ev) return false;
+  const tokens = normalizeBoxTokenList(confirmedBoxTokens);
   const eventPayload = eventToReviewPayload(ev);
-  eventPayload.confirmed_box_token = confirmedBoxToken;
+  delete eventPayload.confirmed_box_tokens;
   const eventTotal = playbackEvents.length;
   const seq = ++eventReviewSaveSeq;
   return runSerializedEventReviewSave(async () => {
@@ -346,7 +428,7 @@ async function persistEventReviewConfirmedBox(ev, confirmedBoxToken) {
         body: JSON.stringify({
           action: "set_confirmed_box",
           event: eventPayload,
-          confirmed_box_token: confirmedBoxToken,
+          confirmed_box_tokens: tokens,
           event_total: eventTotal,
         }),
       });
@@ -355,8 +437,12 @@ async function persistEventReviewConfirmedBox(ev, confirmedBoxToken) {
         throw new Error(err.detail || `保存失败 (${res.status})`);
       }
       const body = await res.json();
+      const msg = tokens.length
+        ? `已确认货框 ${formatConfirmedBoxes(tokens)}`
+        : "已清空货框标注";
       return applyEventReviewResponse(body, seq, recordId, {
-        statusMessage: `已确认货框 ${confirmedBoxToken}`,
+        statusMessage: msg,
+        skipAutoConfirmBoxes: true,
       });
     } catch (err) {
       if (seq !== eventReviewSaveSeq) return false;
@@ -366,6 +452,55 @@ async function persistEventReviewConfirmedBox(ev, confirmedBoxToken) {
       return false;
     }
   });
+}
+
+async function setConfirmedBoxesForEvent(ev, tokens) {
+  if (!ev) return;
+  const list = normalizeBoxTokenList(tokens);
+  setEventConfirmedBoxes(ev, list);
+  updateReviewDock();
+  if (typeof updateStageBoxPickMode === "function") updateStageBoxPickMode();
+  redrawCurrentFrame();
+  if (isEventVerified(ev) && currentRecordId) {
+    await persistEventReviewConfirmedBoxes(ev, list);
+    return;
+  }
+  const detN = normalizeBoxTokenList(ev.box_tokens).length;
+  const hint =
+    detN > 0 ? ` · 已选 ${list.length}/${detN}（可不选满）` : ` · 已选 ${list.length} 个`;
+  setEventReviewSaveStatus(`货框 ${formatConfirmedBoxes(list) || "（无）"}${hint}（标真后自动保存）`, "");
+}
+
+async function toggleConfirmedBoxForEvent(ev, token) {
+  if (!ev || !token) return;
+  const hit = String(token).trim();
+  if (!isAnnotationBoxToken(hit)) {
+    setEventReviewSaveStatus(`货框 ${hit} 不在标注列表中`, "error");
+    return;
+  }
+  const current = getEventConfirmedBoxes(ev);
+  const next = current.includes(hit) ? current.filter((t) => t !== hit) : [...current, hit];
+  await setConfirmedBoxesForEvent(ev, next);
+}
+
+async function resetActiveEventBoxAnnotation() {
+  const ev = getActiveEvent() ?? getActiveFilteredEvent();
+  if (!ev) {
+    setEventReviewSaveStatus("请先选择一条事件", "");
+    return;
+  }
+  setEventConfirmedBoxes(ev, []);
+  updateReviewDock();
+  if (typeof updateStageBoxPickMode === "function") updateStageBoxPickMode();
+  redrawCurrentFrame();
+  if (isEventVerified(ev) && currentRecordId) {
+    const ok = await persistEventReviewConfirmedBoxes(ev, []);
+    if (ok) {
+      setEventReviewSaveStatus("已重置 box 标注，检测框仍作参考显示，请重新点选", "");
+    }
+    return;
+  }
+  setEventReviewSaveStatus("已重置 box 标注，检测框仍作参考显示，请重新点选", "");
 }
 
 /** 切换事件时清除上一条的货框点选提示/错误（保存中状态保留） */
@@ -380,29 +515,17 @@ function clearEventReviewPickStatusOnEventChange() {
   setEventReviewSaveStatus("");
 }
 
+/** @deprecated 兼容旧调用 */
+async function persistEventReviewConfirmedBox(ev, confirmedBoxToken) {
+  const token = String(confirmedBoxToken || "").trim();
+  if (!token) return persistEventReviewConfirmedBoxes(ev, []);
+  const merged = normalizeBoxTokenList([...getEventConfirmedBoxes(ev), token]);
+  return persistEventReviewConfirmedBoxes(ev, merged);
+}
+
+/** @deprecated 兼容旧调用 */
 async function selectConfirmedBoxForEvent(ev, token) {
-  if (!ev || !token) return;
-  const hit = String(token).trim();
-  if (!isAnnotationBoxToken(hit)) {
-    setEventReviewSaveStatus(`货框 ${hit} 不在标注列表中`, "error");
-    return;
-  }
-  const key = eventRowKey(ev);
-  ev.confirmed_box_token = hit;
-  pendingConfirmedBoxByKey.set(key, hit);
-  updateReviewDock();
-  if (typeof updateStageBoxPickMode === "function") updateStageBoxPickMode();
-  redrawCurrentFrame();
-  if (isEventVerified(ev) && currentRecordId) {
-    await persistEventReviewConfirmedBox(ev, hit);
-    return;
-  }
-  const verifiedOnFrame = getVerifiedEventsOnFrame(ev.frame_idx);
-  const verifiedHint =
-    verifiedOnFrame.length > 1
-      ? ` · 本帧已标真 ${countVerifiedFrameConfirmedBoxes(ev.frame_idx)}/${verifiedOnFrame.length} 条已确认货框`
-      : "";
-  setEventReviewSaveStatus(`已选货框 ${hit}${verifiedHint}（标真后自动保存）`, "");
+  await toggleConfirmedBoxForEvent(ev, token);
 }
 
 async function persistEventReviewToggle(ev, wantVerified) {
@@ -629,7 +752,7 @@ function filteredPlaybackEvents() {
   if (mode === "unreviewed") return playbackEvents.filter((e) => !isEventVerified(e));
   if (mode === "needs_box") {
     return playbackEvents.filter(
-      (e) => isEventVerified(e) && (e.box_tokens || []).length > 0 && !getEventConfirmedBox(e)
+      (e) => isEventVerified(e) && !getEventConfirmedBoxes(e).length
     );
   }
   if (mode === "alarm" || mode === "collision") {
@@ -858,44 +981,61 @@ function updateReviewDock() {
   }
   if (tokensEl) {
     const tokenText = formatEventTokens(ev.box_tokens);
-    const confirmed = getEventConfirmedBox(ev);
-    const displayText = confirmed ? `${tokenText} → 已确认 ${confirmed}` : tokenText;
+    const confirmed = getEventConfirmedBoxes(ev);
+    const { detectionRef } = getEventReviewBoxLayers(ev);
+    let displayText = tokenText;
+    if (confirmed.length) {
+      displayText = `${tokenText} → 已确认 ${formatConfirmedBoxes(confirmed)}`;
+    } else if (detectionRef.length && isEventVerified(ev)) {
+      displayText = `${tokenText} → 检测参考 ${formatConfirmedBoxes(detectionRef)}`;
+    }
     tokensEl.textContent = displayText || "\u00a0";
     tokensEl.setAttribute("aria-hidden", displayText ? "false" : "true");
     if (displayText) tokensEl.title = displayText;
     else tokensEl.removeAttribute("title");
   }
   const boxConfirmEl = $("#event-review-box-confirm");
+  const resetBoxBtn = $("#event-reset-box-btn");
+  if (resetBoxBtn) {
+    resetBoxBtn.disabled = !annotationBoxes.length || !ev;
+  }
   if (boxConfirmEl) {
-    const confirmed = getEventConfirmedBox(ev);
+    const confirmed = getEventConfirmedBoxes(ev);
+    const detN = normalizeBoxTokenList(ev.box_tokens).length;
     const frameEvents = getEventsOnFrame(ev.frame_idx);
     const verifiedOnFrame = getVerifiedEventsOnFrame(ev.frame_idx);
     if (!annotationBoxes.length) {
-      boxConfirmEl.textContent = "加载标注后可点击画面任意货架货框";
+      boxConfirmEl.textContent = "加载标注后可点击画面任意货架货框（可多选）";
       boxConfirmEl.classList.remove("is-confirmed");
     } else if (frameEvents.length > 1) {
       const verifiedNote =
         verifiedOnFrame.length > 0
           ? `本帧 ${frameEvents.length} 条检测 · 已标真 ${verifiedOnFrame.length} 条 · 货框已确认 ${countVerifiedFrameConfirmedBoxes(ev.frame_idx)}/${verifiedOnFrame.length}`
-          : `本帧 ${frameEvents.length} 条检测（标真=确认确有拣货，再点选货框）`;
-      if (confirmed) {
-        boxConfirmEl.textContent = `${verifiedNote} · 当前货框：${confirmed}`;
+          : `本帧 ${frameEvents.length} 条检测`;
+      if (confirmed.length) {
+        boxConfirmEl.textContent = `${verifiedNote} · 当前已选 ${confirmed.length}${detN ? `/${detN}` : ""}：${formatConfirmedBoxes(confirmed)}`;
         boxConfirmEl.classList.add("is-confirmed");
       } else if (isEventVerified(ev)) {
-        boxConfirmEl.textContent = `${verifiedNote} · 请为当前已标真事件点击画面货框`;
+        const detRef = formatConfirmedBoxes(getEventReviewBoxLayers(ev).detectionRef);
+        boxConfirmEl.textContent = detRef
+          ? `${verifiedNote} · 检测参考 ${detRef}，请点击画面重新确认`
+          : `${verifiedNote} · 点击画面多选货框`;
         boxConfirmEl.classList.remove("is-confirmed");
       } else {
-        boxConfirmEl.textContent = `${verifiedNote} · 可先标真再点选货框，或先点货框后标真`;
+        boxConfirmEl.textContent = `${verifiedNote} · 点击画面多选货框，不必选满检测数`;
         boxConfirmEl.classList.remove("is-confirmed");
       }
-    } else if (confirmed) {
-      boxConfirmEl.textContent = `货框已确认：${confirmed}（标真表示本帧确有拣货/碰撞）`;
+    } else if (confirmed.length) {
+      boxConfirmEl.textContent = `已选 ${confirmed.length}${detN ? `/${detN}` : ""} 个货框：${formatConfirmedBoxes(confirmed)} · 再次点击可取消`;
       boxConfirmEl.classList.add("is-confirmed");
     } else if (isEventVerified(ev)) {
-      boxConfirmEl.textContent = "已标真 · 多货框时请点选货箱；仅单货框检测时已自动确认";
-      boxConfirmEl.classList.toggle("is-confirmed", !!confirmed);
+      const detRef = formatConfirmedBoxes(getEventReviewBoxLayers(ev).detectionRef);
+      boxConfirmEl.textContent = detRef
+        ? `已标真 · 检测参考 ${detRef}，点击画面确认（可少选）`
+        : `已标真 · 点击画面多选货框`;
+      boxConfirmEl.classList.remove("is-confirmed");
     } else {
-      boxConfirmEl.textContent = "标真=确认确有拣货（单货框时自动确认货箱；多货框需点选）";
+      boxConfirmEl.textContent = "点击画面多选货框；标真时默认写入全部 box_tokens，可少选或重置后重标";
       boxConfirmEl.classList.remove("is-confirmed");
     }
   }
@@ -939,6 +1079,7 @@ function patchEventMarkersVerifiedStates() {
 function patchEventReviewVerifiedUi() {
   if ($("#event-review-list-details")?.open) patchEventReviewTableVerifiedStates();
   patchEventMarkersVerifiedStates();
+  if (typeof redrawCurrentFrame === "function") redrawCurrentFrame();
 }
 
 function renderEventReviewTable(list = null) {
@@ -960,7 +1101,7 @@ function renderEventReviewTable(list = null) {
         <td class="col-type"><span class="event-badge ${ev.event_type}">${typeLabel}</span></td>
         <td class="col-time">${formatTime(ev.timestamp_sec)}</td>
         <td class="col-frame">${ev.frame_idx}</td>
-        <td class="col-tokens" title="${formatEventTokens(ev.box_tokens)}">${formatEventTokens(ev.box_tokens)}${getEventConfirmedBox(ev) ? ` → ${getEventConfirmedBox(ev)}` : ""}</td>
+        <td class="col-tokens" title="${formatEventTokens(ev.box_tokens)}">${formatEventTokens(ev.box_tokens)}${getEventConfirmedBoxes(ev).length ? ` → ${formatConfirmedBoxes(getEventConfirmedBoxes(ev))}` : ""}</td>
       </tr>`;
     })
     .join("");

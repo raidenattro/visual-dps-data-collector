@@ -31,8 +31,10 @@ let activeEventKey = null;
 let playbackEventLinkExact = false;
 /** 人工标为真的事件键（eventRowKey） */
 const verifiedTrueKeys = new Set();
-/** 未标真前在画面上点选的货框（标真时一并写入 event_review） */
-const pendingConfirmedBoxByKey = new Map();
+/** 未标真前在画面上点选的货框列表（标真时一并写入 event_review） */
+const pendingConfirmedBoxesByKey = new Map();
+/** 用户已手动点选/重置过 box 的事件（重置后不再自动回填检测框） */
+const boxAnnotationTouchedKeys = new Set();
 let eventReviewSaveTimer = null;
 let eventReviewSaveSeq = 0;
 /** 标真并下一条后，上一条优先回到此事件（已标真事件不在「未标真」队列中） */
