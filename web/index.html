@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>骨架采集与回放</title>
-  <link rel="stylesheet" href="style.css?v=57" />
+  <link rel="stylesheet" href="style.css?v=58" />
 </head>
 <body>
   <header>
@@ -395,6 +395,39 @@
                 <p id="event-review-box-confirm" class="event-review-box-confirm hint" aria-live="polite">
                   点击画面货框可多选；标真默认写入全部检测框，可少选
                 </p>
+                <details class="event-review-box-legend" open>
+                  <summary>画面货框颜色</summary>
+                  <ul class="box-legend-grid">
+                    <li>
+                      <span class="box-legend-swatch box-legend-swatch--shelf" aria-hidden="true"></span>
+                      <span>淡绿细线 · 普通货架</span>
+                    </li>
+                    <li>
+                      <span class="box-legend-swatch box-legend-swatch--pick" aria-hidden="true"></span>
+                      <span>青绿描边 · 可点选候选</span>
+                    </li>
+                    <li>
+                      <span class="box-legend-swatch box-legend-swatch--confirmed-active" aria-hidden="true"></span>
+                      <span>紫色填充 · 当前事件已确认</span>
+                    </li>
+                    <li>
+                      <span class="box-legend-swatch box-legend-swatch--confirmed-other" aria-hidden="true"></span>
+                      <span>绿色填充 · 同帧其他已确认</span>
+                    </li>
+                    <li>
+                      <span class="box-legend-swatch box-legend-swatch--detection" aria-hidden="true"></span>
+                      <span>琥珀虚线 · 检测参考</span>
+                    </li>
+                    <li>
+                      <span class="box-legend-swatch box-legend-swatch--collision" aria-hidden="true"></span>
+                      <span>黄色描边 · 碰撞</span>
+                    </li>
+                    <li>
+                      <span class="box-legend-swatch box-legend-swatch--alarm" aria-hidden="true"></span>
+                      <span>红色描边 · 告警</span>
+                    </li>
+                  </ul>
+                </details>
                 <button type="button" id="event-reset-box-btn" class="btn-review-reset-box">
                   重置box标注
                 </button>
@@ -450,7 +483,7 @@
   <script src="app/07-playback-stage.js?v=48"></script>
   <script src="app/08-event-review.js?v=56"></script>
   <script src="app/09-playback-events.js?v=54"></script>
-  <script src="app/10-render-collision.js?v=56"></script>
+  <script src="app/10-render-collision.js?v=57"></script>
   <script src="app/11-playback-controls.js?v=54"></script>
   <script src="annotate.js?v=11"></script>
 </body>

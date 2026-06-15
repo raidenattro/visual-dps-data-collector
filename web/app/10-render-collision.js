@@ -478,66 +478,29 @@ function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null, review
     });
     ctx.closePath();
 
-    const drawConfirmedLabel = (label, fillColor, strokeColor) => {
+    const drawReviewBox = (fillColor, strokeColor, lineWidth = 3.5) => {
       ctx.fillStyle = fillColor;
       ctx.strokeStyle = strokeColor;
-      ctx.lineWidth = 3.5;
+      ctx.lineWidth = lineWidth;
       ctx.fill();
       ctx.stroke();
-      const displayPts = framePts.map(([x, y]) => pl.mapPointToDisplay(x, y, layout));
-      const cx = displayPts.reduce((sum, pt) => sum + pt[0], 0) / displayPts.length;
-      const cy = displayPts.reduce((sum, pt) => sum + pt[1], 0) / displayPts.length;
-      ctx.font = "bold 13px system-ui, sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      const tw = ctx.measureText(label).width;
-      ctx.fillStyle = "rgba(15, 23, 42, 0.82)";
-      ctx.fillRect(cx - tw / 2 - 6, cy - 10, tw + 12, 20);
-      ctx.fillStyle = "#f8fafc";
-      ctx.fillText(label, cx, cy);
     };
 
     if (confirmedMeta) {
       if (confirmedMeta.isDetectionRef && !confirmedMeta.isManual) {
-        const refLabel = `检测 ${token}`;
         ctx.setLineDash([6, 4]);
-        if (isActiveConfirmed) {
-          ctx.strokeStyle = "rgba(251, 191, 36, 0.98)";
-          ctx.lineWidth = 2.5;
-          ctx.stroke();
-          ctx.setLineDash([]);
-          const displayPts = framePts.map(([x, y]) => pl.mapPointToDisplay(x, y, layout));
-          const cx = displayPts.reduce((sum, pt) => sum + pt[0], 0) / displayPts.length;
-          const cy = displayPts.reduce((sum, pt) => sum + pt[1], 0) / displayPts.length;
-          ctx.font = "bold 12px system-ui, sans-serif";
-          ctx.textAlign = "center";
-          ctx.textBaseline = "middle";
-          const tw = ctx.measureText(refLabel).width;
-          ctx.fillStyle = "rgba(15, 23, 42, 0.78)";
-          ctx.fillRect(cx - tw / 2 - 5, cy - 9, tw + 10, 18);
-          ctx.fillStyle = "#fde68a";
-          ctx.fillText(refLabel, cx, cy);
-        } else {
-          ctx.strokeStyle = "rgba(251, 191, 36, 0.65)";
-          ctx.lineWidth = 2;
-          ctx.stroke();
-          ctx.setLineDash([]);
-        }
+        ctx.strokeStyle = isActiveConfirmed
+          ? "rgba(251, 191, 36, 0.98)"
+          : "rgba(251, 191, 36, 0.65)";
+        ctx.lineWidth = isActiveConfirmed ? 2.5 : 2;
+        ctx.stroke();
+        ctx.setLineDash([]);
         return;
       }
-      const boxLabel = confirmedMeta.isVerified
-        ? confirmedMeta.isManual
-          ? `✓ ${token}`
-          : `✓ 标真 ${token}`
-        : `✓ ${token}`;
       if (isActiveConfirmed) {
-        drawConfirmedLabel(boxLabel, "rgba(168, 85, 247, 0.32)", "rgba(192, 132, 252, 1)");
+        drawReviewBox("rgba(168, 85, 247, 0.32)", "rgba(192, 132, 252, 1)");
       } else {
-        drawConfirmedLabel(
-          `#${confirmedMeta.eventIndexLabel || confirmedMeta.eventIndex} ${boxLabel}`,
-          "rgba(34, 197, 94, 0.22)",
-          "rgba(74, 222, 128, 0.95)"
-        );
+        drawReviewBox("rgba(34, 197, 94, 0.22)", "rgba(74, 222, 128, 0.95)");
       }
       return;
     }
