@@ -354,15 +354,12 @@ function getReviewBoxHighlightContext(_frameIdx = null) {
     (typeof getActiveFilteredEvent === "function" ? getActiveFilteredEvent() : null);
   if (!activeEv) return null;
 
-  const manual =
-    typeof getEventConfirmedBoxes === "function" ? getEventConfirmedBoxes(activeEv) : [];
-  const layers =
-    typeof getEventReviewBoxLayers === "function"
-      ? getEventReviewBoxLayers(activeEv)
-      : { confirmed: manual, detectionRef: [] };
-
+  const boxes =
+    typeof getEventConfirmedBoxes === "function"
+      ? getEventConfirmedBoxes(activeEv)
+      : [];
   const confirmedByToken = new Map();
-  layers.confirmed.forEach((token) => {
+  boxes.forEach((token) => {
     for (const key of boxTokenLookupKeys(token)) {
       confirmedByToken.set(key, true);
     }

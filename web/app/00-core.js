@@ -31,7 +31,7 @@ let activeEventKey = null;
 let playbackEventLinkExact = false;
 /** 人工标为真的事件键（eventRowKey） */
 const verifiedTrueKeys = new Set();
-/** 未标真前在画面上点选的货框列表（标真时一并写入 event_review） */
+/** 画面上点选的货框（按 Y 标真时一并写入 event_review.json） */
 const pendingConfirmedBoxesByKey = new Map();
 /** 用户已手动点选/重置过 box 的事件（重置后不再自动回填检测框） */
 const boxAnnotationTouchedKeys = new Set();

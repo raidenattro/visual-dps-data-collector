@@ -814,17 +814,26 @@ def _patch_record_event_review_locked(
             want = sig not in by_sig
         if bool(want):
             entry_norm = dict(norm)
-            confirmed_list = extract_confirmed_box_tokens(entry)
-            if confirmed_list:
-                entry_norm["confirmed_box_tokens"] = confirmed_list
+            raw_entry = entry if isinstance(entry, dict) else {}
+            if "confirmed_box_tokens" in raw_entry or "confirmed_box_token" in raw_entry:
+                confirmed_list = extract_confirmed_box_tokens(raw_entry)
+                if confirmed_list:
+                    entry_norm["confirmed_box_tokens"] = confirmed_list
+                else:
+                    entry_norm.pop("confirmed_box_tokens", None)
+                    entry_norm.pop("confirmed_box_token", None)
             else:
-                existing = by_sig.get(sig)
-                if isinstance(existing, dict):
-                    old_list = extract_confirmed_box_tokens(existing)
-                    if old_list:
-                        entry_norm["confirmed_box_tokens"] = old_list
-                if "confirmed_box_tokens" not in entry_norm:
-                    entry_norm["confirmed_box_tokens"] = list(norm["box_tokens"])
+                confirmed_list = extract_confirmed_box_tokens(entry)
+                if confirmed_list:
+                    entry_norm["confirmed_box_tokens"] = confirmed_list
+                else:
+                    existing = by_sig.get(sig)
+                    if isinstance(existing, dict):
+                        old_list = extract_confirmed_box_tokens(existing)
+                        if old_list:
+                            entry_norm["confirmed_box_tokens"] = old_list
+                    if "confirmed_box_tokens" not in entry_norm:
+                        entry_norm["confirmed_box_tokens"] = list(norm["box_tokens"])
             by_sig[sig] = entry_norm
         else:
             by_sig.pop(sig, None)

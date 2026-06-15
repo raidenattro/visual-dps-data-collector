@@ -393,7 +393,7 @@
                 </div>
                 <div id="event-review-tokens" class="event-review-tokens" aria-hidden="true">&nbsp;</div>
                 <p id="event-review-box-confirm" class="event-review-box-confirm hint" aria-live="polite">
-                  点击画面货框可多选；标真默认写入全部检测框，可少选
+                  点选货框显示紫色（含暂选）；按 Y 标为真后写入 event_review，切换事件未按 Y 不保留
                 </p>
                 <details class="event-review-box-legend" open>
                   <summary>画面货框颜色</summary>
@@ -404,7 +404,7 @@
                     </li>
                     <li>
                       <span class="box-legend-swatch box-legend-swatch--confirmed-active" aria-hidden="true"></span>
-                      <span>紫色填充 · 已选手动标注（保留碰撞/告警描边）</span>
+                      <span>紫色填充 · 当前已选人工 box（含暂选，保留碰撞/告警描边）</span>
                     </li>
                     <li>
                       <span class="box-legend-swatch box-legend-swatch--collision" aria-hidden="true"></span>
@@ -429,7 +429,7 @@
                 <button type="button" id="event-unmark-all-btn" class="btn-review-bulk-unmark">全部取消标真</button>
                 <button type="button" id="event-review-complete-btn" class="btn-review-complete">标记复核完成</button>
               </div>
-              <p class="event-review-kbd-hint">标真=确有拣货 · 点选 box 可多选/再点取消 · 重置 box 可重标 · Y/N/U · ↑↓ 切换</p>
+              <p class="event-review-kbd-hint">Y=标真并落盘 box · 紫色=当前已选 · 切换事件丢弃未保存暂选 · 删错：改选/重置后按 Y · N/U · ↑↓</p>
             </div>
             <details id="event-review-list-details" class="event-review-list-details">
               <summary id="event-review-list-summary">全部事件列表</summary>
@@ -461,7 +461,7 @@
   <script src="annotateGeometry.js"></script>
   <script src="annotateVisualMode.js"></script>
   <!-- 回放/采集主逻辑（由 app.monolith.js 拆分，按依赖顺序加载） -->
-  <script src="app/00-core.js?v=54"></script>
+  <script src="app/00-core.js?v=55"></script>
   <script src="app/01-layout-frames.js?v=48"></script>
   <script src="app/02-playback-selection.js?v=34"></script>
   <script src="app/03-tabs.js?v=34"></script>
@@ -469,9 +469,9 @@
   <script src="app/05-collect.js?v=40"></script>
   <script src="app/06-records.js?v=42"></script>
   <script src="app/07-playback-stage.js?v=48"></script>
-  <script src="app/08-event-review.js?v=58"></script>
+  <script src="app/08-event-review.js?v=61"></script>
   <script src="app/09-playback-events.js?v=54"></script>
-  <script src="app/10-render-collision.js?v=61"></script>
+  <script src="app/10-render-collision.js?v=63"></script>
   <script src="app/11-playback-controls.js?v=54"></script>
   <script src="annotate.js?v=11"></script>
 </body>
