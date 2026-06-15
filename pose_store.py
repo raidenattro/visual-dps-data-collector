@@ -651,6 +651,48 @@ def extract_confirmed_box_tokens(entry: dict[str, Any]) -> list[str]:
     return [single] if single else []
 
 
+def review_missing_box_annotation(review: dict[str, Any]) -> bool:
+    """已标真条目中是否存在未确认货框。"""
+    for item in review.get("verified_true") or []:
+        if not isinstance(item, dict):
+            continue
+        if not extract_confirmed_box_tokens(item):
+            return True
+    return False
+
+
+def count_verified_missing_box_annotation(review: dict[str, Any]) -> int:
+    """已标真但缺货框确认的条目数。"""
+    n = 0
+    for item in review.get("verified_true") or []:
+        if not isinstance(item, dict):
+            continue
+        if not extract_confirmed_box_tokens(item):
+            n += 1
+    return n
+
+
+def patch_event_review_persisted_status(locator: RecordLocator, status: str) -> Path:
+    """仅更新 event_review.json 的 status / completed_at，不改动 verified_true 等复核内容。"""
+    path = event_review_path(locator)
+    if not path.is_file():
+        raise FileNotFoundError(f"event_review 不存在: {path}")
+    raw = load_event_review_raw(locator)
+    if not raw:
+        raise ValueError(f"event_review 无效: {path}")
+    st = str(status or "").strip().lower()
+    raw["status"] = st
+    if st == REVIEW_STATUS_COMPLETED:
+        raw["completed_at"] = datetime.now(timezone.utc).isoformat()
+    else:
+        raw.pop("completed_at", None)
+    raw["updated_at"] = datetime.now(timezone.utc).isoformat()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(raw, f, ensure_ascii=False, indent=2)
+    return path.resolve()
+
+
 def normalize_review_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
     if not isinstance(entry, dict):
         return None
