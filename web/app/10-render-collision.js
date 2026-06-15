@@ -334,11 +334,21 @@ function getReviewBoxHighlightContext() {
     const c =
       typeof getEventConfirmedBox === "function" ? getEventConfirmedBox(item) : "";
     if (!c) return;
-    confirmedByToken.set(c, {
-      eventKey: eventRowKey(item),
+    const itemKey = eventRowKey(item);
+    const existing = confirmedByToken.get(c);
+    const meta = {
+      eventKey: itemKey,
       eventIndex: idx + 1,
-      isActive: eventRowKey(item) === activeKey,
-    });
+      isActive: itemKey === activeKey,
+      isVerified: typeof isEventVerified === "function" ? isEventVerified(item) : false,
+    };
+    if (existing) {
+      existing.eventIndexLabel = `${existing.eventIndex},${idx + 1}`;
+      if (meta.isActive) existing.isActive = true;
+    } else {
+      meta.eventIndexLabel = String(idx + 1);
+      confirmedByToken.set(c, meta);
+    }
   });
   return {
     frameEventCount: frameEvents.length,
@@ -464,7 +474,7 @@ function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null, review
         drawConfirmedLabel(`✓ ${token}`, "rgba(168, 85, 247, 0.32)", "rgba(192, 132, 252, 1)");
       } else {
         drawConfirmedLabel(
-          `#${confirmedMeta.eventIndex} ${token}`,
+          `#${confirmedMeta.eventIndexLabel || confirmedMeta.eventIndex} ${token}`,
           "rgba(245, 158, 11, 0.28)",
           "rgba(251, 191, 36, 1)"
         );
