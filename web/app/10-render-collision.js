@@ -17,6 +17,30 @@ function boxCollisionToken(box) {
   return shelf ? `${shelf}:${id}` : `Box_${id}`;
 }
 
+/** 同一货位的多种 token 写法（Box_id 与 shelf:id）用于复核高亮查找 */
+function boxTokenLookupKeys(token) {
+  const t = String(token || "").trim();
+  if (!t) return [];
+  const keys = new Set([t]);
+  let boxId = "";
+  if (t.startsWith("Box_")) {
+    boxId = t.slice(4).trim();
+  } else if (t.includes(":")) {
+    boxId = t.split(":").pop().trim();
+    if (boxId) keys.add(`Box_${boxId}`);
+  }
+  if (boxId) {
+    for (const box of annotationBoxes) {
+      const bid = String(box.box_id ?? box.id ?? "").trim();
+      if (bid && bid === boxId) {
+        const canon = boxCollisionToken(box);
+        if (canon) keys.add(canon);
+      }
+    }
+  }
+  return [...keys];
+}
+
 /** 射线法：点是否在多边形内（推理坐标系） */
 function pointInPolygon(point, polygon) {
   if (!Array.isArray(polygon) || polygon.length < 3) return false;
@@ -320,72 +344,33 @@ function syncCanvasSize() {
   return { cw: cssW, ch: cssH };
 }
 
-/** 回放/复核时当前帧标真货框高亮（随播放帧变化） */
-function getReviewBoxHighlightContext(frameIdx = null) {
+/** 回放/复核时当前选中事件货框高亮（复核面板打开即展示，不依赖播放帧对齐） */
+function getReviewBoxHighlightContext(_frameIdx = null) {
   if (!playbackEvents?.length || !annotationBoxes.length) return null;
+  if (!eventsPanel || eventsPanel.classList.contains("hidden")) return null;
 
-  let fi =
-    frameIdx != null
-      ? parseInt(frameIdx, 10) || 0
-      : lastRenderedFrameIdx >= 1
-        ? lastRenderedFrameIdx
-        : typeof getCurrentPlaybackFrameIdx === "function"
-          ? getCurrentPlaybackFrameIdx()
-          : null;
-  if (fi == null) return null;
+  const activeEv =
+    (typeof getActiveEvent === "function" ? getActiveEvent() : null) ??
+    (typeof getActiveFilteredEvent === "function" ? getActiveFilteredEvent() : null);
+  if (!activeEv) return null;
 
-  const frameEvents = typeof getEventsOnFrame === "function" ? getEventsOnFrame(fi) : [];
-  const picking = !!(eventsPanel && !eventsPanel.classList.contains("hidden"));
-  const activeEv = typeof getActiveEvent === "function" ? getActiveEvent() : null;
-  const activeKey = activeEv ? eventRowKey(activeEv) : null;
+  const manual =
+    typeof getEventConfirmedBoxes === "function" ? getEventConfirmedBoxes(activeEv) : [];
+  const layers =
+    typeof getEventReviewBoxLayers === "function"
+      ? getEventReviewBoxLayers(activeEv)
+      : { confirmed: manual, detectionRef: [] };
+
   const confirmedByToken = new Map();
-
-  frameEvents.forEach((item, idx) => {
-    const itemKey = eventRowKey(item);
-    const verified = typeof isEventVerified === "function" ? isEventVerified(item) : false;
-    const manual =
-      typeof getEventConfirmedBoxes === "function" ? getEventConfirmedBoxes(item) : [];
-    const layers =
-      typeof getEventReviewBoxLayers === "function"
-        ? getEventReviewBoxLayers(item)
-        : { confirmed: manual, detectionRef: [] };
-    if (!verified && !manual.length && !layers.detectionRef.length && !picking) return;
-
-    const addToken = (token, isDetectionRef) => {
-      if (!token) return;
-      const meta = {
-        eventKey: itemKey,
-        eventIndex: idx + 1,
-        isActive: itemKey === activeKey,
-        isVerified: verified,
-        isManual: !isDetectionRef && manual.includes(token),
-        isDetectionRef: !!isDetectionRef,
-      };
-      const existing = confirmedByToken.get(token);
-      if (existing) {
-        existing.eventIndexLabel = `${existing.eventIndex},${idx + 1}`;
-        if (meta.isActive) existing.isActive = true;
-        if (meta.isVerified) existing.isVerified = true;
-        if (meta.isManual) existing.isManual = true;
-        if (meta.isDetectionRef && !existing.isManual) existing.isDetectionRef = true;
-      } else {
-        meta.eventIndexLabel = String(idx + 1);
-        confirmedByToken.set(token, meta);
-      }
-    };
-
-    layers.confirmed.forEach((token) => addToken(token, false));
-    layers.detectionRef.forEach((token) => addToken(token, true));
+  layers.confirmed.forEach((token) => {
+    for (const key of boxTokenLookupKeys(token)) {
+      confirmedByToken.set(key, true);
+    }
   });
 
-  if (!confirmedByToken.size && !picking) return null;
+  if (!confirmedByToken.size) return null;
 
-  return {
-    frameIdx: fi,
-    picking,
-    activeKey,
-    confirmedByToken,
-  };
+  return { confirmedByToken };
 }
 
 function collectAnnotationDisplayPolygons() {
@@ -450,8 +435,11 @@ function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null, review
   const annSize = getEffectiveAnnotationSize();
   const { collisionSet, alarmSet } =
     collisionSets || getFrameCollisionSets(frame, inferW, inferH);
-  const frameIdx = frame?.frame_idx ?? frame?.source_frame_idx ?? lastRenderedFrameIdx;
-  reviewCtx = reviewCtx ?? getReviewBoxHighlightContext(frameIdx);
+  const frameIdx =
+    lastRenderedFrameIdx >= 1
+      ? lastRenderedFrameIdx
+      : Number(frame?.frame_idx) || Number(frame?.source_frame_idx) || 0;
+  reviewCtx = reviewCtx ?? getReviewBoxHighlightContext();
 
   annotationBoxes.forEach((box) => {
     const poly = box.video_polygon;
@@ -467,8 +455,7 @@ function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null, review
     const token = boxCollisionToken(box);
     const isAlarm = alarmSet.has(token);
     const isHit = collisionSet.has(token);
-    const confirmedMeta = reviewCtx?.confirmedByToken?.get(token);
-    const isActiveConfirmed = !!(confirmedMeta?.isActive);
+    const isManuallyConfirmed = !!reviewCtx?.confirmedByToken?.get(token);
 
     ctx.beginPath();
     framePts.forEach(([x, y], i) => {
@@ -478,40 +465,12 @@ function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null, review
     });
     ctx.closePath();
 
-    const drawReviewBox = (fillColor, strokeColor, lineWidth = 3.5) => {
-      ctx.fillStyle = fillColor;
-      ctx.strokeStyle = strokeColor;
-      ctx.lineWidth = lineWidth;
+    if (isManuallyConfirmed) {
+      ctx.fillStyle = "rgba(168, 85, 247, 0.32)";
       ctx.fill();
-      ctx.stroke();
-    };
-
-    if (confirmedMeta) {
-      if (confirmedMeta.isDetectionRef && !confirmedMeta.isManual) {
-        ctx.setLineDash([6, 4]);
-        ctx.strokeStyle = isActiveConfirmed
-          ? "rgba(251, 191, 36, 0.98)"
-          : "rgba(251, 191, 36, 0.65)";
-        ctx.lineWidth = isActiveConfirmed ? 2.5 : 2;
-        ctx.stroke();
-        ctx.setLineDash([]);
-        return;
-      }
-      if (isActiveConfirmed) {
-        drawReviewBox("rgba(168, 85, 247, 0.32)", "rgba(192, 132, 252, 1)");
-      } else {
-        drawReviewBox("rgba(34, 197, 94, 0.22)", "rgba(74, 222, 128, 0.95)");
-      }
-      return;
     }
 
-    if (reviewCtx?.picking) {
-      ctx.strokeStyle = "rgba(52, 211, 153, 0.72)";
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      return;
-    }
-
+    ctx.setLineDash([]);
     ctx.strokeStyle = isAlarm
       ? "rgba(255, 71, 87, 0.95)"
       : isHit

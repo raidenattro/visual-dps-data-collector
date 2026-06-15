@@ -1431,24 +1431,9 @@ main:has(#panel-playback.active) {
   background: transparent;
 }
 
-.box-legend-swatch--pick {
-  border: 2px solid rgba(52, 211, 153, 0.9);
-  background: transparent;
-}
-
 .box-legend-swatch--confirmed-active {
-  border: 2px solid rgba(192, 132, 252, 1);
+  border: 1.5px solid rgba(0, 255, 0, 0.55);
   background: rgba(168, 85, 247, 0.35);
-}
-
-.box-legend-swatch--confirmed-other {
-  border: 2px solid rgba(74, 222, 128, 0.95);
-  background: rgba(34, 197, 94, 0.28);
-}
-
-.box-legend-swatch--detection {
-  border: 2px dashed rgba(251, 191, 36, 0.85);
-  background: transparent;
 }
 
 .box-legend-swatch--collision {

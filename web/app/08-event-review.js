@@ -69,6 +69,23 @@ function normalizeBoxTokenList(tokens) {
   return out;
 }
 
+function eventDisplayFrameIdx(ev) {
+  return parseInt(ev?.frame_idx, 10) || 0;
+}
+
+function eventSourceFrameIdx(ev) {
+  const sfi = parseInt(ev?.source_frame_idx, 10) || 0;
+  const fi = eventDisplayFrameIdx(ev);
+  return sfi > 0 ? sfi : fi;
+}
+
+/** 回放当前帧是否与事件对应（兼容 source_frame_idx） */
+function eventMatchesPlaybackFrame(ev, playbackFrameIdx) {
+  const fi = parseInt(playbackFrameIdx, 10) || 0;
+  if (!fi || !ev) return false;
+  return fi === eventDisplayFrameIdx(ev) || fi === eventSourceFrameIdx(ev);
+}
+
 function formatConfirmedBoxes(tokens) {
   const list = normalizeBoxTokenList(tokens);
   if (!list.length) return "";
