@@ -14,6 +14,9 @@ tabs.forEach((btn) => {
     if (btn.dataset.tab === "annotate") {
       if (typeof window.initAnnotatePanel === "function") window.initAnnotatePanel();
     }
+    if (btn.dataset.tab === "accuracy") {
+      if (typeof window.initAccuracyPanel === "function") window.initAccuracyPanel();
+    }
     if (btn.dataset.tab === "playback") {
       loadRecords();
       restorePlaybackPanelUi();

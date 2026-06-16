@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>骨架采集与回放</title>
-  <link rel="stylesheet" href="style.css?v=60" />
+  <link rel="stylesheet" href="style.css?v=61" />
 </head>
 <body>
   <header>
@@ -15,6 +15,7 @@
   <nav class="tabs">
     <button type="button" class="tab active" data-tab="collect">采集</button>
     <button type="button" class="tab" data-tab="annotate">标注</button>
+    <button type="button" class="tab" data-tab="accuracy">准确率</button>
     <button type="button" class="tab" data-tab="playback">回放</button>
   </nav>
 
@@ -240,6 +241,61 @@
       </div>
     </section>
 
+    <section id="panel-accuracy" class="panel">
+      <div class="card">
+        <p class="hint accuracy-hint">
+          以 <code>localdata/review</code> 中人工复核 <code>verified_true</code> 为范本，对比当前模型下 pose 记录的<strong>告警</strong>（alarm_collisions），衡量 ROI 标注调整效果。
+        </p>
+        <div class="row">
+          <label>
+            <span class="label-with-tip">姿态模型
+              <button type="button" class="field-tip" data-tip="选择要评估的 RTMPose 模型层，将读取 localdata/json/{模型}/{机位}/ 下与 review 匹配的 pose 记录。">?</button>
+            </span>
+            <select id="accuracy-pose-tier">
+              <option value="rtmpose-t">rtmpose-t</option>
+              <option value="rtmpose-s">rtmpose-s</option>
+              <option value="rtmpose-m" selected>rtmpose-m</option>
+            </select>
+          </label>
+          <label>
+            <span class="label-with-tip">机位（机组）
+              <button type="button" class="field-tip" data-tip="仅列出在 review 目录下有复核范本的机位。">?</button>
+            </span>
+            <select id="accuracy-camera">
+              <option value="">— 加载中 —</option>
+            </select>
+          </label>
+          <span class="label-with-tip">
+            <button type="button" id="accuracy-run" class="primary-btn">批量评估</button>
+            <button type="button" class="field-tip" data-tip="规则：连续 verified_true 同货框合并为一段；段内出现匹配告警=成功，无告警=漏报；段外告警=误报。范本货框优先 confirmed_box_tokens。">?</button>
+          </span>
+        </div>
+        <p id="accuracy-context-hint" class="annotation-status hint hidden" role="status"></p>
+      </div>
+      <div id="accuracy-status" class="status hidden" role="status" aria-live="polite"></div>
+      <div id="accuracy-summary" class="card accuracy-summary hidden"></div>
+      <div id="accuracy-clips-wrap" class="card accuracy-clips-wrap hidden">
+        <h2 class="accuracy-clips-heading">分片明细</h2>
+        <div class="accuracy-table-wrap">
+          <table class="accuracy-table" id="accuracy-clips-table">
+            <thead>
+              <tr>
+                <th>复核键</th>
+                <th>记录</th>
+                <th>范本段</th>
+                <th>检出</th>
+                <th>漏报</th>
+                <th>误报</th>
+                <th>召回率</th>
+                <th>状态</th>
+              </tr>
+            </thead>
+            <tbody id="accuracy-clips-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
     <section id="panel-playback" class="panel">
       <div class="playback-layout">
         <aside class="playback-layout-side playback-layout-left">
@@ -455,10 +511,10 @@
   <script src="annotateGeometry.js"></script>
   <script src="annotateVisualMode.js"></script>
   <!-- 回放/采集主逻辑（由 app.monolith.js 拆分，按依赖顺序加载） -->
-  <script src="app/00-core.js?v=55"></script>
+  <script src="app/00-core.js?v=56"></script>
   <script src="app/01-layout-frames.js?v=48"></script>
   <script src="app/02-playback-selection.js?v=34"></script>
-  <script src="app/03-tabs.js?v=34"></script>
+  <script src="app/03-tabs.js?v=35"></script>
   <script src="app/04-collision-config.js?v=34"></script>
   <script src="app/05-collect.js?v=41"></script>
   <script src="app/06-records.js?v=43"></script>
@@ -468,5 +524,6 @@
   <script src="app/10-render-collision.js?v=63"></script>
   <script src="app/11-playback-controls.js?v=54"></script>
   <script src="annotate.js?v=13"></script>
+  <script src="accuracy.js?v=1"></script>
 </body>
 </html>

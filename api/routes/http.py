@@ -57,6 +57,11 @@ from pose_store import (
 )
 from video_frame import first_frame_base64
 
+from api.accuracy_service import (
+    build_accuracy_context,
+    evaluate_camera_batch,
+    list_accuracy_camera_options,
+)
 from api.annotate_service import build_annotate_context, first_frame_video_for_camera, normalize_pose_tier
 from api.collect_service import (
     build_collect_config_snapshot,
@@ -245,6 +250,45 @@ def get_annotate_frame(pose_tier: str = "", camera: str = "") -> dict[str, Any]:
     frame["camera_label"] = label
     frame["pose_tier"] = tier
     return frame
+
+
+@router.get("/api/accuracy/cameras")
+def list_accuracy_cameras() -> dict[str, Any]:
+    """有 review 范本数据的机位列表（优先 reflection 标签）。"""
+    reflection = load_reflection_or_http()
+    paths = resolve_app_paths()
+    return {
+        "cameras": list_accuracy_camera_options(paths, reflection),
+    }
+
+
+@router.get("/api/accuracy/context")
+def get_accuracy_context(pose_tier: str = "", camera: str = "") -> dict[str, Any]:
+    """准确率页：模型 + 机位 → 可评估 clip 与匹配记录。"""
+    label = normalize_corner_label(camera) if normalize_corner_label else str(camera or "").strip()
+    if not label:
+        raise HTTPException(400, "请选择机位")
+    try:
+        tier = normalize_pose_tier(pose_tier)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    reflection = load_reflection_or_http()
+    paths = resolve_app_paths()
+    return build_accuracy_context(paths, reflection, pose_tier=tier, camera_label=label)
+
+
+@router.post("/api/accuracy/evaluate")
+def post_accuracy_evaluate(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    """批量评估指定模型层 + 机位下全部 review clip 的告警准确率。"""
+    pose_tier = str(body.get("pose_tier") or "").strip()
+    camera = str(body.get("camera") or body.get("camera_label") or "").strip()
+    if not camera:
+        raise HTTPException(400, "请选择机位")
+    paths = resolve_app_paths()
+    try:
+        return evaluate_camera_batch(paths, pose_tier=pose_tier, camera_label=camera)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 def _parse_tags_query(raw: str) -> list[str]:

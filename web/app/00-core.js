@@ -8,7 +8,12 @@ const SCORE_MIN = 0.3;
 
 const $ = (sel) => document.querySelector(sel);
 const tabs = document.querySelectorAll(".tab");
-const panels = { collect: $("#panel-collect"), annotate: $("#panel-annotate"), playback: $("#panel-playback") };
+const panels = {
+  collect: $("#panel-collect"),
+  annotate: $("#panel-annotate"),
+  accuracy: $("#panel-accuracy"),
+  playback: $("#panel-playback"),
+};
 
 let poseData = null;
 let annotationBoxes = [];

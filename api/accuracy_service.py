@@ -1,0 +1,403 @@
+"""标注 ROI 有效性：以人工复核 verified_true 为范本，对比告警检测结果。"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from config_loader import AppPaths, camera_storage_slug, resolve_app_paths
+from pose_store import extract_confirmed_box_tokens, iter_active_records, load_timeline, locate_record
+from review_store import EVENT_REVIEW_FILE, canonical_event_review_path, resolve_review_context
+
+from api.annotate_service import normalize_pose_tier
+
+
+def _ground_truth_tokens(entry: dict[str, Any]) -> list[str]:
+    """人工范本货框：优先 confirmed_box_tokens，否则 box_tokens。"""
+    confirmed = extract_confirmed_box_tokens(entry)
+    if confirmed:
+        return confirmed
+    raw = entry.get("box_tokens")
+    if not isinstance(raw, list):
+        return []
+    return [str(t).strip() for t in raw if str(t).strip()]
+
+
+def _gt_token_key(tokens: list[str]) -> tuple[str, ...]:
+    return tuple(sorted({str(t).strip() for t in tokens if str(t).strip()}))
+
+
+@dataclass
+class GroundTruthSegment:
+    gt_tokens: tuple[str, ...]
+    frame_start: int
+    frame_end: int
+    entry_count: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "gt_tokens": list(self.gt_tokens),
+            "frame_start": self.frame_start,
+            "frame_end": self.frame_end,
+            "entry_count": self.entry_count,
+        }
+
+
+def build_ground_truth_segments(verified_true: list[dict[str, Any]]) -> list[GroundTruthSegment]:
+    """将 verified_true 按连续相同范本货框合并为时间段。"""
+    entries = [e for e in verified_true if isinstance(e, dict)]
+    entries.sort(key=lambda e: int(e.get("frame_idx") or e.get("source_frame_idx") or 0))
+
+    segments: list[GroundTruthSegment] = []
+    current: GroundTruthSegment | None = None
+
+    for entry in entries:
+        tokens = _ground_truth_tokens(entry)
+        if not tokens:
+            continue
+        key = _gt_token_key(tokens)
+        frame = int(entry.get("frame_idx") or entry.get("source_frame_idx") or 0)
+        if current and current.gt_tokens == key:
+            current.frame_end = max(current.frame_end, frame)
+            current.entry_count += 1
+        else:
+            if current:
+                segments.append(current)
+            current = GroundTruthSegment(
+                gt_tokens=key,
+                frame_start=frame,
+                frame_end=frame,
+                entry_count=1,
+            )
+    if current:
+        segments.append(current)
+    return segments
+
+
+def _extract_alarms(timeline: list[dict[str, Any]]) -> list[tuple[int, str]]:
+    """从 timeline 提取全部告警 (frame_idx, box_token)。"""
+    out: list[tuple[int, str]] = []
+    for row in timeline:
+        fi = int(row.get("frame_idx") or 0)
+        for raw in row.get("alarm_collisions") or []:
+            token = str(raw).strip()
+            if token:
+                out.append((fi, token))
+    return out
+
+
+def _segment_detected(segment: GroundTruthSegment, alarms: list[tuple[int, str]]) -> bool:
+    gt_set = set(segment.gt_tokens)
+    for frame, token in alarms:
+        if segment.frame_start <= frame <= segment.frame_end and token in gt_set:
+            return True
+    return False
+
+
+def _alarm_covered_by_segment(frame: int, token: str, segment: GroundTruthSegment) -> bool:
+    return segment.frame_start <= frame <= segment.frame_end and token in set(segment.gt_tokens)
+
+
+def evaluate_segments(
+    segments: list[GroundTruthSegment],
+    alarms: list[tuple[int, str]],
+) -> dict[str, Any]:
+    """按规则统计：段内出现匹配告警=成功，否则漏报；未覆盖的告警=误报。"""
+    segment_results: list[dict[str, Any]] = []
+    detected = 0
+    missed = 0
+
+    for seg in segments:
+        ok = _segment_detected(seg, alarms)
+        if ok:
+            detected += 1
+        else:
+            missed += 1
+        segment_results.append({
+            **seg.to_dict(),
+            "detected": ok,
+        })
+
+    false_alarms = 0
+    false_alarm_samples: list[dict[str, Any]] = []
+    for frame, token in alarms:
+        covered = any(_alarm_covered_by_segment(frame, token, seg) for seg in segments)
+        if not covered:
+            false_alarms += 1
+            if len(false_alarm_samples) < 20:
+                false_alarm_samples.append({"frame_idx": frame, "box_token": token})
+
+    total = len(segments)
+    recall = (detected / total) if total else None
+    miss_rate = (missed / total) if total else None
+
+    return {
+        "gt_segments": total,
+        "detected": detected,
+        "missed": missed,
+        "false_alarms": false_alarms,
+        "recall": recall,
+        "miss_rate": miss_rate,
+        "segment_details": segment_results,
+        "false_alarm_samples": false_alarm_samples,
+    }
+
+
+def _load_event_review(path: Path) -> dict[str, Any] | None:
+    if not path.is_file():
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        return raw if isinstance(raw, dict) else None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def build_review_key_index(paths: AppPaths, pose_tier: str) -> dict[str, str]:
+    """review_key → record_id（指定模型层）。"""
+    index: dict[str, str] = {}
+    tier = normalize_pose_tier(pose_tier)
+    for locator in iter_active_records(paths.json_dir, pose_tier=tier):
+        review_key, _, _ = resolve_review_context(locator, paths)
+        if review_key and review_key not in index:
+            index[review_key] = locator.record_id
+    return index
+
+
+def list_review_clips_for_camera(paths: AppPaths, camera_slug: str) -> list[dict[str, Any]]:
+    base = paths.review_dir / camera_slug
+    if not base.is_dir():
+        return []
+    clips: list[dict[str, Any]] = []
+    for child in sorted(base.iterdir(), key=lambda p: p.name.lower()):
+        if not child.is_dir():
+            continue
+        review_path = child / EVENT_REVIEW_FILE
+        if not review_path.is_file():
+            continue
+        review_key = f"{camera_slug}/{child.name}"
+        review = _load_event_review(review_path)
+        verified = review.get("verified_true") if review else []
+        clips.append({
+            "review_key": review_key,
+            "clip_dir": child.name,
+            "source_video": str((review or {}).get("source_video") or ""),
+            "verified_count": len(verified) if isinstance(verified, list) else 0,
+            "review_status": str((review or {}).get("status") or ""),
+        })
+    return clips
+
+
+def list_cameras_with_review(paths: AppPaths) -> list[str]:
+    if not paths.review_dir.is_dir():
+        return []
+    out: list[str] = []
+    for child in sorted(paths.review_dir.iterdir(), key=lambda p: p.name.lower()):
+        if child.is_dir() and any(child.glob(f"*/{EVENT_REVIEW_FILE}")):
+            out.append(child.name)
+    return out
+
+
+def list_accuracy_camera_options(paths: AppPaths, reflection: Any) -> list[dict[str, Any]]:
+    """reflection 机位 + 有 review 数据的 slug。"""
+    review_slugs = set(list_cameras_with_review(paths))
+    options: list[dict[str, Any]] = []
+    for camera_label in reflection.cameras:
+        slug = camera_storage_slug(camera_label)
+        if slug not in review_slugs:
+            continue
+        clip_count = len(list_review_clips_for_camera(paths, slug))
+        options.append({
+            "camera_label": camera_label,
+            "camera_slug": slug,
+            "clip_count": clip_count,
+        })
+    for slug in sorted(review_slugs):
+        if any(o["camera_slug"] == slug for o in options):
+            continue
+        clip_count = len(list_review_clips_for_camera(paths, slug))
+        options.append({
+            "camera_label": slug,
+            "camera_slug": slug,
+            "clip_count": clip_count,
+        })
+    return options
+
+
+def evaluate_single_clip(
+    paths: AppPaths,
+    *,
+    pose_tier: str,
+    review_key: str,
+    record_id: str,
+    review_data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    review_path = canonical_event_review_path(paths, review_key)
+    review = review_data if review_data is not None else _load_event_review(review_path)
+    if not review:
+        return {
+            "review_key": review_key,
+            "record_id": record_id,
+            "status": "error",
+            "error": "复核 JSON 不存在",
+        }
+
+    verified = review.get("verified_true")
+    if not isinstance(verified, list) or not verified:
+        return {
+            "review_key": review_key,
+            "record_id": record_id,
+            "status": "skipped",
+            "error": "无 verified_true 范本数据",
+        }
+
+    locator = locate_record(paths.json_dir, record_id)
+    if not locator:
+        return {
+            "review_key": review_key,
+            "record_id": record_id,
+            "status": "error",
+            "error": f"未找到 pose 记录: {record_id}",
+        }
+
+    timeline = load_timeline(locator, include_events=True)
+    if not timeline:
+        return {
+            "review_key": review_key,
+            "record_id": record_id,
+            "status": "error",
+            "error": "timeline 为空",
+        }
+
+    segments = build_ground_truth_segments(verified)
+    if not segments:
+        return {
+            "review_key": review_key,
+            "record_id": record_id,
+            "status": "skipped",
+            "error": "verified_true 无有效货框范本",
+        }
+
+    alarms = _extract_alarms(timeline)
+    metrics = evaluate_segments(segments, alarms)
+    missed_segments = [s for s in metrics["segment_details"] if not s.get("detected")]
+
+    return {
+        "review_key": review_key,
+        "record_id": record_id,
+        "source_video": str(review.get("source_video") or ""),
+        "status": "ok",
+        **{k: metrics[k] for k in ("gt_segments", "detected", "missed", "false_alarms", "recall", "miss_rate")},
+        "alarm_count": len(alarms),
+        "verified_entry_count": len(verified),
+        "missed_segments": missed_segments[:10],
+        "false_alarm_samples": metrics["false_alarm_samples"],
+    }
+
+
+def evaluate_camera_batch(
+    paths: AppPaths,
+    *,
+    pose_tier: str,
+    camera_label: str,
+) -> dict[str, Any]:
+    tier = normalize_pose_tier(pose_tier)
+    slug = camera_storage_slug(camera_label)
+    clips_meta = list_review_clips_for_camera(paths, slug)
+    if not clips_meta:
+        raise ValueError(f"机位 {camera_label!r}（{slug}）下无 review 复核数据")
+
+    record_index = build_review_key_index(paths, tier)
+    clip_results: list[dict[str, Any]] = []
+    totals = {
+        "gt_segments": 0,
+        "detected": 0,
+        "missed": 0,
+        "false_alarms": 0,
+    }
+    evaluated = 0
+    skipped = 0
+    errors = 0
+
+    for meta in clips_meta:
+        review_key = meta["review_key"]
+        record_id = record_index.get(review_key, "")
+        if not record_id:
+            clip_results.append({
+                "review_key": review_key,
+                "record_id": "",
+                "status": "error",
+                "error": f"该模型层 {tier} 下无匹配 pose 记录",
+            })
+            errors += 1
+            continue
+
+        result = evaluate_single_clip(
+            paths,
+            pose_tier=tier,
+            review_key=review_key,
+            record_id=record_id,
+        )
+        clip_results.append(result)
+        st = result.get("status")
+        if st == "ok":
+            evaluated += 1
+            for k in totals:
+                totals[k] += int(result.get(k) or 0)
+        elif st == "skipped":
+            skipped += 1
+        else:
+            errors += 1
+
+    total_seg = totals["gt_segments"]
+    summary = {
+        "clip_count": len(clips_meta),
+        "evaluated": evaluated,
+        "skipped": skipped,
+        "errors": errors,
+        **totals,
+        "recall": (totals["detected"] / total_seg) if total_seg else None,
+        "miss_rate": (totals["missed"] / total_seg) if total_seg else None,
+    }
+    if total_seg:
+        summary["precision_proxy"] = (
+            totals["detected"] / (totals["detected"] + totals["false_alarms"])
+            if (totals["detected"] + totals["false_alarms"])
+            else None
+        )
+
+    return {
+        "pose_tier": tier,
+        "camera_label": camera_label,
+        "camera_slug": slug,
+        "summary": summary,
+        "clips": clip_results,
+        "rules": {
+            "ground_truth": "verified_true：优先 confirmed_box_tokens，否则 box_tokens",
+            "segment": "连续 verified_true 条目范本货框相同则合并为一段",
+            "success": "段内 [frame_start, frame_end] 出现匹配货框的告警（alarm_collisions）",
+            "miss": "段内无匹配告警记 1 次漏报",
+            "false_alarm": "不在任一段时间与货框范围内的告警记 1 次误报",
+        },
+    }
+
+
+def build_accuracy_context(paths: AppPaths, reflection: Any, *, pose_tier: str, camera_label: str) -> dict[str, Any]:
+    tier = normalize_pose_tier(pose_tier)
+    slug = camera_storage_slug(camera_label)
+    clips = list_review_clips_for_camera(paths, slug)
+    record_index = build_review_key_index(paths, tier)
+    matched = sum(1 for c in clips if record_index.get(c["review_key"]))
+    return {
+        "pose_tier": tier,
+        "camera_label": camera_label,
+        "camera_slug": slug,
+        "clip_count": len(clips),
+        "matched_record_count": matched,
+        "clips": [
+            {**c, "record_id": record_index.get(c["review_key"], "")}
+            for c in clips
+        ],
+    }
