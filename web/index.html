@@ -244,7 +244,7 @@
     <section id="panel-accuracy" class="panel">
       <div class="card">
         <p class="hint accuracy-hint">
-          以 <code>localdata/review</code> 中人工复核 <code>verified_true</code> 为范本，对比当前模型下 pose 记录的<strong>告警</strong>（alarm_collisions），衡量 ROI 标注调整效果。
+          仅以复核状态为 <strong>已复核</strong>（<code>completed</code>）的 review 分片为范本；<strong>无碰撞</strong>及其它未复核记录不参与测试、不计入统计。
         </p>
         <div class="row">
           <label>
@@ -259,7 +259,7 @@
           </label>
           <label>
             <span class="label-with-tip">机位（机组）
-              <button type="button" class="field-tip" data-tip="仅列出在 review 目录下有复核范本的机位。">?</button>
+              <button type="button" class="field-tip" data-tip="仅评估复核状态为「已复核」的分片；无碰撞记录直接排除，不计入测试。">?</button>
             </span>
             <select id="accuracy-camera">
               <option value="">— 加载中 —</option>
@@ -524,6 +524,6 @@
   <script src="app/10-render-collision.js?v=63"></script>
   <script src="app/11-playback-controls.js?v=54"></script>
   <script src="annotate.js?v=13"></script>
-  <script src="accuracy.js?v=1"></script>
+  <script src="accuracy.js?v=2"></script>
 </body>
 </html>

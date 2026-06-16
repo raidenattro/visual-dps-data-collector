@@ -8,7 +8,14 @@ from pathlib import Path
 from typing import Any
 
 from config_loader import AppPaths, camera_storage_slug, resolve_app_paths
-from pose_store import extract_confirmed_box_tokens, iter_active_records, load_timeline, locate_record
+from pose_store import (
+    REVIEW_STATUS_COMPLETED,
+    REVIEW_STATUS_NO_COLLISION,
+    extract_confirmed_box_tokens,
+    iter_active_records,
+    load_timeline,
+    locate_record,
+)
 from review_store import EVENT_REVIEW_FILE, canonical_event_review_path, resolve_review_context
 
 from api.annotate_service import normalize_pose_tier
@@ -166,6 +173,24 @@ def build_review_key_index(paths: AppPaths, pose_tier: str) -> dict[str, str]:
     return index
 
 
+def _normalized_review_status(review: dict[str, Any] | None) -> str:
+    return str((review or {}).get("status") or "").strip().lower()
+
+
+def is_completed_review(review: dict[str, Any] | None) -> bool:
+    """仅 status=completed 的复核参与准确率评估。"""
+    return _normalized_review_status(review) == REVIEW_STATUS_COMPLETED
+
+
+def list_evaluable_review_clips(paths: AppPaths, camera_slug: str) -> list[dict[str, Any]]:
+    """已复核（completed）分片；无碰撞等其它状态不纳入测试池。"""
+    return [
+        c
+        for c in list_review_clips_for_camera(paths, camera_slug)
+        if c.get("review_status") == REVIEW_STATUS_COMPLETED
+    ]
+
+
 def list_review_clips_for_camera(paths: AppPaths, camera_slug: str) -> list[dict[str, Any]]:
     base = paths.review_dir / camera_slug
     if not base.is_dir():
@@ -208,7 +233,7 @@ def list_accuracy_camera_options(paths: AppPaths, reflection: Any) -> list[dict[
         slug = camera_storage_slug(camera_label)
         if slug not in review_slugs:
             continue
-        clip_count = len(list_review_clips_for_camera(paths, slug))
+        clip_count = len(list_evaluable_review_clips(paths, slug))
         options.append({
             "camera_label": camera_label,
             "camera_slug": slug,
@@ -217,7 +242,7 @@ def list_accuracy_camera_options(paths: AppPaths, reflection: Any) -> list[dict[
     for slug in sorted(review_slugs):
         if any(o["camera_slug"] == slug for o in options):
             continue
-        clip_count = len(list_review_clips_for_camera(paths, slug))
+        clip_count = len(list_evaluable_review_clips(paths, slug))
         options.append({
             "camera_label": slug,
             "camera_slug": slug,
@@ -242,6 +267,22 @@ def evaluate_single_clip(
             "record_id": record_id,
             "status": "error",
             "error": "复核 JSON 不存在",
+        }
+
+    review_status = _normalized_review_status(review)
+    if review_status == REVIEW_STATUS_NO_COLLISION:
+        return {
+            "review_key": review_key,
+            "record_id": record_id,
+            "status": "excluded",
+            "error": "无碰撞复核，不参与评估",
+        }
+    if review_status != REVIEW_STATUS_COMPLETED:
+        return {
+            "review_key": review_key,
+            "record_id": record_id,
+            "status": "excluded",
+            "error": f"复核未完成（status={review_status or 'not_started'}）",
         }
 
     verified = review.get("verified_true")
@@ -305,9 +346,9 @@ def evaluate_camera_batch(
 ) -> dict[str, Any]:
     tier = normalize_pose_tier(pose_tier)
     slug = camera_storage_slug(camera_label)
-    clips_meta = list_review_clips_for_camera(paths, slug)
+    clips_meta = list_evaluable_review_clips(paths, slug)
     if not clips_meta:
-        raise ValueError(f"机位 {camera_label!r}（{slug}）下无 review 复核数据")
+        raise ValueError(f"机位 {camera_label!r}（{slug}）下无「已复核」的 review 分片")
 
     record_index = build_review_key_index(paths, tier)
     clip_results: list[dict[str, Any]] = []
@@ -348,6 +389,8 @@ def evaluate_camera_batch(
                 totals[k] += int(result.get(k) or 0)
         elif st == "skipped":
             skipped += 1
+        elif st == "excluded":
+            pass
         else:
             errors += 1
 
@@ -375,6 +418,8 @@ def evaluate_camera_batch(
         "summary": summary,
         "clips": clip_results,
         "rules": {
+            "eligible": "仅复核状态为 completed（已复核）的分片参与评估",
+            "excluded": "no_collision 及其它未复核状态不纳入测试、不计入统计",
             "ground_truth": "verified_true：优先 confirmed_box_tokens，否则 box_tokens",
             "segment": "连续 verified_true 条目范本货框相同则合并为一段",
             "success": "段内 [frame_start, frame_end] 出现匹配货框的告警（alarm_collisions）",
@@ -387,7 +432,7 @@ def evaluate_camera_batch(
 def build_accuracy_context(paths: AppPaths, reflection: Any, *, pose_tier: str, camera_label: str) -> dict[str, Any]:
     tier = normalize_pose_tier(pose_tier)
     slug = camera_storage_slug(camera_label)
-    clips = list_review_clips_for_camera(paths, slug)
+    clips = list_evaluable_review_clips(paths, slug)
     record_index = build_review_key_index(paths, tier)
     matched = sum(1 for c in clips if record_index.get(c["review_key"]))
     return {
@@ -396,6 +441,7 @@ def build_accuracy_context(paths: AppPaths, reflection: Any, *, pose_tier: str, 
         "camera_slug": slug,
         "clip_count": len(clips),
         "matched_record_count": matched,
+        "review_filter": REVIEW_STATUS_COMPLETED,
         "clips": [
             {**c, "record_id": record_index.get(c["review_key"], "")}
             for c in clips

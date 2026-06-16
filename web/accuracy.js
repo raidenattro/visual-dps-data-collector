@@ -44,7 +44,7 @@ function updateAccuracyContextHint(ctx) {
     return;
   }
   el.classList.remove("hidden");
-  el.innerHTML = `机位 <strong>${escHtml(ctx.camera_label)}</strong>（<code>${escHtml(ctx.camera_slug)}</code>）· review 分片 <strong>${ctx.clip_count}</strong> 个 · 模型层 <code>${escHtml(ctx.pose_tier)}</code> 可匹配记录 <strong>${ctx.matched_record_count}</strong> 个`;
+  el.innerHTML = `机位 <strong>${escHtml(ctx.camera_label)}</strong>（<code>${escHtml(ctx.camera_slug)}</code>）· <strong>已复核</strong>分片 <strong>${ctx.clip_count}</strong> 个 · 模型层 <code>${escHtml(ctx.pose_tier)}</code> 可匹配记录 <strong>${ctx.matched_record_count}</strong> 个`;
 }
 
 async function loadAccuracyCameras() {
@@ -59,7 +59,7 @@ async function loadAccuracyCameras() {
     cameras.forEach((c) => {
       const opt = document.createElement("option");
       opt.value = c.camera_label;
-      opt.textContent = `${c.camera_label}（${c.clip_count} 片）`;
+      opt.textContent = `${c.camera_label}（已复核 ${c.clip_count} 片）`;
       sel.appendChild(opt);
     });
     if (!cameras.length) {
