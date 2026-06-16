@@ -37,6 +37,10 @@ localdata/json/archive/*
 localdata/video/*
 !localdata/video/.gitkeep
 
+# 人工复核 event_review（与 pose tier 解耦，运行时生成）
+localdata/review/*
+!localdata/review/.gitkeep
+
 # 上传临时目录（含 tmp_*、回放临时）
 localdata/upload/*
 !localdata/upload/.gitkeep
