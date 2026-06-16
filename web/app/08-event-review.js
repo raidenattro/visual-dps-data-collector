@@ -826,6 +826,20 @@ function getActiveGlobalIndex() {
   return idx >= 0 ? idx : 0;
 }
 
+function globalIndexForEventKey(key) {
+  if (!key || !playbackEvents.length) return -1;
+  return playbackEvents.findIndex((e) => eventRowKey(e) === key);
+}
+
+/** 按时间线全局顺序切换事件（不受筛选队列影响） */
+function navigateReviewEventGlobal(delta, baseGlobalIdx = null) {
+  if (!playbackEvents.length) return;
+  const cur = baseGlobalIdx != null ? baseGlobalIdx : getActiveGlobalIndex();
+  const idx = Math.max(0, Math.min(playbackEvents.length - 1, cur + delta));
+  reviewBackKey = null;
+  void seekToEvent(playbackEvents[idx]);
+}
+
 function navigateReviewEvent(delta) {
   if (!playbackEvents.length) return;
 
@@ -849,7 +863,28 @@ function navigateReviewEvent(delta) {
   let idx;
   if (useFiltered) {
     idx = curKey ? list.findIndex((e) => eventRowKey(e) === curKey) : -1;
-    if (idx < 0) idx = delta > 0 ? -1 : list.length;
+    if (idx < 0) {
+      const globalIdx = globalIndexForEventKey(curKey);
+      if (globalIdx < 0) {
+        idx = delta > 0 ? 0 : list.length - 1;
+      } else if (delta > 0) {
+        const next = list.find((e) => globalIndexForEventKey(eventRowKey(e)) > globalIdx);
+        reviewBackKey = null;
+        if (next) void seekToEvent(next);
+        return;
+      } else {
+        let prev = null;
+        for (let i = list.length - 1; i >= 0; i -= 1) {
+          if (globalIndexForEventKey(eventRowKey(list[i])) < globalIdx) {
+            prev = list[i];
+            break;
+          }
+        }
+        reviewBackKey = null;
+        if (prev) void seekToEvent(prev);
+        return;
+      }
+    }
     idx = Math.max(0, Math.min(list.length - 1, idx + delta));
   } else {
     idx = getActiveGlobalIndex();
@@ -1255,6 +1290,7 @@ async function unmarkTrueAndNext() {
     setEventReviewSaveStatus("请先在列表或进度条上选择一条事件", "");
     return;
   }
+  const globalIdx = getActiveGlobalIndex();
   if (isEventVerified(ev)) {
     if (!currentRecordId) {
       setEventReviewSaveStatus("导入 JSON 无法保存，请从记录列表打开", "error");
@@ -1272,13 +1308,12 @@ async function unmarkTrueAndNext() {
       renderEventMarkers();
       return;
     }
-    if (eventRowKey(ev) === reviewBackKey) {
-      reviewBackKey = null;
-    }
+    reviewBackKey = null;
   } else {
     setEventReviewSaveStatus("当前选中事件未标真", "");
   }
-  navigateReviewEvent(1);
+  // 「下一条」按时间线全局顺序，避免在「已标真」等筛选下取消标真后跳到队列首条
+  navigateReviewEventGlobal(1, globalIdx);
 }
 
 async function skipToNextEvent() {
