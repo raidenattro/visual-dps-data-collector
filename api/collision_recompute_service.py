@@ -18,8 +18,9 @@ from pose_store import (
     STORAGE_V1_JSON,
     STORAGE_V2_PARQUET,
     RecordLocator,
-    event_review_path,
+    legacy_event_review_path,
     load_all_frames,
+    load_events,
     load_manifest,
     patch_v2_manifest,
     write_timeline_parquet,
@@ -151,9 +152,25 @@ def recompute_record_collisions(
     else:
         raise ValueError(f"不支持的存储类型: {locator.storage}")
 
-    review_path = event_review_path(locator)
-    if review_path.is_file():
-        review_path.unlink()
+    legacy_review = legacy_event_review_path(locator)
+    if legacy_review.is_file():
+        legacy_review.unlink()
+
+    # 碰撞重算后重置共享复核（不 unlink review_dir，避免残留空键）
+    from pose_store import REVIEW_STATUS_IN_PROGRESS, load_event_review, save_event_review
+
+    review = load_event_review(locator)
+    if review.get("verified_true") or str(review.get("status") or "").strip():
+        try:
+            event_total = len(load_events(locator))
+        except (RuntimeError, OSError, ValueError):
+            event_total = review.get("event_total")
+        save_event_review(
+            locator,
+            [],
+            status=REVIEW_STATUS_IN_PROGRESS,
+            event_total=event_total if event_total is not None else None,
+        )
 
     stem = video_stem or annotation_path.stem
     if locator.path.is_dir():

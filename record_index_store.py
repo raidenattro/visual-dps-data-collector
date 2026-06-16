@@ -12,7 +12,6 @@ from pose_store import (
     REVIEW_STATUS_NO_COLLISION,
     REVIEW_STATUS_NOT_STARTED,
     REVIEW_STATUS_TERMINAL,
-    event_review_path,
     iter_active_records,
 )
 from record_tag_store import _utc_now, get_db, init_data_store
@@ -46,15 +45,17 @@ def _review_fields(summary: dict[str, Any]) -> tuple[str, int]:
 
 def _source_fingerprint(locator, paths: AppPaths) -> tuple[float, str]:
     from api.record_service import meta_path_for_record
+    from review_store import event_review_read_paths
 
     mtime = float(locator.path.stat().st_mtime)
     parts = [str(int(mtime))]
     sidecar = meta_path_for_record(locator.record_id, locator)
     if sidecar.is_file():
         parts.append(str(int(sidecar.stat().st_mtime)))
-    review_path = event_review_path(locator)
-    if review_path.is_file():
-        parts.append(str(int(review_path.stat().st_mtime)))
+    for review_path in event_review_read_paths(locator, paths):
+        if review_path.is_file():
+            parts.append(str(int(review_path.stat().st_mtime)))
+            break
     return mtime, ":".join(parts)
 
 
@@ -287,7 +288,9 @@ def import_event_reviews_to_index(
     with get_db() as conn:
         for locator in locators:
             stats["scanned"] += 1
-            if not event_review_path(locator).is_file():
+            from review_store import event_review_read_paths
+
+            if not event_review_read_paths(locator, paths):
                 stats["skipped_no_file"] += 1
                 continue
             try:

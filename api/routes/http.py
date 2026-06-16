@@ -724,7 +724,7 @@ def patch_record_event_review(record_id: str, body: dict[str, Any] = Body(...)) 
     if not isinstance(body, dict):
         raise HTTPException(400, "请求体须为 JSON 对象")
 
-    with event_review_write_lock(record_id):
+    with event_review_write_lock(locator):
         return _patch_record_event_review_locked(record_id, locator, body)
 
 

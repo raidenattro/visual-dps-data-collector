@@ -386,6 +386,7 @@ def _review_merge_changed(dest_rev: dict[str, Any], merged: dict[str, Any]) -> b
 
 def _maybe_merge_review_on_record_skip(
     *,
+    paths,
     dest_pkg: Path,
     src_pkg: Path,
     dest_rel: str,
@@ -393,18 +394,27 @@ def _maybe_merge_review_on_record_skip(
     stats: MergeStats,
     dry_run: bool,
 ) -> None:
-    """记录包冲突且保留本地时，将导入侧人工复核并入本地 event_review.json。"""
+    """记录包冲突且保留本地时，将导入侧人工复核并入 review_dir。"""
     if review_mode == "skip":
         return
+    from pose_store import locate_record, load_event_review_raw
+
     src_rev = _load_json(src_pkg / EVENT_REVIEW_FILE)
     if not _review_has_import_data(src_rev):
         return
-    dest_rev = _load_json(dest_pkg / EVENT_REVIEW_FILE) or {}
+    locator = locate_record(paths.json_dir, dest_rel)
+    if not locator:
+        return
+    dest_rev = load_event_review_raw(locator) or {}
+    from review_store import event_review_write_path, merge_event_reviews, resolve_review_context
+
+    review_key, _, _ = resolve_review_context(locator, paths)
     if review_mode == "overwrite":
         merged = dict(src_rev)
+        merged["review_key"] = review_key
         merged["record_id"] = dest_rel
     else:
-        merged = _merge_event_review(src_rev, dest_rev, record_id=dest_rel)
+        merged = merge_event_reviews(src_rev, dest_rev, review_key=review_key, record_id=dest_rel)
     if not _review_merge_changed(dest_rev, merged):
         return
     stats.records_review_merge += 1
@@ -422,7 +432,41 @@ def _maybe_merge_review_on_record_skip(
             f"status={merged.get('status') or '-'}）"
         )
     _log(stats, msg, dry_run=dry_run)
-    _write_json(dest_pkg / EVENT_REVIEW_FILE, merged, dry_run=dry_run)
+    _write_json(event_review_write_path(locator, paths), merged, dry_run=dry_run)
+
+
+def _import_src_package_review(
+    *,
+    paths,
+    dest_rel: str,
+    src_pkg: Path,
+    review_mode: str,
+    stats: MergeStats,
+    dry_run: bool,
+) -> None:
+    """将源记录包内复核导入 review_dir（新增/覆盖记录后调用）。"""
+    from pose_store import locate_record, load_event_review_raw
+    from review_store import event_review_write_path, merge_event_reviews, resolve_review_context
+
+    src_rev = _load_json(src_pkg / EVENT_REVIEW_FILE)
+    if not _review_has_import_data(src_rev):
+        return
+    locator = locate_record(paths.json_dir, dest_rel)
+    if not locator:
+        return
+    dest_rev = load_event_review_raw(locator) or {}
+    review_key, _, _ = resolve_review_context(locator, paths)
+    if review_mode == "overwrite" or not _review_has_import_data(dest_rev):
+        merged = dict(src_rev)
+        merged["review_key"] = review_key
+        merged["record_id"] = dest_rel
+    else:
+        merged = merge_event_reviews(src_rev, dest_rev, review_key=review_key, record_id=dest_rel)
+    if dest_rev and not _review_merge_changed(dest_rev, merged):
+        return
+    stats.records_review_merge += 1
+    _log(stats, f"导入复核到 review_dir: {dest_rel}", dry_run=dry_run)
+    _write_json(event_review_write_path(locator, paths), merged, dry_run=dry_run)
 
 
 def _copy_file(src: Path, dest: Path, *, dry_run: bool) -> None:
@@ -502,6 +546,7 @@ def merge_annotations(
 
 def merge_records(
     *,
+    paths,
     src_json_root: Path,
     dest_json_tier: Path,
     dest_video_tier: Path,
@@ -537,6 +582,7 @@ def merge_records(
                 _add_conflict(stats, dest_pkg, src_pkg, record_id=dest_rel)
                 _log(stats, f"跳过记录（已存在，保留本地）: {dest_rel}", dry_run=dry_run)
                 _maybe_merge_review_on_record_skip(
+                    paths=paths,
                     dest_pkg=dest_pkg,
                     src_pkg=src_pkg,
                     dest_rel=dest_rel,
@@ -550,6 +596,7 @@ def merge_records(
                 _add_conflict(stats, dest_pkg, src_pkg, record_id=dest_rel)
                 _log(stats, f"跳过记录（冲突策略，保留本地）: {dest_rel}", dry_run=dry_run)
                 _maybe_merge_review_on_record_skip(
+                    paths=paths,
                     dest_pkg=dest_pkg,
                     src_pkg=src_pkg,
                     dest_rel=dest_rel,
@@ -581,9 +628,16 @@ def merge_records(
                     stats.meta_copy += 1
                     _log(stats, f"同步 meta: {dest_rel}.meta.json", dry_run=dry_run)
 
-        # 覆盖模式下用源复核；合并模式已在 skip 分支处理
-        if pkg_exists and on_conflict == "overwrite" and (src_pkg / EVENT_REVIEW_FILE).is_file():
-            _copy_file(src_pkg / EVENT_REVIEW_FILE, dest_pkg / EVENT_REVIEW_FILE, dry_run=dry_run)
+        # 复核写入 review_dir，不再复制到记录包
+        if (src_pkg / EVENT_REVIEW_FILE).is_file():
+            _import_src_package_review(
+                paths=paths,
+                dest_rel=dest_rel,
+                src_pkg=src_pkg,
+                review_mode=review_mode,
+                stats=stats,
+                dry_run=dry_run,
+            )
 
     # 配套视频：按机位目录合并（避免每条记录重复扫描）
     if include_videos and src_video_root.is_dir():
@@ -673,6 +727,7 @@ def run_merge(
         _log(stats, f"源 annotations: {src_ann} → 目标: {dest_ann}", dry_run=dry_run)
 
     merge_records(
+        paths=paths,
         src_json_root=src_json_root,
         dest_json_tier=dest_json_tier,
         dest_video_tier=dest_video_tier,

@@ -170,6 +170,7 @@ class AppPaths:
     base_localdata: Path
     json_dir: Path
     video_dir: Path
+    review_dir: Path
     upload_dir: Path
     playback_temp_dir: Path
     annotation_dir: Path
@@ -192,6 +193,12 @@ def resolve_app_paths(cfg: dict[str, Any] | None = None, *, base: Path | None = 
             base=root,
         )
     )
+    review_dir = Path(
+        _resolve_path(
+            str(paths.get("review_dir") or "localdata/review"),
+            base=root,
+        )
+    )
     models_onnx = Path(
         _resolve_path(
             str(
@@ -208,6 +215,7 @@ def resolve_app_paths(cfg: dict[str, Any] | None = None, *, base: Path | None = 
         base_localdata=base_localdata.resolve(),
         json_dir=json_dir,
         video_dir=video_dir,
+        review_dir=review_dir.resolve(),
         upload_dir=upload_dir,
         playback_temp_dir=(upload_dir / "playback_temp").resolve(),
         annotation_dir=annotation_dir.resolve(),

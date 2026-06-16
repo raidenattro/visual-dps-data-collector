@@ -51,6 +51,7 @@ python scripts/data/merge_staging_batches.py --consolidate-after
 | `data/repair_batch_records.py` | 为已有记录补 `annotation.json` 回放副本 |
 | `data/restore_source_videos.py` | 将 `localdata/video` 配套视频复制回批处理源目录 |
 | `data/backfill_no_collision_review.py` | 批量为无碰撞记录写入 `event_review`（无碰撞） |
+| `data/migrate_event_review_to_review_dir.py` | 将包内 `event_review` 迁到 `localdata/review/`（见 [docs/migrate-event-review.md](../docs/migrate-event-review.md)） |
 
 ```bash
 # 本机 slug 归并（先 --dry-run）

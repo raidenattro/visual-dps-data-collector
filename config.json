@@ -5,7 +5,8 @@
         "video_dir": "localdata/video",
         "upload_dir": "localdata/upload",
         "models_onnx_dir": "localdata/models/onnx",
-        "annotation_dir": "localdata/json/annotations"
+        "annotation_dir": "localdata/json/annotations",
+        "review_dir": "localdata/review"
     },
     "storage": {
         "save_video": true

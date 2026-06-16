@@ -16,11 +16,23 @@ _review_write_locks_mu = threading.Lock()
 
 
 @contextmanager
-def event_review_write_lock(record_id: str):
-    """同一 record 的 event_review 写入串行化，避免并发 PATCH toggle 互相覆盖。"""
-    rid = str(record_id or "").strip()
+def event_review_write_lock(locator_or_id: RecordLocator | str):
+    """同一 review_key（或 record_id）的 event_review 写入串行化。"""
+    lock_key = ""
+    if isinstance(locator_or_id, RecordLocator):
+        try:
+            from review_store import resolve_review_context
+
+            review_key, _, _ = resolve_review_context(locator_or_id)
+            lock_key = f"review:{review_key}"
+        except Exception:
+            lock_key = str(locator_or_id.record_id or "").strip()
+    else:
+        lock_key = str(locator_or_id or "").strip()
+    if not lock_key:
+        lock_key = "review:unknown"
     with _review_write_locks_mu:
-        lock = _review_write_locks.setdefault(rid, threading.Lock())
+        lock = _review_write_locks.setdefault(lock_key, threading.Lock())
     lock.acquire()
     try:
         yield
@@ -617,9 +629,39 @@ def event_signature(event_type: str, frame_idx: int, box_tokens: list[Any] | Non
 
 
 def event_review_path(locator: RecordLocator) -> Path:
-    if locator.storage == STORAGE_V2_PARQUET:
-        return locator.path / EVENT_REVIEW_FILE
-    return locator.path.with_suffix(".event_review.json")
+    """人工复核写入路径（review_dir，与 pose tier 解耦）。"""
+    from review_store import event_review_write_path
+
+    return event_review_write_path(locator)
+
+
+def legacy_event_review_path(locator: RecordLocator) -> Path:
+    """记录包内旧版 event_review.json（只读兼容）。"""
+    from review_store import legacy_package_event_review_path
+
+    return legacy_package_event_review_path(locator)
+
+
+def _read_event_review_file(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _first_existing_event_review_raw(locator: RecordLocator) -> tuple[dict[str, Any], Path | None]:
+    from review_store import event_review_read_paths
+
+    for path in event_review_read_paths(locator):
+        raw = _read_event_review_file(path)
+        if raw:
+            return raw, path
+    paths = event_review_read_paths(locator)
+    return {}, paths[0] if paths else None
 
 
 def events_to_verified_entries(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -674,12 +716,14 @@ def count_verified_missing_box_annotation(review: dict[str, Any]) -> int:
 
 def patch_event_review_persisted_status(locator: RecordLocator, status: str) -> Path:
     """仅更新 event_review.json 的 status / completed_at，不改动 verified_true 等复核内容。"""
+    raw, _ = _first_existing_event_review_raw(locator)
     path = event_review_path(locator)
-    if not path.is_file():
-        raise FileNotFoundError(f"event_review 不存在: {path}")
-    raw = load_event_review_raw(locator)
+    if not raw and not path.is_file():
+        legacy = legacy_event_review_path(locator)
+        if legacy.is_file():
+            raw = _read_event_review_file(legacy)
     if not raw:
-        raise ValueError(f"event_review 无效: {path}")
+        raise FileNotFoundError(f"event_review 不存在: {path}")
     st = str(status or "").strip().lower()
     raw["status"] = st
     if st == REVIEW_STATUS_COMPLETED:
@@ -726,36 +770,31 @@ def normalize_review_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
 
 def load_event_review_raw(locator: RecordLocator) -> dict[str, Any]:
     """仅读取 event_review.json 原始内容（列表接口用，不做 verified 规范化）。"""
-    path = event_review_path(locator)
-    if not path.is_file():
-        return {}
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except (OSError, json.JSONDecodeError):
-        return {}
+    raw, _ = _first_existing_event_review_raw(locator)
+    return raw
 
 
 def load_event_review(locator: RecordLocator) -> dict[str, Any]:
     """加载人工复核结果（标为真的碰撞/告警）。"""
-    path = event_review_path(locator)
+    from review_store import extract_segment_window, load_meta_for_locator, review_key_for_record
+
+    meta = load_meta_for_locator(locator)
+    review_key = review_key_for_record(meta=meta, record_id=locator.record_id)
+    seg_start, seg_end = extract_segment_window(meta=meta, record_id=locator.record_id)
     empty = {
         "schema": EVENT_REVIEW_SCHEMA,
         "record_id": locator.record_id,
+        "review_key": review_key,
+        "source_video": str(meta.get("source_video") or ""),
+        "segment_start": seg_start,
+        "segment_end": seg_end,
         "verified_true": [],
         "status": "",
         "completed_at": "",
         "event_total": None,
     }
-    if not path.is_file():
-        return empty
-    try:
-        with open(path, encoding="utf-8") as f:
-            raw = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return empty
-    if not isinstance(raw, dict):
+    raw, _ = _first_existing_event_review_raw(locator)
+    if not raw:
         return empty
 
     verified: list[dict[str, Any]] = []
@@ -779,6 +818,10 @@ def load_event_review(locator: RecordLocator) -> dict[str, Any]:
     return {
         "schema": int(raw.get("schema") or EVENT_REVIEW_SCHEMA),
         "record_id": str(raw.get("record_id") or locator.record_id),
+        "review_key": str(raw.get("review_key") or review_key),
+        "source_video": str(raw.get("source_video") or meta.get("source_video") or ""),
+        "segment_start": str(raw.get("segment_start") or seg_start),
+        "segment_end": str(raw.get("segment_end") or seg_end),
         "updated_at": str(raw.get("updated_at") or ""),
         "status": str(raw.get("status") or "").strip().lower(),
         "completed_at": str(raw.get("completed_at") or ""),
@@ -932,7 +975,12 @@ def save_event_review(
     status: str | None = None,
     event_total: int | None = None,
 ) -> Path:
-    """保存人工复核结果到记录目录 event_review.json。"""
+    """保存人工复核结果到 review_dir（与 pose tier 解耦）。"""
+    from review_store import extract_segment_window, load_meta_for_locator, review_key_for_record
+
+    meta = load_meta_for_locator(locator)
+    review_key = review_key_for_record(meta=meta, record_id=locator.record_id)
+    seg_start, seg_end = extract_segment_window(meta=meta, record_id=locator.record_id)
     existing = load_event_review(locator)
     if verified_true is None:
         normalized = list(existing.get("verified_true") or [])
@@ -959,6 +1007,10 @@ def save_event_review(
     payload: dict[str, Any] = {
         "schema": EVENT_REVIEW_SCHEMA,
         "record_id": locator.record_id,
+        "review_key": review_key,
+        "source_video": str(meta.get("source_video") or existing.get("source_video") or ""),
+        "segment_start": seg_start,
+        "segment_end": seg_end,
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "verified_true": normalized,
     }
@@ -1113,10 +1165,11 @@ def delete_record(
         sidecar.unlink()
         deleted.append(str(sidecar.resolve()))
 
-    review_path = event_review_path(locator)
-    if review_path.is_file():
-        review_path.unlink()
-        deleted.append(str(review_path.resolve()))
+    # 共享复核在 review_dir，删除单条采集记录时不移除（其他 tier 可能仍引用同一 review_key）
+    legacy_review = legacy_event_review_path(locator)
+    if legacy_review.is_file():
+        legacy_review.unlink()
+        deleted.append(str(legacy_review.resolve()))
 
     if locator.path.is_file():
         legacy_sidecar = locator.path.with_suffix(".meta.json")
