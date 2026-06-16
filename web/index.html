@@ -164,32 +164,36 @@
 
     <section id="panel-annotate" class="panel">
       <div class="card">
+        <p class="hint annotate-hint">选择姿态模型与机位，编辑对应 annotation JSON；首帧来自该机位已采集的内置视频。</p>
         <div class="row">
           <label>
-            <span class="label-with-tip">video_stem（视频主名）
-              <button type="button" class="field-tip" data-tip="与视频文件名主名或 reflection 标注编号一致，对应 annotations/{主名}.json。可勾选保留原文件并另存为 71-(2).json。">?</button>
+            <span class="label-with-tip">姿态模型
+              <button type="button" class="field-tip" data-tip="与 localdata/video/{模型}/{机位}/ 目录对应，用于选取对照首帧视频。">?</button>
             </span>
-            <input type="text" id="annotate-stem" placeholder="与视频文件名主名一致" />
+            <select id="annotate-pose-tier">
+              <option value="rtmpose-t" selected>rtmpose-t</option>
+              <option value="rtmpose-s">rtmpose-s</option>
+              <option value="rtmpose-m">rtmpose-m</option>
+            </select>
+          </label>
+          <label>
+            <span class="label-with-tip">机位（机组）
+              <button type="button" class="field-tip" data-tip="来自 reflection.json 的 camera 字段，如 1-6组-2。同一机位可对应多个货位标注文件。">?</button>
+            </span>
+            <select id="annotate-camera">
+              <option value="">— 请选择机位 —</option>
+            </select>
+          </label>
+          <label>
+            <span class="label-with-tip">货位标注
+              <button type="button" class="field-tip" data-tip="同一机位可有 2 个 annotation（如 71、72），可单独编辑其中一个；保存写入 annotations/{编号}.json。">?</button>
+            </span>
+            <select id="annotate-annotation-id" disabled>
+              <option value="">— 先选机位 —</option>
+            </select>
           </label>
         </div>
-        <div class="annotate-actions">
-          <label class="inline-file">
-            <span class="label-with-tip">本地视频
-              <button type="button" class="field-tip" data-tip="选择本地视频以提取首帧到画布；也可在采集页已存记录的场景下仅填 video_stem 后从服务端取帧。">?</button>
-            </span>
-            <input type="file" id="annotate-video" accept="video/*" />
-          </label>
-          <span class="label-with-tip">
-            <button type="button" id="annotate-load-frame">加载首帧</button>
-            <button type="button" class="field-tip" data-tip="将视频第一帧绘制到画布，用于标定货架透视与货位。需先选择本地视频或填写 video_stem。">?</button>
-          </span>
-          <label class="inline-file">
-            <span class="label-with-tip">上传 JSON 覆盖
-              <button type="button" class="field-tip" data-tip="从本机加载已有标注 JSON 覆盖当前编辑内容（保存前不会写盘）。">?</button>
-            </span>
-            <input type="file" id="annotate-json-upload" accept=".json,application/json" />
-          </label>
-        </div>
+        <p id="annotate-context-hint" class="annotation-status hint hidden" role="status"></p>
         <div class="row annotate-grid-size">
           <label>
             <span class="label-with-tip">网格行数
@@ -218,19 +222,9 @@
           </label>
           <button type="button" id="annotate-delete-cell" class="danger-btn">删除货位</button>
         </div>
-        <div class="annotate-save-options">
-          <label class="annotate-check">
-            <input type="checkbox" id="annotate-preserve-existing" />
-            保留原标注（另存为 <code>stem-(2).json</code>）
-          </label>
-          <label class="annotate-check">
-            <input type="checkbox" id="annotate-recompute-collisions" checked />
-            保存后仅重算碰撞（复用骨架，不重新推理）
-          </label>
-        </div>
         <div class="annotate-actions">
           <button type="button" id="annotate-save" class="primary-btn">保存标注</button>
-          <button type="button" id="annotate-recompute-only">仅重算碰撞</button>
+          <button type="button" id="annotate-reload">重新加载</button>
           <button type="button" id="annotate-restart">重置货架</button>
           <button type="button" id="annotate-download">下载当前 JSON</button>
         </div>
@@ -241,7 +235,7 @@
         <canvas id="annotate-canvas" class="hidden"></canvas>
         <p class="annotate-stage-hint">
           <span class="hint">画布</span>
-          <button type="button" class="field-tip" data-tip="步骤：① 加载首帧 → ② 生成货位并对照 → ③ 拖绿色/橙色角点或平移货位 → ④ 保存。交互与现场 visual-dps 一致。">?</button>
+          <button type="button" class="field-tip" data-tip="步骤：① 选择模型/机位/货位标注 → ② 生成货位并对照 → ③ 拖绿色/橙色角点或平移货位 → ④ 保存至 annotations。">?</button>
         </p>
       </div>
     </section>
@@ -466,13 +460,13 @@
   <script src="app/02-playback-selection.js?v=34"></script>
   <script src="app/03-tabs.js?v=34"></script>
   <script src="app/04-collision-config.js?v=34"></script>
-  <script src="app/05-collect.js?v=40"></script>
-  <script src="app/06-records.js?v=42"></script>
+  <script src="app/05-collect.js?v=41"></script>
+  <script src="app/06-records.js?v=43"></script>
   <script src="app/07-playback-stage.js?v=48"></script>
   <script src="app/08-event-review.js?v=63"></script>
   <script src="app/09-playback-events.js?v=54"></script>
   <script src="app/10-render-collision.js?v=63"></script>
   <script src="app/11-playback-controls.js?v=54"></script>
-  <script src="annotate.js?v=11"></script>
+  <script src="annotate.js?v=13"></script>
 </body>
 </html>

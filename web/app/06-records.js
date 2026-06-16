@@ -397,7 +397,6 @@ function renderRecordItem(s) {
         <span class="record-actions record-actions-compact">
           <a href="${recordApiUrl(s.record_id, "/manifest.json")}" download title="${esc(jsonFile)}">JSON</a>
           <a href="${recordApiUrl(s.record_id, "/export.xlsx")}" download title="导出 Excel">XLSX</a>
-          ${s.has_video ? `<button type="button" data-annotate="${esc(s.record_id)}" data-stem="${esc(s.video_stem || name)}">标注</button>` : ""}
           <button type="button" class="danger-btn" data-delete="${esc(s.record_id)}" data-name="${esc(name)}">删</button>
         </span>
       </li>`;
@@ -461,13 +460,6 @@ function bindRecordListEvents(list) {
   const keepId = selectedPlaybackRecord?.recordId || currentRecordId || "";
   if (keepId) highlightPlaybackRecordInList(keepId);
   else updatePlaybackLoadButton();
-  list.querySelectorAll("[data-annotate]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      if (typeof window.openAnnotateForRecord === "function") {
-        window.openAnnotateForRecord(btn.dataset.annotate, btn.dataset.stem);
-      }
-    });
-  });
   list.querySelectorAll(".record-tag-remove").forEach((btn) => {
     btn.addEventListener("click", async (e) => {
       e.preventDefault();

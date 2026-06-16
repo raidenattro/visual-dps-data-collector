@@ -57,6 +57,7 @@ from pose_store import (
 )
 from video_frame import first_frame_base64
 
+from api.annotate_service import build_annotate_context, first_frame_video_for_camera, normalize_pose_tier
 from api.collect_service import (
     build_collect_config_snapshot,
     resolve_collect_annotation,
@@ -201,6 +202,49 @@ def lookup_reflection_camera(camera: str = "") -> dict[str, Any]:
         "message": f"机位 {label} → {', '.join(json_files)}"
         + ("（采集时将合并）" if len(json_files) > 1 else ""),
     }
+
+
+@router.get("/api/annotate/context")
+def get_annotate_context(pose_tier: str = "", camera: str = "") -> dict[str, Any]:
+    """标注页：模型层 + 机位 → reflection 标注列表与内置视频信息。"""
+    label = normalize_corner_label(camera) if normalize_corner_label else str(camera or "").strip()
+    if not label:
+        raise HTTPException(400, "请选择机位")
+    try:
+        tier = normalize_pose_tier(pose_tier)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    reflection = load_reflection_or_http()
+    paths = resolve_app_paths()
+    try:
+        return build_annotate_context(paths, reflection, pose_tier=tier, camera_label=label)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/api/annotate/frame")
+def get_annotate_frame(pose_tier: str = "", camera: str = "") -> dict[str, Any]:
+    """标注页：从 localdata/video/{模型}/{机位}/ 取首个视频的首帧。"""
+    label = normalize_corner_label(camera) if normalize_corner_label else str(camera or "").strip()
+    if not label:
+        raise HTTPException(400, "请选择机位")
+    try:
+        tier = normalize_pose_tier(pose_tier)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    paths = resolve_app_paths()
+    try:
+        path = first_frame_video_for_camera(paths, label, pose_tier=tier)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    try:
+        frame = first_frame_base64(path)
+    except RuntimeError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    frame["video_file"] = path.name
+    frame["camera_label"] = label
+    frame["pose_tier"] = tier
+    return frame
 
 
 def _parse_tags_query(raw: str) -> list[str]:

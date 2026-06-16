@@ -1,4 +1,4 @@
-/** 货位标注（交互对齐现场 visual-dps：货架角点 + 货位四边形编辑） */
+/** 货位标注：按模型 + 机位编辑 annotations/{编号}.json（首帧来自内置视频） */
 
 const getAnnCanvas = () => document.getElementById("annotate-canvas");
 const getAnnCtx = () => {
@@ -11,20 +11,24 @@ let gridRows = 4;
 let gridCols = 4;
 let finalBoxes = [];
 let unbindVisualCanvas = null;
-let currentVideoStem = "";
+let currentAnnotationId = "";
 let currentSourceVideo = "";
 let frameWidth = 0;
 let frameHeight = 0;
 let loadedAnnotationSize = null;
 let currentShelfCode = "SHELF_1";
-/** 缓存用户选择的本地视频，避免仅依赖 input.files 在部分浏览器下丢失 */
-let cachedLocalVideoFile = null;
-/** 从采集页跳转标注时携带的 record_id（非 UI 下拉） */
-let pendingAnnotateRecordId = "";
+let annotateContext = null;
+let annotateLoadToken = 0;
 
 const previewLayoutApi = window.previewLayout || {};
 const mapPtsToVideoFrame = previewLayoutApi.mapPointsToVideoFrame;
 const isNormPolyValid = previewLayoutApi.isNormPolygonValid;
+
+/** loadShelf 只传 (points, norm)，此处绑定标注分辨率与当前首帧尺寸 */
+function createFramePointMapper(annotationSize, frameW, frameH) {
+  return (points, normPolygon) =>
+    mapPtsToVideoFrame(points, normPolygon, annotationSize, frameW, frameH);
+}
 
 function visualMode() {
   return window.AnnotateVisualMode;
@@ -32,6 +36,18 @@ function visualMode() {
 
 function ann$(sel) {
   return document.querySelector(sel);
+}
+
+function getAnnotatePoseTier() {
+  return (ann$("#annotate-pose-tier")?.value || "rtmpose-t").trim();
+}
+
+function getAnnotateCamera() {
+  return (ann$("#annotate-camera")?.value || "").trim();
+}
+
+function getAnnotateAnnotationId() {
+  return (ann$("#annotate-annotation-id")?.value || currentAnnotationId || "").trim();
 }
 
 function setAnnotateStatus(html, isError = false) {
@@ -70,7 +86,6 @@ async function readApiErrorDetail(res) {
   }
 }
 
-/** 加载失败时：状态栏 + 弹窗，避免“无任何提示” */
 function notifyAnnotateFailure(message, { alertUser = true } = {}) {
   const msg = String(message || "未知错误").trim() || "未知错误";
   console.error("[annotate]", msg);
@@ -97,23 +112,38 @@ function countAnnotationBoxes(data) {
   return n;
 }
 
+function updateAnnotateContextHint(ctx) {
+  const el = ann$("#annotate-context-hint");
+  if (!el) return;
+  if (!ctx) {
+    el.classList.add("hidden");
+    el.textContent = "";
+    return;
+  }
+  el.classList.remove("hidden");
+  const annPart = (ctx.annotations || [])
+    .map((a) => `${a.annotation_id}${a.has_file ? `（${a.box_count} 框）` : "（未创建）"}`)
+    .join("、");
+  const videoPart = ctx.has_video
+    ? `首帧来源：<code>${ctx.video_dir}/${ctx.video_file}</code>`
+    : "⚠️ 该机位下暂无内置视频，请先完成采集";
+  el.innerHTML = `机位 <strong>${ctx.camera_label}</strong> → 标注 ${annPart || "—"} · ${videoPart}`;
+}
+
 function updateAnnotateVerifyPanel(info) {
   const el = document.getElementById("annotate-verify");
   if (!el) return;
   const {
     ok,
-    recordId,
-    videoStem,
-    sourceVideo,
-    localVideoName,
+    poseTier,
+    cameraLabel,
+    annotationId,
+    videoFile,
     frameLoaded,
     frameSize,
-    frameSource,
     annotationLoaded,
     boxCount,
     annSize,
-    stemMatch,
-    videoNameMatch,
     errors = [],
   } = info;
   el.classList.remove("hidden", "ok", "warn", "fail");
@@ -125,11 +155,11 @@ function updateAnnotateVerifyPanel(info) {
   if (ok) {
     lines.push("<strong>对照预览已就绪</strong>：首帧 + 标注网格已叠加，请目视货框是否与视频一致。");
   } else if (frameLoaded && !annotationLoaded) {
-    lines.push("<strong>仅有首帧</strong>：未加载到标注 JSON，无法对照。");
+    lines.push("<strong>仅有首帧</strong>：该标注文件尚未创建，可拖动货架角点后「生成货位」新建。");
   } else if (!frameLoaded && annotationLoaded) {
     lines.push("<strong>仅有标注数据</strong>：无首帧背景，无法目视对照。");
   } else {
-    lines.push("<strong>加载未完成</strong>：无法对照，请根据下方明细排查。");
+    lines.push("<strong>加载未完成</strong>：请根据下方明细排查。");
   }
   if (errors.length) {
     lines.push(`<p class="verify-err">${errors.map((e) => `• ${e}`).join("<br/>")}</p>`);
@@ -138,12 +168,10 @@ function updateAnnotateVerifyPanel(info) {
   el.innerHTML = `
     ${lines.join("")}
     <dl>
-      <dt>记录 ID</dt><dd>${recordId || "—"}</dd>
-      <dt>video_stem</dt><dd>${videoStem || "—"} ${stemMatch === false ? '<span class="verify-warn">（与标注 JSON 内不一致）</span>' : ""}</dd>
-      <dt>标注 JSON</dt><dd>${annotationLoaded ? `已加载，${boxCount} 个货框` : "未加载"}${annSize ? `；标注分辨率 ${annSize.w}×${annSize.h}` : ""}</dd>
-      <dt>视频首帧</dt><dd>${frameLoaded ? `已显示 ${frameSize || ""}（${frameSource || "—"}）` : "未显示"}</dd>
-      <dt>记录 source_video</dt><dd>${sourceVideo || "—"}</dd>
-      <dt>本地视频文件</dt><dd>${localVideoName || "未选择"} ${videoNameMatch === false ? '<span class="verify-warn">（与 source_video 文件名不一致）</span>' : ""}</dd>
+      <dt>姿态模型</dt><dd>${poseTier || "—"}</dd>
+      <dt>机位</dt><dd>${cameraLabel || "—"}</dd>
+      <dt>货位标注</dt><dd>${annotationId ? `annotations/${annotationId}.json` : "—"} ${annotationLoaded ? `（${boxCount} 个货框）` : "（未加载）"}${annSize ? `；分辨率 ${annSize.w}×${annSize.h}` : ""}</dd>
+      <dt>视频首帧</dt><dd>${frameLoaded ? `已显示 ${frameSize || ""}` : "未显示"}${videoFile ? ` · ${videoFile}` : ""}</dd>
     </dl>
   `;
   el.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -182,22 +210,6 @@ function syncAnnotateCellPanel(panel) {
   }
 }
 
-function flattenBoxesFromPayload(data) {
-  if (Array.isArray(data?.boxes)) return data.boxes;
-  if (Array.isArray(data?.shelves)) {
-    const out = [];
-    data.shelves.forEach((shelf) => {
-      const code = String(shelf?.shelf_code || "").trim();
-      (shelf?.boxes || []).forEach((b) => {
-        out.push({ ...b, shelf_code: b.shelf_code || code });
-      });
-    });
-    return out;
-  }
-  return [];
-}
-
-/** 将首帧绘制到标注画布（单一 onload，避免被覆盖导致画布不显示） */
 function showCanvasWithImage(dataUrl, w, h) {
   return new Promise((resolve, reject) => {
     const canvas = getAnnCanvas();
@@ -221,188 +233,25 @@ function showCanvasWithImage(dataUrl, w, h) {
   });
 }
 
-function setupCanvasFromBase64(imageB64, w, h) {
-  return showCanvasWithImage(`data:image/jpeg;base64,${imageB64}`, w, h);
-}
-
 async function loadFirstFrameOntoCanvas(dataUrl, width, height) {
   ensureAnnotatePanelVisible();
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
   await showCanvasWithImage(dataUrl, width, height);
 }
 
-function getAnnotateLocalVideoFile() {
-  return cachedLocalVideoFile || ann$("#annotate-video")?.files?.[0] || null;
-}
-
-function rememberLocalVideoFile(file) {
-  cachedLocalVideoFile = file || null;
-}
-
-async function fetchRecordMeta(recordId) {
-  try {
-    const res = await fetch(`/api/records/${encodeURIComponent(recordId)}`);
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
-    return null;
-  }
-}
-
-async function loadAnnotationForRecord(recordId, videoStem) {
-  if (recordId) {
-    try {
-      const res = await fetch(`/api/records/${encodeURIComponent(recordId)}/annotation.json`);
-      if (res.ok) return await res.json();
-    } catch {
-      /* 回退按 video_stem */
-    }
-  }
-  return loadExistingAnnotation(videoStem);
-}
-
-function localVideoMatchesRecord(file, sourceVideo, videoStem) {
-  if (!file) return false;
-  const name = file.name;
-  if (sourceVideo && name === sourceVideo) return true;
-  const localStem = name.replace(/\.[^.]+$/, "");
-  if (videoStem && localStem === videoStem) return true;
-  const norm = (s) => String(s || "").replace(/[^\w.-]+/g, "_").toLowerCase();
-  return videoStem && norm(localStem) === norm(videoStem);
-}
-
-async function tryLoadRecordFrameFromApi(recordId) {
-  const frameRes = await fetch(`/api/records/${encodeURIComponent(recordId)}/annotation/frame`);
-  if (!frameRes.ok) return { ok: false, detail: await readApiErrorDetail(frameRes) };
-  const frame = await frameRes.json();
-  await loadFirstFrameOntoCanvas(
-    `data:image/jpeg;base64,${frame.image}`,
-    frame.width,
-    frame.height
-  );
-  return { ok: true };
-}
-
-async function tryLoadFrameByVideoStem(videoStem) {
-  const stem = String(videoStem || "").trim();
-  if (!stem) return { ok: false, detail: "无 video_stem" };
-  const frameRes = await fetch(`/api/annotations/by-video/${encodeURIComponent(stem)}/frame`);
-  if (!frameRes.ok) return { ok: false, detail: await readApiErrorDetail(frameRes) };
-  const frame = await frameRes.json();
-  await loadFirstFrameOntoCanvas(
-    `data:image/jpeg;base64,${frame.image}`,
-    frame.width,
-    frame.height
-  );
-  return { ok: true };
-}
-
-async function tryLoadRecordFrameFromLocalFile(file) {
-  let clientErr = null;
-  try {
-    const { dataUrl, width, height } = await extractFirstFrameFromVideoFile(file);
-    await loadFirstFrameOntoCanvas(dataUrl, width, height);
-    return { ok: true, via: "browser" };
-  } catch (err) {
-    clientErr = err;
-  }
-  setAnnotateStatus("浏览器无法解码，正在由服务端提取首帧…");
-  const fd = new FormData();
-  fd.append("file", file, file.name || "video.mp4");
-  const res = await fetch("/api/annotate/extract-frame", { method: "POST", body: fd });
-  if (!res.ok) {
-    const detail = await readApiErrorDetail(res);
-    throw new Error(detail || clientErr?.message || "服务端首帧提取失败");
-  }
-  const frame = await res.json();
-  await loadFirstFrameOntoCanvas(
-    `data:image/jpeg;base64,${frame.image}`,
-    frame.width,
-    frame.height
-  );
-  return { ok: true, via: "server" };
-}
-
-async function extractFirstFrameFromVideoFile(file) {
-  const url = URL.createObjectURL(file);
-  try {
-    return await extractFirstFrameFromObjectUrl(url);
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
-
-function extractFirstFrameFromObjectUrl(url) {
-  return new Promise((resolve, reject) => {
-    const video = document.createElement("video");
-    video.muted = true;
-    video.playsInline = true;
-    video.setAttribute("playsinline", "");
-    video.setAttribute("webkit-playsinline", "");
-    video.preload = "auto";
-    video.style.cssText = "position:fixed;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none";
-    document.body.appendChild(video);
-
-    let settled = false;
-    const finish = (err, result) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      video.pause();
-      video.removeAttribute("src");
-      video.load();
-      video.remove();
-      if (err) reject(err);
-      else resolve(result);
-    };
-    const timer = setTimeout(() => finish(new Error("视频首帧提取超时（30s）")), 30000);
-
-    const capture = () => {
-      const w = video.videoWidth;
-      const h = video.videoHeight;
-      if (!w || !h) {
-        finish(new Error("无法读取视频尺寸"));
-        return;
-      }
-      const c = document.createElement("canvas");
-      c.width = w;
-      c.height = h;
-      const cx = c.getContext("2d");
-      try {
-        cx.drawImage(video, 0, 0, w, h);
-        finish(null, { dataUrl: c.toDataURL("image/jpeg", 0.88), width: w, height: h });
-      } catch (e) {
-        finish(new Error(e?.message || "首帧绘制失败"));
-      }
-    };
-
-    video.onerror = () => finish(new Error("视频加载失败"));
-    video.oncanplay = () => {
-      const runCapture = () => {
-        video.pause();
-        requestAnimationFrame(() => capture());
-      };
-      if (video.currentTime > 0.01) {
-        video.onseeked = () => runCapture();
-        video.currentTime = 0;
-      } else {
-        runCapture();
-      }
-    };
-    video.src = url;
-    video.load();
-  });
-}
-
 function parsePrimaryShelf(data) {
   if (Array.isArray(data?.shelves) && data.shelves.length) {
-    const shelf = data.shelves.find((s) => s && s.shelf_code) || data.shelves[0];
+    const shelf =
+      data.shelves.find((s) => s && String(s.shelf_code || "") === currentAnnotationId) ||
+      data.shelves.find((s) => s && s.shelf_code) ||
+      data.shelves[0];
     return shelf || null;
   }
   if (Array.isArray(data?.boxes) && data.boxes.length) {
     const code =
-      String(data?.source_info?.shelf_code || data?.source_info?.video_stem || currentVideoStem || "SHELF_1").trim() ||
-      "SHELF_1";
+      String(
+        data?.source_info?.shelf_code || data?.source_info?.video_stem || currentAnnotationId || "SHELF_1"
+      ).trim() || "SHELF_1";
     return {
       shelf_code: code,
       shelf_name: "",
@@ -427,12 +276,13 @@ function applyAnnotationPayload(data) {
   const shelf = parsePrimaryShelf(data);
   if (!shelf) return false;
 
-  currentShelfCode = String(shelf.shelf_code || currentVideoStem || "SHELF_1").trim() || "SHELF_1";
+  currentShelfCode =
+    String(shelf.shelf_code || currentAnnotationId || "SHELF_1").trim() || "SHELF_1";
   const vm = visualMode();
   if (!vm) return false;
 
   vm.loadShelf(shelf, {
-    mapPointsToFrame: mapPtsToVideoFrame,
+    mapPointsToFrame: createFramePointMapper(loadedAnnotationSize, frameWidth, frameHeight),
     isNormValid: isNormPolyValid,
     annotationSize: loadedAnnotationSize,
     frameWidth,
@@ -448,10 +298,10 @@ function applyAnnotationPayload(data) {
   return vm.isGridReady();
 }
 
-async function loadExistingAnnotation(videoStem) {
-  if (!videoStem) return null;
+async function loadExistingAnnotation(annotationId) {
+  if (!annotationId) return null;
   try {
-    const res = await fetch(`/api/annotations/by-video/${encodeURIComponent(videoStem)}`);
+    const res = await fetch(`/api/annotations/by-video/${encodeURIComponent(annotationId)}`);
     if (!res.ok) return null;
     return await res.json();
   } catch {
@@ -459,118 +309,141 @@ async function loadExistingAnnotation(videoStem) {
   }
 }
 
-async function loadAnnotateFirstFrame() {
-  ensureAnnotatePanelVisible();
-  const stem = (ann$("#annotate-stem")?.value || currentVideoStem || "").trim();
-  if (!stem) {
-    setAnnotateStatus("请填写 video_stem（视频主名）", true);
+async function fetchAnnotateContext(poseTier, camera) {
+  const qs = new URLSearchParams({ pose_tier: poseTier, camera });
+  const res = await fetch(`/api/annotate/context?${qs}`);
+  if (!res.ok) throw new Error(await readApiErrorDetail(res));
+  return res.json();
+}
+
+async function fetchAnnotateFrame(poseTier, camera) {
+  const qs = new URLSearchParams({ pose_tier: poseTier, camera });
+  const res = await fetch(`/api/annotate/frame?${qs}`);
+  if (!res.ok) throw new Error(await readApiErrorDetail(res));
+  return res.json();
+}
+
+function populateAnnotationSelect(annotations, selectedId = "") {
+  const sel = ann$("#annotate-annotation-id");
+  if (!sel) return;
+  const list = Array.isArray(annotations) ? annotations : [];
+  sel.innerHTML = "";
+  if (!list.length) {
+    sel.disabled = true;
+    sel.innerHTML = '<option value="">— 无机位标注 —</option>';
     return;
   }
-  const localFile = getAnnotateLocalVideoFile();
-  if (!localFile) {
-    setAnnotateStatus("请先选择本地视频文件", true);
+  sel.disabled = false;
+  list.forEach((item) => {
+    const opt = document.createElement("option");
+    opt.value = item.annotation_id;
+    const suffix = item.has_file ? `${item.box_count} 框` : "未创建";
+    opt.textContent = `${item.annotation_id} · ${suffix}`;
+    sel.appendChild(opt);
+  });
+  const pick =
+    selectedId && list.some((a) => a.annotation_id === selectedId)
+      ? selectedId
+      : list[0].annotation_id;
+  sel.value = pick;
+  currentAnnotationId = pick;
+}
+
+async function loadAnnotateCameras() {
+  const sel = ann$("#annotate-camera");
+  if (!sel) return;
+  try {
+    const res = await fetch("/api/reflection/cameras");
+    if (!res.ok) throw new Error(await readApiErrorDetail(res));
+    const body = await res.json();
+    const cameras = Array.isArray(body.cameras) ? body.cameras : [];
+    sel.innerHTML = '<option value="">— 请选择机位 —</option>';
+    cameras.forEach((cam) => {
+      const opt = document.createElement("option");
+      opt.value = cam;
+      opt.textContent = cam;
+      sel.appendChild(opt);
+    });
+  } catch (err) {
+    setAnnotateStatus(`❌ 机位列表加载失败：${err.message}`, true);
+  }
+}
+
+async function loadAnnotateSession({ annotationId = "" } = {}) {
+  const poseTier = getAnnotatePoseTier();
+  const camera = getAnnotateCamera();
+  if (!camera) {
+    setAnnotateStatus("请选择机位", true);
     return;
   }
 
-  const recordId = pendingAnnotateRecordId || "";
+  const token = ++annotateLoadToken;
   resetAnnotationState();
-  pendingAnnotateRecordId = recordId;
+  setAnnotateStatus("正在加载机位上下文…");
+
+  let ctx;
+  try {
+    ctx = await fetchAnnotateContext(poseTier, camera);
+  } catch (err) {
+    notifyAnnotateFailure(err.message || String(err));
+    return;
+  }
+  if (token !== annotateLoadToken) return;
+
+  annotateContext = ctx;
+  populateAnnotationSelect(ctx.annotations, annotationId || getAnnotateAnnotationId());
+  updateAnnotateContextHint(ctx);
+
+  const annId = getAnnotateAnnotationId();
+  if (!annId) {
+    setAnnotateStatus("该机位无 reflection 标注编号", true);
+    return;
+  }
+  currentAnnotationId = annId;
+
   const verifyErrors = [];
-
-  let sourceVideo = "";
-  if (recordId) {
-    const meta = await fetchRecordMeta(recordId);
-    if (meta) {
-      sourceVideo = String(meta.source_video || "").trim();
-    }
-  }
-
-  currentVideoStem = stem;
-  currentSourceVideo = sourceVideo || "";
-  ann$("#annotate-stem").value = currentVideoStem;
-
   let frameLoaded = false;
-  let frameSource = "";
-  let frameLoadError = "";
-  const stemForFrame = currentVideoStem;
-
-  setAnnotateStatus("正在加载视频首帧…");
-
-  if (!localFile) {
-    verifyErrors.push("未选择本地视频");
-  } else {
-    try {
-      const local = await tryLoadRecordFrameFromLocalFile(localFile);
-      if (local && local.ok) {
-        frameLoaded = true;
-        frameSource = local.via === "server" ? "local-server" : "local";
-        if (!currentSourceVideo) currentSourceVideo = localFile.name;
-      } else {
-        frameLoadError = "本地首帧提取未返回有效结果";
-        verifyErrors.push(frameLoadError);
-      }
-    } catch (err) {
-      frameLoadError = err.message || String(err);
-      verifyErrors.push(`首帧：${frameLoadError}`);
-    }
-  }
-
-  if (!frameLoaded) {
-    try {
-      if (recordId) {
-        const api = await tryLoadRecordFrameFromApi(recordId);
-        if (api.ok) {
-          frameLoaded = true;
-          frameSource = "server";
-        } else {
-          frameLoadError = api.detail || frameLoadError;
-        }
-      }
-      if (!frameLoaded && stemForFrame) {
-        const stemApi = await tryLoadFrameByVideoStem(stemForFrame);
-        if (stemApi.ok) {
-          frameLoaded = true;
-          frameSource = "server";
-        } else if (!frameLoadError) {
-          frameLoadError = stemApi.detail || "";
-        }
-      }
-    } catch (err) {
-      frameLoadError = err.message || String(err);
-    }
-  }
-
-  if (!frameLoaded && !localFile) {
-    frameLoadError = frameLoadError || "请先在「本地视频」选择 mp4 文件";
-  }
-
-  let existing = null;
+  let frameSourceVideo = "";
   let annotationLoaded = false;
   let boxCount = 0;
-  let annStem = "";
+
+  setAnnotateStatus("正在加载视频首帧…");
   try {
-    existing = await loadAnnotationForRecord(recordId, currentVideoStem);
+    const frame = await fetchAnnotateFrame(poseTier, camera);
+    if (token !== annotateLoadToken) return;
+    frameSourceVideo = frame.video_file || "";
+    currentSourceVideo = frameSourceVideo;
+    await loadFirstFrameOntoCanvas(
+      `data:image/jpeg;base64,${frame.image}`,
+      frame.width,
+      frame.height
+    );
+    frameLoaded = true;
+  } catch (err) {
+    verifyErrors.push(`首帧：${err.message || err}`);
+  }
+
+  try {
+    const existing = await loadExistingAnnotation(annId);
+    if (token !== annotateLoadToken) return;
     if (existing) {
       annotationLoaded = true;
       boxCount = countAnnotationBoxes(existing);
-      annStem = String(existing?.source_info?.video_stem || "").trim();
+      const src = String(existing?.source_info?.source_video || "").trim();
+      if (src) currentSourceVideo = src;
       currentShelfCode =
-        String(existing?.shelves?.[0]?.shelf_code || existing?.source_info?.shelf_code || currentVideoStem || "SHELF_1").trim() ||
-        "SHELF_1";
+        String(
+          existing?.shelves?.[0]?.shelf_code || existing?.source_info?.shelf_code || annId || "SHELF_1"
+        ).trim() || annId;
       applyAnnotationPayload(existing);
-    } else if (recordId || stemForFrame) {
-      verifyErrors.push(
-        `未找到标注 JSON（video_stem=${currentVideoStem || stemForFrame}，记录=${recordId || "—"}）`
-      );
+    } else {
+      currentShelfCode = annId;
+      verifyErrors.push(`标注文件 annotations/${annId}.json 尚未创建，保存后将新建`);
     }
   } catch (err) {
     verifyErrors.push(`标注叠加失败：${err.message || err}`);
-    console.error("[annotate] applyAnnotationPayload", err);
   }
 
-  const videoNameMatch =
-    !localFile || !sourceVideo ? null : localVideoMatchesRecord(localFile, sourceVideo, currentVideoStem);
-  const stemMatch = !annStem || !currentVideoStem ? null : annStem === currentVideoStem;
   const annSize =
     loadedAnnotationSize?.width > 0
       ? { w: loadedAnnotationSize.width, h: loadedAnnotationSize.height }
@@ -580,91 +453,43 @@ async function loadAnnotateFirstFrame() {
 
   if (previewReady) {
     setAnnotateStatus(
-      `✅ 对照预览就绪：记录「${currentVideoStem}」共 ${boxCount} 个货框已叠加在首帧上，请目视网格是否与视频一致。`
+      `✅ 已加载 <code>annotations/${annId}.json</code>（${boxCount} 个货框），请对照首帧检查货位。`
     );
   } else if (frameLoaded && annotationLoaded) {
     setAnnotateStatus(
-      `⚠️ 首帧已显示，标注已读入。请点击「生成货位」以 visual-dps 方式显示可编辑货位（${boxCount} 个货框数据）。`,
+      `⚠️ 首帧已显示，标注已读入。请点击「生成货位」以显示可编辑货位（${boxCount} 个货框数据）。`,
       true
     );
   } else if (frameLoaded) {
     setAnnotateStatus(
-      `⚠️ 仅加载首帧，未加载标注 JSON，无法对照记录「${currentVideoStem || recordId || "?"}」的网格。`,
-      true
+      `首帧已加载：拖动绿色货架角点，设置行列后点「生成货位」。保存将写入 <code>annotations/${annId}.json</code>。`
     );
   } else if (annotationLoaded) {
-    setAnnotateStatus(
-      `⚠️ 已读取标注（${boxCount} 个货框），但首帧未显示：${frameLoadError || "请选择本地视频后重试"}`,
-      true
-    );
+    setAnnotateStatus(`⚠️ 已读取标注，但首帧未显示：${verifyErrors[0] || "请确认该机位已采集视频"}`, true);
   } else {
-    const summary = frameLoadError || verifyErrors[0] || "首帧与标注均未加载";
-    notifyAnnotateFailure(summary, { alertUser: true });
+    notifyAnnotateFailure(verifyErrors[0] || "首帧与标注均未加载", { alertUser: !frameLoaded });
   }
 
-  if (sourceVideo && localFile && videoNameMatch === false) {
-    verifyErrors.push(`本地视频「${localFile.name}」与记录 source_video「${sourceVideo}」不一致，请确认是否为同一文件`);
-  }
-  if (stemMatch === false) {
-    verifyErrors.push(`标注 JSON 内 video_stem=${annStem}，与当前记录 ${currentVideoStem} 不一致`);
-  }
   if (annSize && frameWidth && (annSize.w !== frameWidth || annSize.h !== frameHeight)) {
     verifyErrors.push(`标注分辨率 ${annSize.w}×${annSize.h} 与首帧 ${frameWidth}×${frameHeight} 不同，已按比例映射坐标`);
   }
 
   updateAnnotateVerifyPanel({
     ok: previewReady,
-    recordId,
-    videoStem: currentVideoStem,
-    sourceVideo,
-    localVideoName: localFile?.name || "",
+    poseTier,
+    cameraLabel: camera,
+    annotationId: annId,
+    videoFile: frameSourceVideo,
     frameLoaded,
     frameSize,
-    frameSource,
     annotationLoaded,
     boxCount,
     annSize,
-    stemMatch,
-    videoNameMatch,
     errors: verifyErrors,
   });
 
   if (frameLoaded || annotationLoaded) {
     renderAnnotator();
-  }
-
-  if (!frameLoaded && !annotationLoaded) {
-    return;
-  }
-  if (!previewReady && (frameLoaded || annotationLoaded)) {
-    window.alert(
-      `对照预览未完全就绪：\n\n${verifyErrors.length ? verifyErrors.join("\n") : "首帧或货架四角未齐备"}\n\n详见页面上「对照明细」区域。`
-    );
-  }
-  pendingAnnotateRecordId = "";
-}
-
-async function loadFromLocalVideo(file) {
-  rememberLocalVideoFile(file);
-  resetAnnotationState();
-  currentVideoStem = file.name.replace(/\.[^.]+$/, "").replace(/[^\w.-]+/g, "_");
-  currentSourceVideo = file.name;
-  ann$("#annotate-stem").value = currentVideoStem;
-  setAnnotateStatus("正在提取视频首帧…");
-  const { dataUrl, width, height } = await extractFirstFrameFromVideoFile(file);
-  await loadFirstFrameOntoCanvas(dataUrl, width, height);
-  currentShelfCode = currentVideoStem || "SHELF_1";
-
-  const existing = await loadExistingAnnotation(currentVideoStem);
-  if (existing) {
-    currentShelfCode =
-      String(existing?.shelves?.[0]?.shelf_code || existing?.source_info?.shelf_code || currentVideoStem || "SHELF_1").trim() ||
-      "SHELF_1";
-    applyAnnotationPayload(existing);
-  } else {
-    setAnnotateStatus(
-      "首帧已加载：拖动绿色货架角点，设置行列后点「生成货位」，再对照货位形状。"
-    );
   }
 }
 
@@ -673,14 +498,14 @@ function buildSavePayload() {
   const vm = visualMode();
   finalBoxes = vm ? vm.buildBoxes(frameWidth, frameHeight) : [];
   const gs = vm?.getGridSize() || { rows: gridRows, cols: gridCols };
-  const stem = currentVideoStem;
-  const shelfCode = currentShelfCode || stem || "SHELF_1";
+  const annId = getAnnotateAnnotationId() || currentAnnotationId;
+  const shelfCode = currentShelfCode || annId || "SHELF_1";
   return {
     annotation_size: { width: frameWidth, height: frameHeight },
     source_info: {
       capture_source: "video",
-      video_stem: stem,
-      source_video: currentSourceVideo || `${stem}.mp4`,
+      video_stem: annId,
+      source_video: currentSourceVideo || `${annId}.mp4`,
       shelf_code: shelfCode,
     },
     shelves: [
@@ -695,96 +520,49 @@ function buildSavePayload() {
   };
 }
 
-function annotateSaveQueryParams() {
-  const qs = new URLSearchParams();
-  if (ann$("#annotate-preserve-existing")?.checked) qs.set("preserve_existing", "true");
-  if (ann$("#annotate-recompute-collisions")?.checked) qs.set("recompute_collisions", "true");
-  if (pendingAnnotateRecordId) qs.set("record_ids", pendingAnnotateRecordId);
-  const s = qs.toString();
-  return s ? `?${s}` : "";
-}
-
-function encodeRecordIdForApi(recordId) {
-  return String(recordId || "")
-    .split("/")
-    .map((part) => encodeURIComponent(part))
-    .join("/");
-}
-
-function formatRecomputeStatus(recompute) {
-  if (!recompute) return "";
-  if (recompute.status === "skipped") {
-    return ` · 碰撞重算跳过：${recompute.reason || "无关联记录"}`;
-  }
-  const ok = (recompute.recomputed || []).length;
-  const bad = (recompute.errors || []).length;
-  if (!ok && bad) {
-    return ` · 碰撞重算失败：${recompute.errors.map((e) => e.error).join("; ")}`;
-  }
-  return ` · 已重算碰撞 ${ok} 条记录（复用骨架）${bad ? `，失败 ${bad} 条` : ""}`;
-}
-
 async function saveAnnotation() {
-  const stem = (ann$("#annotate-stem")?.value || currentVideoStem || "").trim();
-  if (!stem) {
-    setAnnotateStatus("请填写视频主名（video_stem）", true);
+  const annId = getAnnotateAnnotationId() || currentAnnotationId;
+  if (!annId) {
+    setAnnotateStatus("请选择货位标注编号", true);
     return;
   }
   const vm = visualMode();
   if (!vm?.shelfCornersReady()) {
-    setAnnotateStatus("请先标定货架四角（拖动红色角点）", true);
+    setAnnotateStatus("请先标定货架四角（拖动绿色角点）", true);
     return;
   }
   if (!vm.isGridReady()) {
     setAnnotateStatus("请先点击「生成货位」", true);
     return;
   }
-  currentVideoStem = stem;
-  const payload = buildSavePayload();
-  const recompute = !!ann$("#annotate-recompute-collisions")?.checked;
-  setAnnotateStatus(recompute ? "正在保存并重算碰撞…" : "正在保存…");
-  const res = await fetch(
-    `/api/annotations/by-video/${encodeURIComponent(stem)}${annotateSaveQueryParams()}`,
-    {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }
-  );
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(formatApiDetail(body.detail) || body.detail || res.statusText);
-  const savedStem = body.video_stem || stem;
-  currentVideoStem = savedStem;
-  if (savedStem !== stem) ann$("#annotate-stem").value = savedStem;
-  setAnnotateStatus(
-    `✅ ${body.message || "已保存"}：<code>annotations/${savedStem}.json</code>（${body.box_count ?? finalBoxes.length} 个货框）${formatRecomputeStatus(body.recompute)}`
-  );
-}
-
-async function recomputeCollisionsOnly() {
-  const stem = (ann$("#annotate-stem")?.value || currentVideoStem || "").trim();
-  if (!pendingAnnotateRecordId) {
-    setAnnotateStatus("请从回放/采集记录进入标注页，或保存时勾选重算碰撞", true);
+  if (!frameWidth || !frameHeight) {
+    setAnnotateStatus("请先加载首帧（选择机位后会自动加载）", true);
     return;
   }
-  setAnnotateStatus("正在重算碰撞（复用已有骨架）…");
-  const payload = stem ? { annotation_stem: stem } : {};
-  const res = await fetch(
-    `/api/records/${encodeRecordIdForApi(pendingAnnotateRecordId)}/recompute-collisions`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }
-  );
+  currentAnnotationId = annId;
+  const payload = buildSavePayload();
+  setAnnotateStatus("正在保存…");
+  const res = await fetch(`/api/annotations/by-video/${encodeURIComponent(annId)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(formatApiDetail(body.detail) || body.detail || res.statusText);
-  const row = (body.recomputed || [])[0];
-  const frames = row?.frame_count ?? "?";
-  const ann = row?.annotation_file || stem;
+  const savedId = body.video_stem || annId;
+  currentAnnotationId = savedId;
   setAnnotateStatus(
-    `✅ 碰撞已重算（${ann}）：记录 ${pendingAnnotateRecordId}，${frames} 帧骨架未重新推理。`
+    `✅ ${body.message || "已保存"}：<code>annotations/${savedId}.json</code>（${body.box_count ?? finalBoxes.length} 个货框），全局生效。`
   );
+  if (annotateContext) {
+    const item = (annotateContext.annotations || []).find((a) => a.annotation_id === savedId);
+    if (item) {
+      item.has_file = true;
+      item.box_count = body.box_count ?? finalBoxes.length;
+      updateAnnotateContextHint(annotateContext);
+      populateAnnotationSelect(annotateContext.annotations, savedId);
+    }
+  }
 }
 
 function renderAnnotator() {
@@ -833,104 +611,38 @@ function confirmGenerateGrid() {
   renderAnnotator();
 }
 
-/** 供 app.js 从采集页跳转标注（非回放） */
-window.openAnnotateForRecord = async function openAnnotateForRecord(recordId, videoStem = "") {
-  document.querySelectorAll(".tab").forEach((b) => {
-    b.classList.toggle("active", b.dataset.tab === "annotate");
-  });
-  document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
-  document.getElementById("panel-annotate")?.classList.add("active");
-  if (typeof window.initAnnotatePanel === "function") window.initAnnotatePanel();
-
-  pendingAnnotateRecordId = String(recordId || "").trim();
-  let stem = String(videoStem || "").trim();
-  if (pendingAnnotateRecordId) {
-    const meta = await fetchRecordMeta(pendingAnnotateRecordId);
-    if (meta) {
-      stem = String(meta.video_stem || meta.display_name || stem || pendingAnnotateRecordId).trim();
-    }
-  }
-  if (stem) ann$("#annotate-stem").value = stem;
-  currentVideoStem = stem;
-  setAnnotateStatus(
-    `已关联记录「${stem || pendingAnnotateRecordId}」：请选择<strong>本地视频</strong>（与采集视频一致），再点「加载首帧」。`
-  );
-};
-
 let annotatePanelInited = false;
 
 function initAnnotatePanel() {
   if (annotatePanelInited) return;
   annotatePanelInited = true;
   bindCanvasEvents();
+  loadAnnotateCameras();
 
-  ann$("#annotate-load-frame")?.addEventListener("click", async () => {
+  ann$("#annotate-pose-tier")?.addEventListener("change", () => {
+    if (getAnnotateCamera()) loadAnnotateSession();
+  });
+
+  ann$("#annotate-camera")?.addEventListener("change", () => {
+    loadAnnotateSession();
+  });
+
+  ann$("#annotate-annotation-id")?.addEventListener("change", () => {
+    currentAnnotationId = getAnnotateAnnotationId();
+    if (currentAnnotationId) loadAnnotateSession({ annotationId: currentAnnotationId });
+  });
+
+  ann$("#annotate-reload")?.addEventListener("click", async () => {
     try {
-      await loadAnnotateFirstFrame();
+      await loadAnnotateSession({ annotationId: getAnnotateAnnotationId() });
     } catch (err) {
       notifyAnnotateFailure(err.message || String(err));
     }
   });
 
-  ann$("#annotate-video")?.addEventListener("change", async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) {
-      rememberLocalVideoFile(null);
-      return;
-    }
-    rememberLocalVideoFile(file);
-    const stem = (ann$("#annotate-stem")?.value || "").trim();
-    if (!stem) {
-      const guess = file.name.replace(/\.[^.]+$/, "").replace(/[^\w.-]+/g, "_");
-      ann$("#annotate-stem").value = guess;
-    }
-    setAnnotateStatus(`已选择「${file.name}」，请点击「加载首帧」。`);
-  });
-
-  ann$("#annotate-json-upload")?.addEventListener("change", async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const stem = (ann$("#annotate-stem")?.value || currentVideoStem || "").trim();
-    if (!stem) {
-      setAnnotateStatus("请先加载视频或填写 video_stem", true);
-      e.target.value = "";
-      return;
-    }
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      setAnnotateStatus("正在上传保存…");
-      const res = await fetch(
-        `/api/annotations/by-video/${encodeURIComponent(stem)}/upload${annotateSaveQueryParams()}`,
-        { method: "POST", body: fd }
-      );
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(formatApiDetail(body.detail) || body.detail || res.statusText);
-      const savedStem = body.video_stem || stem;
-      currentVideoStem = savedStem;
-      if (savedStem !== stem) ann$("#annotate-stem").value = savedStem;
-      const data = JSON.parse(await file.text());
-      applyAnnotationPayload(data);
-      setAnnotateStatus(
-        `✅ ${body.message || "已上传"}（${body.box_count ?? "?"} 个货框）${formatRecomputeStatus(body.recompute)}`
-      );
-    } catch (err) {
-      setAnnotateStatus(`❌ ${err.message}`, true);
-    }
-    e.target.value = "";
-  });
-
   ann$("#annotate-save")?.addEventListener("click", async () => {
     try {
       await saveAnnotation();
-    } catch (err) {
-      setAnnotateStatus(`❌ ${err.message}`, true);
-    }
-  });
-
-  ann$("#annotate-recompute-only")?.addEventListener("click", async () => {
-    try {
-      await recomputeCollisionsOnly();
     } catch (err) {
       setAnnotateStatus(`❌ ${err.message}`, true);
     }
@@ -968,19 +680,19 @@ function initAnnotatePanel() {
   ann$("#annotate-cols")?.addEventListener("change", applyGridSizeFromInputs);
 
   ann$("#annotate-download")?.addEventListener("click", async () => {
-    const stem = (ann$("#annotate-stem")?.value || currentVideoStem || "").trim();
-    if (!stem) {
-      setAnnotateStatus("无 video_stem", true);
+    const annId = getAnnotateAnnotationId() || currentAnnotationId;
+    if (!annId) {
+      setAnnotateStatus("请选择货位标注", true);
       return;
     }
     try {
-      const res = await fetch(`/api/annotations/by-video/${encodeURIComponent(stem)}`);
+      const res = await fetch(`/api/annotations/by-video/${encodeURIComponent(annId)}`);
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = `${stem}.json`;
+      a.download = `${annId}.json`;
       a.click();
       URL.revokeObjectURL(a.href);
     } catch (err) {
@@ -1000,4 +712,3 @@ if (document.readyState === "loading") {
 } else {
   bootAnnotatePanel();
 }
-

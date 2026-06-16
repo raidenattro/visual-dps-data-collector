@@ -170,16 +170,13 @@ function switchToTab(tabId) {
   if (btn) btn.click();
 }
 
-function openAnnotateForVideoStem(stem) {
-  const s = String(stem || "").trim();
+function openAnnotateTab() {
   switchToTab("annotate");
-  const stemEl = document.querySelector("#annotate-stem");
-  if (stemEl && s) stemEl.value = s;
   if (typeof window.initAnnotatePanel === "function") window.initAnnotatePanel();
 }
 
 window.switchToTab = switchToTab;
-window.openAnnotateForVideoStem = openAnnotateForVideoStem;
+window.openAnnotateTab = openAnnotateTab;
 
 async function resolveCollectAnnotationForBatch() {
   const camera = getCollectCameraLabel();
@@ -211,7 +208,7 @@ async function resolveCollectAnnotationSource(file, annFile) {
   return {
     ok: false,
     stem,
-    message: `请填写机位标识、上传标注 JSON，或到「标注」页按视频主名「${stem}」保存后再采集`,
+    message: `请填写机位标识、上传标注 JSON，或到「标注」页按机位保存 annotation 后再采集`,
   };
 }
 
@@ -265,15 +262,13 @@ async function refreshCollectAnnotationHint() {
     collectAnnotationStatus.innerHTML = `✅ ${via}，采集时会计算并保存碰撞/告警。`;
     return;
   }
-  const stemEsc = String(check.stem || "").replace(/"/g, "&quot;");
-  collectAnnotationStatus.innerHTML = `⚠️ ${check.message} <button type="button" class="link-btn collect-goto-annotate" data-stem="${stemEsc}">去标注「${check.stem}」</button>`;
+  collectAnnotationStatus.innerHTML = `⚠️ ${check.message} <button type="button" class="link-btn collect-goto-annotate">去标注页</button>`;
 }
 
 collectAnnotationStatus?.addEventListener("click", (e) => {
   const btn = e.target.closest(".collect-goto-annotate");
   if (!btn) return;
-  const file = $("#collect-file")?.files?.[0];
-  openAnnotateForVideoStem(btn.dataset.stem || videoStemFromFilename(file?.name));
+  openAnnotateTab();
 });
 
 document.querySelectorAll('input[name="collect-mode"]').forEach((el) => {
