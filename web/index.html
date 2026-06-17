@@ -249,6 +249,16 @@
         </p>
         <div class="row">
           <label>
+            <span class="label-with-tip">评估模式
+              <button type="button" class="field-tip" data-tip="仅评估：读取当前 timeline 告警与 review 范本对比。重算并评估：先用下方碰撞参数重算该机位全部匹配记录的碰撞/告警（覆盖写回），再评估。">?</button>
+            </span>
+            <select id="accuracy-eval-mode">
+              <option value="evaluate_only" selected>仅评估（不重算）</option>
+              <option value="recompute_evaluate">重算碰撞并评估</option>
+              <option value="recompute_only">仅重算碰撞（不评估）</option>
+            </select>
+          </label>
+          <label>
             <span class="label-with-tip">姿态模型
               <button type="button" class="field-tip" data-tip="选择要评估的 RTMPose 模型层，将读取 localdata/json/{模型}/{机位}/ 下与 review 匹配的 pose 记录。">?</button>
             </span>
@@ -266,10 +276,28 @@
               <option value="">— 加载中 —</option>
             </select>
           </label>
-          <span class="label-with-tip">
-            <button type="button" id="accuracy-run" class="primary-btn">批量评估</button>
-            <button type="button" class="field-tip" data-tip="规则：连续 verified_true 同货框合并为一段；段内出现匹配告警=成功，无告警=漏报；段外告警=误报。范本货框优先 confirmed_box_tokens。">?</button>
-          </span>
+        </div>
+        <fieldset class="collision-config accuracy-collision-config">
+          <legend class="legend-with-tip">碰撞检测参数（重算时使用）
+            <button type="button" class="field-tip" data-tip="与采集页一致：基于已有骨架 keypoints 重算 collisions / alarm_collisions，仅覆盖写回 timeline 与 manifest.collision；不修改 localdata/review 人工复核。">?</button>
+          </legend>
+          <div class="row">
+            <label>
+              <span class="label-with-tip">alarm_min_consecutive_frames
+                <button type="button" class="field-tip" data-tip="手腕在货框内连续命中达到该帧数后，才触发告警（alarm）。">?</button>
+              </span>
+              <input type="number" id="accuracy-alarm-min" value="3" min="1" step="1" />
+            </label>
+            <label>
+              <span class="label-with-tip">alarm_cooldown_frames
+                <button type="button" class="field-tip" data-tip="同一货框两次告警之间的最小帧间隔。">?</button>
+              </span>
+              <input type="number" id="accuracy-alarm-cooldown" value="6" min="1" step="1" />
+            </label>
+          </div>
+        </fieldset>
+        <div class="row accuracy-actions">
+          <button type="button" id="accuracy-run" class="primary-btn">执行</button>
         </div>
         <p id="accuracy-context-hint" class="annotation-status hint hidden" role="status"></p>
       </div>
@@ -516,7 +544,7 @@
   <script src="app/01-layout-frames.js?v=48"></script>
   <script src="app/02-playback-selection.js?v=34"></script>
   <script src="app/03-tabs.js?v=35"></script>
-  <script src="app/04-collision-config.js?v=34"></script>
+  <script src="app/04-collision-config.js?v=35"></script>
   <script src="app/05-collect.js?v=41"></script>
   <script src="app/06-records.js?v=43"></script>
   <script src="app/07-playback-stage.js?v=48"></script>
@@ -525,6 +553,6 @@
   <script src="app/10-render-collision.js?v=63"></script>
   <script src="app/11-playback-controls.js?v=54"></script>
   <script src="annotate.js?v=15"></script>
-  <script src="accuracy.js?v=2"></script>
+  <script src="accuracy.js?v=4"></script>
 </body>
 </html>

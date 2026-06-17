@@ -18,9 +18,7 @@ from pose_store import (
     STORAGE_V1_JSON,
     STORAGE_V2_PARQUET,
     RecordLocator,
-    legacy_event_review_path,
     load_all_frames,
-    load_events,
     load_manifest,
     patch_v2_manifest,
     write_timeline_parquet,
@@ -82,7 +80,7 @@ def recompute_record_collisions(
     alarm_min_consecutive_frames: int | None = None,
     alarm_cooldown_frames: int | None = None,
 ) -> dict[str, Any]:
-    """不重跑骨架推理，仅按新 ROI 重算 collisions / alarm_collisions。"""
+    """不重跑骨架推理，仅按新 ROI 重算 collisions / alarm_collisions；不修改 review 复核数据。"""
     if not annotation_path.is_file():
         raise FileNotFoundError(f"标注不存在: {annotation_path}")
 
@@ -152,26 +150,6 @@ def recompute_record_collisions(
     else:
         raise ValueError(f"不支持的存储类型: {locator.storage}")
 
-    legacy_review = legacy_event_review_path(locator)
-    if legacy_review.is_file():
-        legacy_review.unlink()
-
-    # 碰撞重算后重置共享复核（不 unlink review_dir，避免残留空键）
-    from pose_store import REVIEW_STATUS_IN_PROGRESS, load_event_review, save_event_review
-
-    review = load_event_review(locator)
-    if review.get("verified_true") or str(review.get("status") or "").strip():
-        try:
-            event_total = len(load_events(locator))
-        except (RuntimeError, OSError, ValueError):
-            event_total = review.get("event_total")
-        save_event_review(
-            locator,
-            [],
-            status=REVIEW_STATUS_IN_PROGRESS,
-            event_total=event_total if event_total is not None else None,
-        )
-
     stem = video_stem or annotation_path.stem
     if locator.path.is_dir():
         try:
@@ -214,6 +192,7 @@ def recompute_records_collisions(
     video_stem: str = "",
     alarm_min_consecutive_frames: int | None = None,
     alarm_cooldown_frames: int | None = None,
+    resolve_annotation=None,
 ) -> dict[str, Any]:
     results: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
@@ -225,12 +204,21 @@ def recompute_records_collisions(
         if not locator:
             errors.append({"record_id": rid, "error": "记录不存在"})
             continue
+        ann_path = annotation_path
+        if resolve_annotation is not None:
+            try:
+                ann_path = resolve_annotation(locator) or annotation_path
+            except (OSError, ValueError, FileNotFoundError):
+                ann_path = annotation_path
+        if not ann_path or not ann_path.is_file():
+            errors.append({"record_id": rid, "error": "未找到可用标注 JSON"})
+            continue
         try:
             results.append(
                 recompute_record_collisions(
                     locator,
-                    annotation_path,
-                    video_stem=video_stem,
+                    ann_path,
+                    video_stem=video_stem or ann_path.stem,
                     alarm_min_consecutive_frames=alarm_min_consecutive_frames,
                     alarm_cooldown_frames=alarm_cooldown_frames,
                 )

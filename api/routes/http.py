@@ -64,6 +64,8 @@ from api.accuracy_service import (
     build_accuracy_context,
     evaluate_camera_batch,
     list_accuracy_camera_options,
+    recompute_and_evaluate_camera_batch,
+    recompute_camera_records_batch,
 )
 from api.annotate_service import (
     build_annotate_context,
@@ -306,6 +308,56 @@ def post_accuracy_evaluate(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
     paths = resolve_app_paths()
     try:
         return evaluate_camera_batch(paths, pose_tier=pose_tier, camera_label=camera)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/api/accuracy/recompute")
+def post_accuracy_recompute(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    """按新碰撞参数重算指定模型层 + 机位下匹配记录的 timeline 碰撞/告警。"""
+    pose_tier = str(body.get("pose_tier") or "").strip()
+    camera = str(body.get("camera") or body.get("camera_label") or "").strip()
+    if not camera:
+        raise HTTPException(400, "请选择机位")
+    try:
+        alarm_min = max(1, int(body.get("alarm_min_consecutive_frames") or 3))
+        alarm_cd = max(1, int(body.get("alarm_cooldown_frames") or 6))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400, "碰撞参数须为整数") from exc
+    paths = resolve_app_paths()
+    try:
+        return recompute_camera_records_batch(
+            paths,
+            pose_tier=pose_tier,
+            camera_label=camera,
+            alarm_min_consecutive_frames=alarm_min,
+            alarm_cooldown_frames=alarm_cd,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/api/accuracy/recompute-evaluate")
+def post_accuracy_recompute_evaluate(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    """重算碰撞/告警后立刻批量评估（不修改 review 复核数据）。"""
+    pose_tier = str(body.get("pose_tier") or "").strip()
+    camera = str(body.get("camera") or body.get("camera_label") or "").strip()
+    if not camera:
+        raise HTTPException(400, "请选择机位")
+    try:
+        alarm_min = max(1, int(body.get("alarm_min_consecutive_frames") or 3))
+        alarm_cd = max(1, int(body.get("alarm_cooldown_frames") or 6))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400, "碰撞参数须为整数") from exc
+    paths = resolve_app_paths()
+    try:
+        return recompute_and_evaluate_camera_batch(
+            paths,
+            pose_tier=pose_tier,
+            camera_label=camera,
+            alarm_min_consecutive_frames=alarm_min,
+            alarm_cooldown_frames=alarm_cd,
+        )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 

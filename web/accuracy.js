@@ -37,6 +37,25 @@ async function readApiError(res) {
   }
 }
 
+function getAccuracyEvalMode() {
+  return acc$("#accuracy-eval-mode")?.value || "evaluate_only";
+}
+
+function readAccuracyRequestBody() {
+  const poseTier = acc$("#accuracy-pose-tier")?.value || "rtmpose-m";
+  const camera = acc$("#accuracy-camera")?.value || "";
+  const collision =
+    typeof window.readAccuracyCollisionConfigFromForm === "function"
+      ? window.readAccuracyCollisionConfigFromForm()
+      : { alarm_min_consecutive_frames: 3, alarm_cooldown_frames: 6 };
+  return {
+    pose_tier: poseTier,
+    camera,
+    alarm_min_consecutive_frames: collision.alarm_min_consecutive_frames,
+    alarm_cooldown_frames: collision.alarm_cooldown_frames,
+  };
+}
+
 function updateAccuracyContextHint(ctx) {
   const el = acc$("#accuracy-context-hint");
   if (!el || !ctx) {
@@ -88,12 +107,26 @@ async function refreshAccuracyContext() {
   }
 }
 
+function renderAccuracyRecomputeSummary(recompute) {
+  if (!recompute) return "";
+  const ok = recompute.recomputed_count ?? 0;
+  const err = recompute.error_count ?? 0;
+  const params = `alarm_min=${recompute.alarm_min_consecutive_frames ?? "—"}, cooldown=${recompute.alarm_cooldown_frames ?? "—"}`;
+  return `<p class="hint accuracy-recompute-hint">碰撞重算：成功 <strong>${ok}</strong> 条，失败 <strong>${err}</strong> 条（${escHtml(params)}）· ${escHtml(recompute.note || "")}</p>`;
+}
+
 function renderAccuracySummary(result) {
   const el = acc$("#accuracy-summary");
   if (!el) return;
   const s = result.summary || {};
+  const recomputeBlock = renderAccuracyRecomputeSummary(result.recompute);
+  if (!s.evaluated && !recomputeBlock) {
+    el.classList.add("hidden");
+    return;
+  }
   el.classList.remove("hidden");
   el.innerHTML = `
+    ${recomputeBlock}
     <h2 class="accuracy-summary-heading">汇总 · ${escHtml(result.camera_label)} · ${escHtml(result.pose_tier)}</h2>
     <div class="accuracy-metrics-grid">
       <div class="accuracy-metric"><span class="accuracy-metric-label">评估分片</span><span class="accuracy-metric-value">${s.evaluated ?? 0} / ${s.clip_count ?? 0}</span></div>
@@ -149,29 +182,74 @@ function renderAccuracyClips(clips) {
     .join("");
 }
 
-async function runAccuracyEvaluation() {
-  const poseTier = acc$("#accuracy-pose-tier")?.value || "rtmpose-m";
-  const camera = acc$("#accuracy-camera")?.value || "";
-  if (!camera) {
+function syncAccuracyCollisionUi() {
+  const mode = getAccuracyEvalMode();
+  const fieldset = acc$(".accuracy-collision-config");
+  const needsCollision = mode === "recompute_evaluate" || mode === "recompute_only";
+  fieldset?.classList.toggle("hidden", !needsCollision);
+}
+
+async function runAccuracyJob() {
+  const mode = getAccuracyEvalMode();
+  const body = readAccuracyRequestBody();
+  if (!body.camera) {
     setAccuracyStatus("请选择机位", true);
     return;
   }
-  setAccuracyStatus("正在批量评估，请稍候…");
+
+  const endpoint =
+    mode === "recompute_evaluate"
+      ? "/api/accuracy/recompute-evaluate"
+      : mode === "recompute_only"
+        ? "/api/accuracy/recompute"
+        : "/api/accuracy/evaluate";
+
+  const statusMsg =
+    mode === "recompute_evaluate"
+      ? "正在重算碰撞并批量评估…"
+      : mode === "recompute_only"
+        ? "正在批量重算碰撞/告警…"
+        : "正在批量评估，请稍候…";
+
+  setAccuracyStatus(statusMsg);
   acc$("#accuracy-summary")?.classList.add("hidden");
   acc$("#accuracy-clips-wrap")?.classList.add("hidden");
+
   try {
-    const res = await fetch("/api/accuracy/evaluate", {
+    const res = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pose_tier: poseTier, camera }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) throw new Error(await readApiError(res));
     const result = await res.json();
+
+    if (mode === "recompute_only") {
+      acc$("#accuracy-summary")?.classList.remove("hidden");
+      acc$("#accuracy-clips-wrap")?.classList.add("hidden");
+      const el = acc$("#accuracy-summary");
+      if (el) {
+        el.innerHTML = `
+          <h2 class="accuracy-summary-heading">碰撞重算完成 · ${escHtml(result.camera_label)} · ${escHtml(result.pose_tier)}</h2>
+          ${renderAccuracyRecomputeSummary(result)}
+          <p class="hint">已覆盖写回匹配记录的 timeline 碰撞/告警与 manifest.collision（骨架 keypoints 复用未重推理）。</p>
+        `;
+      }
+      setAccuracyStatus(
+        `✅ 重算完成：成功 ${result.recomputed_count ?? 0} 条，失败 ${result.error_count ?? 0} 条`
+      );
+      return;
+    }
+
     renderAccuracySummary(result);
     renderAccuracyClips(result.clips);
     const s = result.summary || {};
+    const rc = result.recompute;
+    const recomputeHint = rc
+      ? `；重算 ${rc.recomputed_count ?? 0} 条记录后评估`
+      : "";
     setAccuracyStatus(
-      `✅ 评估完成：${s.evaluated ?? 0} 个分片，召回率 ${pct(s.recall)}，误报 ${s.false_alarms ?? 0} 次`
+      `✅ 评估完成：${s.evaluated ?? 0} 个分片，召回率 ${pct(s.recall)}，误报 ${s.false_alarms ?? 0} 次${recomputeHint}`
     );
   } catch (err) {
     setAccuracyStatus(`❌ ${escHtml(err.message)}`, true);
@@ -184,7 +262,19 @@ function initAccuracyPanel() {
   if (accuracyPanelInited) return;
   accuracyPanelInited = true;
   loadAccuracyCameras();
+  syncAccuracyCollisionUi();
 
+  if (typeof window.applyAccuracyCollisionConfigToForm === "function") {
+    const stored =
+      typeof loadCollisionConfigFromStorage === "function"
+        ? loadCollisionConfigFromStorage()
+        : null;
+    if (stored) window.applyAccuracyCollisionConfigToForm(stored);
+  }
+
+  acc$("#accuracy-eval-mode")?.addEventListener("change", () => {
+    syncAccuracyCollisionUi();
+  });
   acc$("#accuracy-pose-tier")?.addEventListener("change", () => {
     void refreshAccuracyContext();
   });
@@ -192,7 +282,7 @@ function initAccuracyPanel() {
     void refreshAccuracyContext();
   });
   acc$("#accuracy-run")?.addEventListener("click", () => {
-    void runAccuracyEvaluation();
+    void runAccuracyJob();
   });
 }
 

@@ -18,7 +18,15 @@ from pose_store import (
 )
 from review_store import EVENT_REVIEW_FILE, canonical_event_review_path, resolve_review_context
 
+from annotation_store import (
+    annotation_dir_for_source,
+    annotation_path_for_video_stem,
+    materialize_tier_annotation_from_master,
+    resolve_video_stem_from_record,
+)
 from api.annotate_service import normalize_pose_tier
+from api.collision_recompute_service import recompute_record_collisions
+from api.record_service import meta_path_for_record, resolve_annotation_path_for_record
 
 
 def _ground_truth_tokens(entry: dict[str, Any]) -> list[str]:
@@ -427,6 +435,139 @@ def evaluate_camera_batch(
             "false_alarm": "不在任一段时间与货框范围内的告警记 1 次误报",
         },
     }
+
+
+def resolve_annotation_for_accuracy_record(
+    paths: AppPaths,
+    locator,
+    *,
+    pose_tier: str,
+) -> Path | None:
+    """优先模型层 annotations，再回退母本 / reflection。"""
+    tier = normalize_pose_tier(pose_tier)
+    sidecar = meta_path_for_record(locator.record_id, locator)
+    meta = None
+    if sidecar.is_file():
+        try:
+            meta = json.loads(sidecar.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            meta = None
+    video_stem = resolve_video_stem_from_record(
+        locator.record_id,
+        json_dir=paths.json_dir,
+        pose_path=locator.path,
+        meta=meta if isinstance(meta, dict) else None,
+    )
+    tier_dir = annotation_dir_for_source(paths, tier)
+    tier_path = annotation_path_for_video_stem(video_stem, annotation_dir=tier_dir)
+    if tier_path.is_file():
+        return tier_path
+    mat = materialize_tier_annotation_from_master(video_stem, paths=paths, source=tier)
+    if mat and mat.is_file():
+        return mat
+    return resolve_annotation_path_for_record(
+        locator.record_id,
+        locator=locator,
+        meta=meta if isinstance(meta, dict) else None,
+    )
+
+
+def recompute_camera_records_batch(
+    paths: AppPaths,
+    *,
+    pose_tier: str,
+    camera_label: str,
+    alarm_min_consecutive_frames: int,
+    alarm_cooldown_frames: int,
+) -> dict[str, Any]:
+    """对指定模型层 + 机位下与 review 匹配的全部记录重算碰撞/告警并写回 timeline（不改 review）。"""
+    tier = normalize_pose_tier(pose_tier)
+    slug = camera_storage_slug(camera_label)
+    record_index = build_review_key_index(paths, tier)
+    clips_meta = list_evaluable_review_clips(paths, slug)
+    if not clips_meta:
+        raise ValueError(f"机位 {camera_label!r}（{slug}）下无「已复核」的 review 分片")
+
+    alarm_min = max(1, int(alarm_min_consecutive_frames))
+    alarm_cd = max(1, int(alarm_cooldown_frames))
+    recomputed: list[dict[str, Any]] = []
+    errors: list[dict[str, str]] = []
+    seen_records: set[str] = set()
+
+    for meta in clips_meta:
+        review_key = meta["review_key"]
+        record_id = record_index.get(review_key, "")
+        if not record_id or record_id in seen_records:
+            continue
+        seen_records.add(record_id)
+        locator = locate_record(paths.json_dir, record_id)
+        if not locator:
+            errors.append({"record_id": record_id, "review_key": review_key, "error": "记录不存在"})
+            continue
+        ann_path = resolve_annotation_for_accuracy_record(paths, locator, pose_tier=tier)
+        if not ann_path or not ann_path.is_file():
+            errors.append({
+                "record_id": record_id,
+                "review_key": review_key,
+                "error": "未找到可用标注 JSON",
+            })
+            continue
+        try:
+            result = recompute_record_collisions(
+                locator,
+                ann_path,
+                video_stem=ann_path.stem,
+                alarm_min_consecutive_frames=alarm_min,
+                alarm_cooldown_frames=alarm_cd,
+            )
+            recomputed.append({**result, "review_key": review_key})
+        except (OSError, ValueError, FileNotFoundError, RuntimeError) as exc:
+            errors.append({
+                "record_id": record_id,
+                "review_key": review_key,
+                "error": str(exc),
+            })
+
+    return {
+        "pose_tier": tier,
+        "camera_label": camera_label,
+        "camera_slug": slug,
+        "alarm_min_consecutive_frames": alarm_min,
+        "alarm_cooldown_frames": alarm_cd,
+        "record_count": len(seen_records),
+        "recomputed_count": len(recomputed),
+        "error_count": len(errors),
+        "recomputed": recomputed,
+        "errors": errors,
+        "note": "复用已有骨架 keypoints，仅重算 collisions / alarm_collisions 并覆盖 timeline 与 manifest.collision；不修改 localdata/review 人工复核",
+    }
+
+
+def recompute_and_evaluate_camera_batch(
+    paths: AppPaths,
+    *,
+    pose_tier: str,
+    camera_label: str,
+    alarm_min_consecutive_frames: int,
+    alarm_cooldown_frames: int,
+) -> dict[str, Any]:
+    """先按新碰撞参数重算匹配记录，再执行准确率批量评估。"""
+    recompute_result = recompute_camera_records_batch(
+        paths,
+        pose_tier=pose_tier,
+        camera_label=camera_label,
+        alarm_min_consecutive_frames=alarm_min_consecutive_frames,
+        alarm_cooldown_frames=alarm_cooldown_frames,
+    )
+    if not recompute_result.get("recomputed_count") and recompute_result.get("error_count"):
+        raise ValueError(
+            recompute_result["errors"][0].get("error", "碰撞重算失败")
+            if recompute_result.get("errors")
+            else "无记录被重算"
+        )
+    eval_result = evaluate_camera_batch(paths, pose_tier=pose_tier, camera_label=camera_label)
+    eval_result["recompute"] = recompute_result
+    return eval_result
 
 
 def build_accuracy_context(paths: AppPaths, reflection: Any, *, pose_tier: str, camera_label: str) -> dict[str, Any]:

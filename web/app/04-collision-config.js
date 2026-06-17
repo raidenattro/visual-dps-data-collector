@@ -65,16 +65,41 @@ async function loadInferenceConfigDefaults() {
     /* ignore */
   }
   const stored = loadCollisionConfigFromStorage();
-  applyCollisionConfigToForm({
+  const merged = {
     alarm_min_consecutive_frames:
       stored?.alarm_min_consecutive_frames ??
       serverCfg?.alarm_min_consecutive_frames ??
       3,
     alarm_cooldown_frames:
       stored?.alarm_cooldown_frames ?? serverCfg?.alarm_cooldown_frames ?? 6,
-  });
+  };
+  applyCollisionConfigToForm(merged);
+  if (typeof applyAccuracyCollisionConfigToForm === "function") {
+    applyAccuracyCollisionConfigToForm(merged);
+  }
   if (serverCfg?.frame_rate != null && $("#collect-fps") && !$("#collect-fps").dataset.userTouched) {
     $("#collect-fps").value = String(serverCfg.frame_rate);
   }
 }
+
+function readAccuracyCollisionConfigFromForm() {
+  const min = Math.max(1, parseInt(document.querySelector("#accuracy-alarm-min")?.value, 10) || 3);
+  const cd = Math.max(1, parseInt(document.querySelector("#accuracy-alarm-cooldown")?.value, 10) || 6);
+  return { alarm_min_consecutive_frames: min, alarm_cooldown_frames: cd };
+}
+
+function applyAccuracyCollisionConfigToForm(cfg) {
+  if (!cfg) return;
+  const minEl = document.querySelector("#accuracy-alarm-min");
+  const cdEl = document.querySelector("#accuracy-alarm-cooldown");
+  if (minEl && cfg.alarm_min_consecutive_frames != null) {
+    minEl.value = String(cfg.alarm_min_consecutive_frames);
+  }
+  if (cdEl && cfg.alarm_cooldown_frames != null) {
+    cdEl.value = String(cfg.alarm_cooldown_frames);
+  }
+}
+
+window.readAccuracyCollisionConfigFromForm = readAccuracyCollisionConfigFromForm;
+window.applyAccuracyCollisionConfigToForm = applyAccuracyCollisionConfigToForm;
 
