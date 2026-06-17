@@ -1,4 +1,33 @@
-/** 货位标注：按模型 + 机位编辑 annotations/{编号}.json（首帧来自内置视频） */
+/** 货位标注：按标注来源 + 机位编辑；母本只读，模型层保存至 json/{tier}/annotations */
+
+function getAnnotateAnnotationSource() {
+  return (ann$("#annotate-annotation-source")?.value || "rtmpose-t").trim();
+}
+
+function isAnnotateMasterSource() {
+  return getAnnotateAnnotationSource() === "master";
+}
+
+function annotateSourceLabel(src) {
+  const s = String(src || "").trim();
+  return s === "master" ? "母本" : s;
+}
+
+function annotateSaveDirForContext(ctx) {
+  if (!ctx) return "json/annotations";
+  if (ctx.annotation_save_dir) return ctx.annotation_save_dir;
+  const src = ctx.annotation_source || getAnnotateAnnotationSource();
+  return src === "master" ? "json/annotations" : `json/${src}/annotations`;
+}
+
+function syncAnnotateSaveUi(ctx) {
+  const readonly = ctx?.annotation_readonly ?? isAnnotateMasterSource();
+  const saveBtn = ann$("#annotate-save");
+  if (saveBtn) {
+    saveBtn.disabled = readonly;
+    saveBtn.title = readonly ? "母本只读，请选择模型层（rtmpose-t/s/m）后保存" : "";
+  }
+}
 
 const getAnnCanvas = () => document.getElementById("annotate-canvas");
 const getAnnCtx = () => {
@@ -36,10 +65,6 @@ function visualMode() {
 
 function ann$(sel) {
   return document.querySelector(sel);
-}
-
-function getAnnotatePoseTier() {
-  return (ann$("#annotate-pose-tier")?.value || "rtmpose-t").trim();
 }
 
 function getAnnotateCamera() {
@@ -121,13 +146,25 @@ function updateAnnotateContextHint(ctx) {
     return;
   }
   el.classList.remove("hidden");
+  const srcLabel = annotateSourceLabel(ctx.annotation_source);
+  const saveDir = annotateSaveDirForContext(ctx);
   const annPart = (ctx.annotations || [])
-    .map((a) => `${a.annotation_id}${a.has_file ? `（${a.box_count} 框）` : "（未创建）"}`)
+    .map((a) => {
+      let tag = a.has_file ? `${a.box_count} 框` : "未创建";
+      if (a.resolved_from === "master" && ctx.annotation_source !== "master" && !a.has_tier_file) {
+        tag += "（母本）";
+      } else if (a.has_tier_file) {
+        tag += "（模型层）";
+      }
+      return `${a.annotation_id} · ${tag}`;
+    })
     .join("、");
+  const videoTier = ctx.video_pose_tier || "rtmpose-t";
   const videoPart = ctx.has_video
-    ? `首帧来源：<code>${ctx.video_dir}/${ctx.video_file}</code>`
+    ? `首帧来源：<code>${ctx.video_dir}/${ctx.video_file}</code>（视频层 ${videoTier}）`
     : "⚠️ 该机位下暂无内置视频，请先完成采集";
-  el.innerHTML = `机位 <strong>${ctx.camera_label}</strong> → 标注 ${annPart || "—"} · ${videoPart}`;
+  const ro = ctx.annotation_readonly ? " · <strong>母本只读</strong>" : ` · 保存至 <code>${saveDir}/</code>`;
+  el.innerHTML = `标注来源 <strong>${srcLabel}</strong>${ro} · 机位 <strong>${ctx.camera_label}</strong> → ${annPart || "—"} · ${videoPart}`;
 }
 
 function updateAnnotateVerifyPanel(info) {
@@ -135,7 +172,9 @@ function updateAnnotateVerifyPanel(info) {
   if (!el) return;
   const {
     ok,
-    poseTier,
+    annotationSource,
+    saveDir,
+    readonly,
     cameraLabel,
     annotationId,
     videoFile,
@@ -144,6 +183,7 @@ function updateAnnotateVerifyPanel(info) {
     annotationLoaded,
     boxCount,
     annSize,
+    resolvedFrom,
     errors = [],
   } = info;
   el.classList.remove("hidden", "ok", "warn", "fail");
@@ -168,9 +208,9 @@ function updateAnnotateVerifyPanel(info) {
   el.innerHTML = `
     ${lines.join("")}
     <dl>
-      <dt>姿态模型</dt><dd>${poseTier || "—"}</dd>
+      <dt>标注来源</dt><dd>${annotateSourceLabel(annotationSource) || "—"}${readonly ? "（只读）" : ""}</dd>
       <dt>机位</dt><dd>${cameraLabel || "—"}</dd>
-      <dt>货位标注</dt><dd>${annotationId ? `annotations/${annotationId}.json` : "—"} ${annotationLoaded ? `（${boxCount} 个货框）` : "（未加载）"}${annSize ? `；分辨率 ${annSize.w}×${annSize.h}` : ""}</dd>
+      <dt>货位标注</dt><dd>${annotationId ? `<code>${saveDir || "json/annotations"}/${annotationId}.json</code>` : "—"} ${annotationLoaded ? `（${boxCount} 个货框${resolvedFrom === "master" && annotationSource !== "master" ? "，来自母本" : ""}）` : "（未加载）"}${annSize ? `；分辨率 ${annSize.w}×${annSize.h}` : ""}</dd>
       <dt>视频首帧</dt><dd>${frameLoaded ? `已显示 ${frameSize || ""}` : "未显示"}${videoFile ? ` · ${videoFile}` : ""}</dd>
     </dl>
   `;
@@ -298,10 +338,13 @@ function applyAnnotationPayload(data) {
   return vm.isGridReady();
 }
 
-async function loadExistingAnnotation(annotationId) {
+async function loadExistingAnnotation(annotationId, { materialize = false } = {}) {
   if (!annotationId) return null;
+  const src = getAnnotateAnnotationSource();
   try {
-    const res = await fetch(`/api/annotations/by-video/${encodeURIComponent(annotationId)}`);
+    const qs = new URLSearchParams({ annotation_source: src });
+    if (materialize && src !== "master") qs.set("materialize", "1");
+    const res = await fetch(`/api/annotations/by-video/${encodeURIComponent(annotationId)}?${qs}`);
     if (!res.ok) return null;
     return await res.json();
   } catch {
@@ -309,15 +352,15 @@ async function loadExistingAnnotation(annotationId) {
   }
 }
 
-async function fetchAnnotateContext(poseTier, camera) {
-  const qs = new URLSearchParams({ pose_tier: poseTier, camera });
+async function fetchAnnotateContext(annotationSource, camera) {
+  const qs = new URLSearchParams({ annotation_source: annotationSource, camera });
   const res = await fetch(`/api/annotate/context?${qs}`);
   if (!res.ok) throw new Error(await readApiErrorDetail(res));
   return res.json();
 }
 
-async function fetchAnnotateFrame(poseTier, camera) {
-  const qs = new URLSearchParams({ pose_tier: poseTier, camera });
+async function fetchAnnotateFrame(annotationSource, camera) {
+  const qs = new URLSearchParams({ annotation_source: annotationSource, camera });
   const res = await fetch(`/api/annotate/frame?${qs}`);
   if (!res.ok) throw new Error(await readApiErrorDetail(res));
   return res.json();
@@ -337,7 +380,10 @@ function populateAnnotationSelect(annotations, selectedId = "") {
   list.forEach((item) => {
     const opt = document.createElement("option");
     opt.value = item.annotation_id;
-    const suffix = item.has_file ? `${item.box_count} 框` : "未创建";
+    let suffix = item.has_file ? `${item.box_count} 框` : "未创建";
+    if (item.resolved_from === "master" && !item.has_tier_file && getAnnotateAnnotationSource() !== "master") {
+      suffix += " · 母本";
+    }
     opt.textContent = `${item.annotation_id} · ${suffix}`;
     sel.appendChild(opt);
   });
@@ -370,7 +416,7 @@ async function loadAnnotateCameras() {
 }
 
 async function loadAnnotateSession({ annotationId = "" } = {}) {
-  const poseTier = getAnnotatePoseTier();
+  const annotationSource = getAnnotateAnnotationSource();
   const camera = getAnnotateCamera();
   if (!camera) {
     setAnnotateStatus("请选择机位", true);
@@ -383,7 +429,7 @@ async function loadAnnotateSession({ annotationId = "" } = {}) {
 
   let ctx;
   try {
-    ctx = await fetchAnnotateContext(poseTier, camera);
+    ctx = await fetchAnnotateContext(annotationSource, camera);
   } catch (err) {
     notifyAnnotateFailure(err.message || String(err));
     return;
@@ -391,6 +437,7 @@ async function loadAnnotateSession({ annotationId = "" } = {}) {
   if (token !== annotateLoadToken) return;
 
   annotateContext = ctx;
+  syncAnnotateSaveUi(ctx);
   populateAnnotationSelect(ctx.annotations, annotationId || getAnnotateAnnotationId());
   updateAnnotateContextHint(ctx);
 
@@ -406,10 +453,13 @@ async function loadAnnotateSession({ annotationId = "" } = {}) {
   let frameSourceVideo = "";
   let annotationLoaded = false;
   let boxCount = 0;
+  let resolvedFrom = "none";
+  const saveDir = annotateSaveDirForContext(ctx);
+  const readonly = !!ctx.annotation_readonly;
 
   setAnnotateStatus("正在加载视频首帧…");
   try {
-    const frame = await fetchAnnotateFrame(poseTier, camera);
+    const frame = await fetchAnnotateFrame(annotationSource, camera);
     if (token !== annotateLoadToken) return;
     frameSourceVideo = frame.video_file || "";
     currentSourceVideo = frameSourceVideo;
@@ -424,11 +474,13 @@ async function loadAnnotateSession({ annotationId = "" } = {}) {
   }
 
   try {
-    const existing = await loadExistingAnnotation(annId);
+    const materialize = annotationSource !== "master";
+    const existing = await loadExistingAnnotation(annId, { materialize });
     if (token !== annotateLoadToken) return;
     if (existing) {
       annotationLoaded = true;
       boxCount = countAnnotationBoxes(existing);
+      resolvedFrom = existing?._meta?.resolved_from || "tier";
       const src = String(existing?.source_info?.source_video || "").trim();
       if (src) currentSourceVideo = src;
       currentShelfCode =
@@ -438,7 +490,7 @@ async function loadAnnotateSession({ annotationId = "" } = {}) {
       applyAnnotationPayload(existing);
     } else {
       currentShelfCode = annId;
-      verifyErrors.push(`标注文件 annotations/${annId}.json 尚未创建，保存后将新建`);
+      verifyErrors.push(`标注文件 ${saveDir}/${annId}.json 尚未创建，保存后将新建`);
     }
   } catch (err) {
     verifyErrors.push(`标注叠加失败：${err.message || err}`);
@@ -453,7 +505,7 @@ async function loadAnnotateSession({ annotationId = "" } = {}) {
 
   if (previewReady) {
     setAnnotateStatus(
-      `✅ 已加载 <code>annotations/${annId}.json</code>（${boxCount} 个货框），请对照首帧检查货位。`
+      `✅ 已加载 <code>${saveDir}/${annId}.json</code>（${boxCount} 个货框）${readonly ? "，母本只读" : ""}，请对照首帧检查货位。`
     );
   } else if (frameLoaded && annotationLoaded) {
     setAnnotateStatus(
@@ -462,7 +514,7 @@ async function loadAnnotateSession({ annotationId = "" } = {}) {
     );
   } else if (frameLoaded) {
     setAnnotateStatus(
-      `首帧已加载：拖动绿色货架角点，设置行列后点「生成货位」。保存将写入 <code>annotations/${annId}.json</code>。`
+      `首帧已加载：拖动绿色货架角点，设置行列后点「生成货位」。${readonly ? "母本只读。" : `保存将写入 <code>${saveDir}/${annId}.json</code>。`}`
     );
   } else if (annotationLoaded) {
     setAnnotateStatus(`⚠️ 已读取标注，但首帧未显示：${verifyErrors[0] || "请确认该机位已采集视频"}`, true);
@@ -476,7 +528,9 @@ async function loadAnnotateSession({ annotationId = "" } = {}) {
 
   updateAnnotateVerifyPanel({
     ok: previewReady,
-    poseTier,
+    annotationSource,
+    saveDir,
+    readonly,
     cameraLabel: camera,
     annotationId: annId,
     videoFile: frameSourceVideo,
@@ -485,6 +539,7 @@ async function loadAnnotateSession({ annotationId = "" } = {}) {
     annotationLoaded,
     boxCount,
     annSize,
+    resolvedFrom,
     errors: verifyErrors,
   });
 
@@ -522,6 +577,11 @@ function buildSavePayload() {
 
 async function saveAnnotation() {
   const annId = getAnnotateAnnotationId() || currentAnnotationId;
+  const src = getAnnotateAnnotationSource();
+  if (src === "master") {
+    setAnnotateStatus("母本目录只读，请选择模型层（rtmpose-t/s/m）后保存", true);
+    return;
+  }
   if (!annId) {
     setAnnotateStatus("请选择货位标注编号", true);
     return;
@@ -541,8 +601,10 @@ async function saveAnnotation() {
   }
   currentAnnotationId = annId;
   const payload = buildSavePayload();
+  const saveDir = annotateSaveDirForContext(annotateContext);
   setAnnotateStatus("正在保存…");
-  const res = await fetch(`/api/annotations/by-video/${encodeURIComponent(annId)}`, {
+  const qs = new URLSearchParams({ annotation_source: src });
+  const res = await fetch(`/api/annotations/by-video/${encodeURIComponent(annId)}?${qs}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -552,12 +614,14 @@ async function saveAnnotation() {
   const savedId = body.video_stem || annId;
   currentAnnotationId = savedId;
   setAnnotateStatus(
-    `✅ ${body.message || "已保存"}：<code>annotations/${savedId}.json</code>（${body.box_count ?? finalBoxes.length} 个货框），全局生效。`
+    `✅ ${body.message || "已保存"}：<code>${body.annotation_dir || saveDir}/${savedId}.json</code>（${body.box_count ?? finalBoxes.length} 个货框）。`
   );
   if (annotateContext) {
     const item = (annotateContext.annotations || []).find((a) => a.annotation_id === savedId);
     if (item) {
       item.has_file = true;
+      item.has_tier_file = true;
+      item.resolved_from = "tier";
       item.box_count = body.box_count ?? finalBoxes.length;
       updateAnnotateContextHint(annotateContext);
       populateAnnotationSelect(annotateContext.annotations, savedId);
@@ -618,8 +682,10 @@ function initAnnotatePanel() {
   annotatePanelInited = true;
   bindCanvasEvents();
   loadAnnotateCameras();
+  syncAnnotateSaveUi();
 
-  ann$("#annotate-pose-tier")?.addEventListener("change", () => {
+  ann$("#annotate-annotation-source")?.addEventListener("change", () => {
+    syncAnnotateSaveUi();
     if (getAnnotateCamera()) loadAnnotateSession();
   });
 
@@ -686,7 +752,10 @@ function initAnnotatePanel() {
       return;
     }
     try {
-      const res = await fetch(`/api/annotations/by-video/${encodeURIComponent(annId)}`);
+      const src = getAnnotateAnnotationSource();
+      const qs = new URLSearchParams({ annotation_source: src });
+      if (src !== "master") qs.set("materialize", "1");
+      const res = await fetch(`/api/annotations/by-video/${encodeURIComponent(annId)}?${qs}`);
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });

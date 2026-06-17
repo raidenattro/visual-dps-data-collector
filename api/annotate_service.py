@@ -6,7 +6,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from annotation_store import load_annotation_json
+from annotation_store import (
+    ANNOTATION_SOURCE_MASTER,
+    annotation_dir_display_rel,
+    annotation_dir_for_source,
+    annotation_path_for_video_stem,
+    load_annotation_json,
+    normalize_annotation_source,
+)
 from config_loader import (
     POSE_MODEL_TIERS,
     AppPaths,
@@ -80,11 +87,22 @@ def resolve_camera_video_bucket(
     return None
 
 
+def video_pose_tier_for_annotate(annotation_source: str) -> str:
+    """标注来源为模型层时同层取视频；母本时默认 rtmpose-t。"""
+    norm = normalize_annotation_source(annotation_source)
+    if norm != ANNOTATION_SOURCE_MASTER:
+        return norm
+    return "rtmpose-t"
+
+
 @dataclass
 class AnnotationListItem:
     annotation_id: str
     json_file: str
     has_file: bool
+    has_master_file: bool
+    has_tier_file: bool
+    resolved_from: str
     box_count: int
 
     def to_dict(self) -> dict[str, Any]:
@@ -92,6 +110,9 @@ class AnnotationListItem:
             "annotation_id": self.annotation_id,
             "json_file": self.json_file,
             "has_file": self.has_file,
+            "has_master_file": self.has_master_file,
+            "has_tier_file": self.has_tier_file,
+            "resolved_from": self.resolved_from,
             "box_count": self.box_count,
         }
 
@@ -100,14 +121,40 @@ def list_annotations_for_camera(
     paths: AppPaths,
     reflection: Any,
     camera_label: str,
+    *,
+    annotation_source: str,
 ) -> list[AnnotationListItem]:
+    norm = normalize_annotation_source(annotation_source)
+    tier_dir = annotation_dir_for_source(paths, norm) if norm != ANNOTATION_SOURCE_MASTER else None
     ann_ids = reflection.annotations_for_camera(camera_label)
     items: list[AnnotationListItem] = []
     for aid in ann_ids:
-        path = annotation_json_path(aid, paths.annotation_dir)
+        master_path = annotation_json_path(aid, paths.annotation_dir)
+        has_master = master_path.is_file()
+        has_tier = False
+        if tier_dir is not None:
+            has_tier = annotation_path_for_video_stem(aid, annotation_dir=tier_dir).is_file()
+
+        if norm == ANNOTATION_SOURCE_MASTER:
+            load_dir = paths.annotation_dir
+            has_file = has_master
+            resolved_from = "master" if has_master else "none"
+        elif has_tier:
+            load_dir = tier_dir
+            has_file = True
+            resolved_from = "tier"
+        elif has_master:
+            load_dir = paths.annotation_dir
+            has_file = True
+            resolved_from = "master"
+        else:
+            load_dir = tier_dir or paths.annotation_dir
+            has_file = False
+            resolved_from = "none"
+
         box_count = 0
-        if path.is_file():
-            data = load_annotation_json(path.stem, annotation_dir=paths.annotation_dir)
+        if has_file:
+            data = load_annotation_json(aid, annotation_dir=load_dir)
             if data:
                 boxes = data.get("boxes")
                 if isinstance(boxes, list):
@@ -120,7 +167,10 @@ def list_annotations_for_camera(
             AnnotationListItem(
                 annotation_id=aid,
                 json_file=f"{aid}.json",
-                has_file=path.is_file(),
+                has_file=has_file,
+                has_master_file=has_master,
+                has_tier_file=has_tier,
+                resolved_from=resolved_from,
                 box_count=box_count,
             )
         )
@@ -131,29 +181,37 @@ def build_annotate_context(
     paths: AppPaths,
     reflection: Any,
     *,
-    pose_tier: str,
+    annotation_source: str,
     camera_label: str,
 ) -> dict[str, Any]:
-    tier = normalize_pose_tier(pose_tier)
+    norm = normalize_annotation_source(annotation_source)
+    video_tier = video_pose_tier_for_annotate(norm)
     label = str(camera_label or "").strip()
     if not label:
         raise ValueError("请填写机位标识")
     if not reflection.has_camera(label):
         raise ValueError(f"机位 {label!r} 不在 reflection.json 中")
 
-    annotations = list_annotations_for_camera(paths, reflection, label)
-    video_hit = resolve_camera_video_bucket(paths, label, pose_tier=tier)
+    annotations = list_annotations_for_camera(
+        paths, reflection, label, annotation_source=norm
+    )
+    video_hit = resolve_camera_video_bucket(paths, label, pose_tier=video_tier)
     camera_slug = video_hit[0] if video_hit else camera_storage_slug(label)
     video_file = video_hit[1].name if video_hit else ""
 
     return {
-        "pose_tier": tier,
+        "annotation_source": norm,
+        "video_pose_tier": video_tier,
+        "annotation_readonly": norm == ANNOTATION_SOURCE_MASTER,
+        "annotation_save_dir": (
+            annotation_dir_display_rel(paths, norm) if norm != ANNOTATION_SOURCE_MASTER else None
+        ),
         "camera_label": label,
         "camera_slug": camera_slug,
         "annotations": [a.to_dict() for a in annotations],
         "has_video": bool(video_hit),
         "video_file": video_file,
-        "video_dir": f"localdata/video/{tier}/{camera_slug}",
+        "video_dir": f"localdata/video/{video_tier}/{camera_slug}",
     }
 
 

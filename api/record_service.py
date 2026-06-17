@@ -115,10 +115,17 @@ def persist_annotation_for_video(
     frame_width: int = 0,
     frame_height: int = 0,
     preserve_existing: bool = False,
+    annotation_source: str = "master",
 ) -> tuple[Path, str]:
+    from annotation_store import annotation_dir_for_source, normalize_annotation_source
+
     paths = resolve_app_paths()
+    norm = normalize_annotation_source(annotation_source)
+    if norm == "master":
+        raise ValueError("母本目录只读，请指定模型层 annotation_source（rtmpose-t/s/m）")
+    ann_dir = annotation_dir_for_source(paths, norm)
     save_stem = resolve_annotation_save_stem(
-        paths.annotation_dir,
+        ann_dir,
         video_stem,
         preserve_existing=preserve_existing,
     )
@@ -132,7 +139,7 @@ def persist_annotation_for_video(
     _, err = validate_annotation_payload(normalized)
     if err:
         raise ValueError(err)
-    path = save_annotation_json(save_stem, normalized, annotation_dir=paths.annotation_dir)
+    path = save_annotation_json(save_stem, normalized, annotation_dir=ann_dir)
     return path, save_stem
 
 

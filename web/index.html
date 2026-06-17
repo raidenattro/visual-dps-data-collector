@@ -165,13 +165,14 @@
 
     <section id="panel-annotate" class="panel">
       <div class="card">
-        <p class="hint annotate-hint">选择姿态模型与机位，编辑对应 annotation JSON；首帧来自该机位已采集的内置视频。</p>
+        <p class="hint annotate-hint">选择标注来源与机位，编辑货框标注；母本只读对照，修改保存至对应模型目录；首帧来自该机位已采集的内置视频。</p>
         <div class="row">
           <label>
-            <span class="label-with-tip">姿态模型
-              <button type="button" class="field-tip" data-tip="与 localdata/video/{模型}/{机位}/ 目录对应，用于选取对照首帧视频。">?</button>
+            <span class="label-with-tip">标注来源
+              <button type="button" class="field-tip" data-tip="母本：json/annotations 只读对照。模型层：编辑后保存至 json/{模型}/annotations；若该层尚无标注，加载时自动从母本复制。">?</button>
             </span>
-            <select id="annotate-pose-tier">
+            <select id="annotate-annotation-source">
+              <option value="master">母本</option>
               <option value="rtmpose-t" selected>rtmpose-t</option>
               <option value="rtmpose-s">rtmpose-s</option>
               <option value="rtmpose-m">rtmpose-m</option>
@@ -187,7 +188,7 @@
           </label>
           <label>
             <span class="label-with-tip">货位标注
-              <button type="button" class="field-tip" data-tip="同一机位可有 2 个 annotation（如 71、72），可单独编辑其中一个；保存写入 annotations/{编号}.json。">?</button>
+              <button type="button" class="field-tip" data-tip="同一机位可有 2 个 annotation（如 71、72），可单独编辑；模型层保存至 json/{模型}/annotations/{编号}.json。">?</button>
             </span>
             <select id="annotate-annotation-id" disabled>
               <option value="">— 先选机位 —</option>
@@ -236,7 +237,7 @@
         <canvas id="annotate-canvas" class="hidden"></canvas>
         <p class="annotate-stage-hint">
           <span class="hint">画布</span>
-          <button type="button" class="field-tip" data-tip="步骤：① 选择模型/机位/货位标注 → ② 生成货位并对照 → ③ 拖绿色/橙色角点或平移货位 → ④ 保存至 annotations。">?</button>
+          <button type="button" class="field-tip" data-tip="步骤：① 选择标注来源/机位/货位 → ② 生成货位并对照 → ③ 拖角点或平移货位 → ④ 选模型层后保存（母本只读）。">?</button>
         </p>
       </div>
     </section>
@@ -523,7 +524,7 @@
   <script src="app/09-playback-events.js?v=54"></script>
   <script src="app/10-render-collision.js?v=63"></script>
   <script src="app/11-playback-controls.js?v=54"></script>
-  <script src="annotate.js?v=13"></script>
+  <script src="annotate.js?v=15"></script>
   <script src="accuracy.js?v=2"></script>
 </body>
 </html>

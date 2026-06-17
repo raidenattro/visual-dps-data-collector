@@ -14,9 +14,12 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 
 from annotation_store import (
     annotation_path_for_video_stem,
+    load_annotation_for_source,
     load_annotation_json,
+    normalize_annotation_source,
     resolve_video_stem_from_record,
     validate_annotation_payload,
+    annotation_dir_display_rel,
 )
 from collect_core import validate_video_path
 from config_loader import (
@@ -62,7 +65,12 @@ from api.accuracy_service import (
     evaluate_camera_batch,
     list_accuracy_camera_options,
 )
-from api.annotate_service import build_annotate_context, first_frame_video_for_camera, normalize_pose_tier
+from api.annotate_service import (
+    build_annotate_context,
+    first_frame_video_for_camera,
+    normalize_pose_tier,
+    video_pose_tier_for_annotate,
+)
 from api.collect_service import (
     build_collect_config_snapshot,
     resolve_collect_annotation,
@@ -71,7 +79,6 @@ from api.collect_service import (
 )
 from api.constants import VIDEO_MIME
 from api.job_store import get_job, set_job
-from annotation_store import annotation_path_for_video_stem
 from api.collision_recompute_service import recompute_records_collisions
 from api.record_service import (
     annotation_frame_size,
@@ -118,9 +125,17 @@ def _parse_record_ids_param(raw: str) -> list[str]:
     return [p.strip() for p in str(raw or "").replace(";", ",").split(",") if p.strip()]
 
 
-def _annotation_save_message(saved_stem: str, requested_stem: str, *, preserved: bool) -> str:
+def _annotation_save_message(
+    saved_stem: str,
+    requested_stem: str,
+    *,
+    preserved: bool,
+    annotation_source: str = "",
+) -> str:
     if preserved and saved_stem != requested_stem:
         return f"已保留原标注，另存为 {saved_stem}.json"
+    if annotation_source and annotation_source != "master":
+        return f"已保存至 {annotation_dir_display_rel(resolve_app_paths(), annotation_source)}/{saved_stem}.json"
     return "已覆盖保存标注"
 
 
@@ -210,36 +225,39 @@ def lookup_reflection_camera(camera: str = "") -> dict[str, Any]:
 
 
 @router.get("/api/annotate/context")
-def get_annotate_context(pose_tier: str = "", camera: str = "") -> dict[str, Any]:
-    """标注页：模型层 + 机位 → reflection 标注列表与内置视频信息。"""
+def get_annotate_context(annotation_source: str = "rtmpose-t", camera: str = "") -> dict[str, Any]:
+    """标注页：标注来源 + 机位 → reflection 标注列表与内置视频信息。"""
     label = normalize_corner_label(camera) if normalize_corner_label else str(camera or "").strip()
     if not label:
         raise HTTPException(400, "请选择机位")
     try:
-        tier = normalize_pose_tier(pose_tier)
+        norm = normalize_annotation_source(annotation_source)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     reflection = load_reflection_or_http()
     paths = resolve_app_paths()
     try:
-        return build_annotate_context(paths, reflection, pose_tier=tier, camera_label=label)
+        return build_annotate_context(
+            paths, reflection, annotation_source=norm, camera_label=label
+        )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
 
 @router.get("/api/annotate/frame")
-def get_annotate_frame(pose_tier: str = "", camera: str = "") -> dict[str, Any]:
+def get_annotate_frame(annotation_source: str = "rtmpose-t", camera: str = "") -> dict[str, Any]:
     """标注页：从 localdata/video/{模型}/{机位}/ 取首个视频的首帧。"""
     label = normalize_corner_label(camera) if normalize_corner_label else str(camera or "").strip()
     if not label:
         raise HTTPException(400, "请选择机位")
     try:
-        tier = normalize_pose_tier(pose_tier)
+        norm = normalize_annotation_source(annotation_source)
+        video_tier = video_pose_tier_for_annotate(norm)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     paths = resolve_app_paths()
     try:
-        path = first_frame_video_for_camera(paths, label, pose_tier=tier)
+        path = first_frame_video_for_camera(paths, label, pose_tier=video_tier)
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc
     try:
@@ -248,7 +266,8 @@ def get_annotate_frame(pose_tier: str = "", camera: str = "") -> dict[str, Any]:
         raise HTTPException(400, str(exc)) from exc
     frame["video_file"] = path.name
     frame["camera_label"] = label
-    frame["pose_tier"] = tier
+    frame["annotation_source"] = norm
+    frame["video_pose_tier"] = video_tier
     return frame
 
 
@@ -504,13 +523,33 @@ def get_record_annotation_frame(record_id: str) -> dict[str, Any]:
 
 
 @router.get("/api/annotations/by-video/{video_stem}")
-def get_annotation_by_video(video_stem: str) -> dict[str, Any]:
+def get_annotation_by_video(
+    video_stem: str,
+    annotation_source: str = "master",
+    materialize: bool = False,
+) -> dict[str, Any]:
     paths = resolve_app_paths()
     stem = sanitize_file_stem(video_stem)
-    data = load_annotation_json(stem, annotation_dir=paths.annotation_dir)
+    try:
+        norm = normalize_annotation_source(annotation_source)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    data, ann_dir, resolved_from = load_annotation_for_source(
+        stem, paths=paths, source=norm, materialize=materialize
+    )
     if not data:
         raise HTTPException(404, "该视频尚无标注")
-    return data
+    tier_path = annotation_path_for_video_stem(stem, annotation_dir=ann_dir)
+    return {
+        **data,
+        "_meta": {
+            "annotation_source": norm,
+            "resolved_from": resolved_from,
+            "annotation_dir": annotation_dir_display_rel(paths, norm),
+            "has_tier_file": tier_path.is_file() if norm != "master" else True,
+            "readonly": norm == "master",
+        },
+    }
 
 
 @router.get("/api/annotations/by-video/{video_stem}/frame")
@@ -575,10 +614,17 @@ async def put_annotation_by_video(
     preserve_existing: bool = False,
     recompute_collisions: bool = False,
     record_ids: str = "",
+    annotation_source: str = "rtmpose-t",
 ) -> dict[str, Any]:
     if not isinstance(body, dict):
         raise HTTPException(400, "请求体须为 JSON 对象")
     requested_stem = sanitize_file_stem(video_stem)
+    try:
+        norm = normalize_annotation_source(annotation_source)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if norm == "master":
+        raise HTTPException(400, "母本目录只读，请选择模型层（rtmpose-t/s/m）后保存")
     fw, fh = annotation_frame_size(body)
     try:
         path, saved_stem = persist_annotation_for_video(
@@ -587,6 +633,7 @@ async def put_annotation_by_video(
             frame_width=fw,
             frame_height=fh,
             preserve_existing=preserve_existing,
+            annotation_source=norm,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -602,14 +649,20 @@ async def put_annotation_by_video(
         )
     except (OSError, ValueError, RuntimeError) as exc:
         raise HTTPException(500, f"碰撞重算失败: {exc}") from exc
+    paths = resolve_app_paths()
+    rel = annotation_dir_display_rel(paths, norm)
     return {
         "status": "ok",
         "video_stem": saved_stem,
         "requested_stem": requested_stem,
+        "annotation_source": norm,
         "path": str(path),
+        "annotation_dir": rel,
         "box_count": len(boxes),
         "preserved_original": saved_stem != requested_stem if preserve_existing else False,
-        "message": _annotation_save_message(saved_stem, requested_stem, preserved=preserve_existing),
+        "message": _annotation_save_message(
+            saved_stem, requested_stem, preserved=preserve_existing, annotation_source=norm
+        ),
         "recompute": recompute_result,
     }
 
