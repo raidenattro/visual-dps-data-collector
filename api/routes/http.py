@@ -23,6 +23,7 @@ from annotation_store import (
     annotation_dir_for_source,
 )
 from collect_core import validate_video_path
+from event_engine.box_identity import canonicalize_box_token_list
 from config_loader import (
     allocate_camera_storage_slug,
     build_settings,
@@ -1143,10 +1144,12 @@ def _patch_record_event_review_locked(
             raw = body.get("confirmed_box_tokens")
             if not isinstance(raw, list):
                 raise HTTPException(400, "confirmed_box_tokens 须为数组")
-            confirmed_list = [str(t).strip() for t in raw if str(t).strip()]
+            confirmed_list = canonicalize_box_token_list(
+                [str(t).strip() for t in raw if str(t).strip()]
+            )
         else:
             token = str(body.get("confirmed_box_token") or "").strip()
-            confirmed_list = [token] if token else []
+            confirmed_list = canonicalize_box_token_list([token] if token else [])
         sig = event_signature(norm["event_type"], norm["frame_idx"], norm["box_tokens"])
         if sig not in by_sig:
             raise HTTPException(400, "该事件尚未标真，请先标真或标真时一并提交货框编号")

@@ -2161,10 +2161,9 @@ function clearVideoElement() {
 }
 
 function boxCollisionToken(box) {
-  const shelf = String(box.shelf_code || "").trim();
   const id = String(box.box_id ?? box.id ?? "").trim();
   if (!id) return "";
-  return shelf ? `${shelf}:${id}` : `Box_${id}`;
+  return `Box_${id}`;
 }
 
 /** 射线法：点是否在多边形内（推理坐标系） */

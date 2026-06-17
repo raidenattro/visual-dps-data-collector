@@ -27,7 +27,11 @@ from annotation_store import (
 from api.annotate_service import normalize_pose_tier
 from api.collision_recompute_service import recompute_record_collisions
 from api.record_service import meta_path_for_record, resolve_annotation_path_for_record
-from event_engine.box_identity import token_matches_any
+from event_engine.box_identity import (
+    canonical_box_token,
+    canonicalize_box_token_list,
+    token_matches_any,
+)
 from record_tag_store import normalize_tag_name, record_ids_with_all_tags
 
 
@@ -61,18 +65,18 @@ def _allowed_record_ids_for_tags(tags: list[str]) -> set[str] | None:
 
 
 def _ground_truth_tokens(entry: dict[str, Any]) -> list[str]:
-    """人工范本货框：优先 confirmed_box_tokens，否则 box_tokens。"""
+    """人工范本货框：优先 confirmed_box_tokens，否则 box_tokens（均为 Box_{box_id}）。"""
     confirmed = extract_confirmed_box_tokens(entry)
     if confirmed:
         return confirmed
     raw = entry.get("box_tokens")
     if not isinstance(raw, list):
         return []
-    return [str(t).strip() for t in raw if str(t).strip()]
+    return canonicalize_box_token_list([str(t).strip() for t in raw if str(t).strip()])
 
 
 def _gt_token_key(tokens: list[str]) -> tuple[str, ...]:
-    return tuple(sorted({str(t).strip() for t in tokens if str(t).strip()}))
+    return tuple(canonicalize_box_token_list(tokens))
 
 
 @dataclass
@@ -128,7 +132,7 @@ def _extract_alarms(timeline: list[dict[str, Any]]) -> list[tuple[int, str]]:
     for row in timeline:
         fi = int(row.get("frame_idx") or 0)
         for raw in row.get("alarm_collisions") or []:
-            token = str(raw).strip()
+            token = canonical_box_token(str(raw).strip())
             if token:
                 out.append((fi, token))
     return out

@@ -590,14 +590,20 @@ def load_timeline(locator: RecordLocator, *, include_events: bool = False) -> li
 
 def load_events(locator: RecordLocator) -> list[dict[str, Any]]:
     """碰撞/告警事件列表（每帧每类型一条，供回放跳转）。"""
+    from event_engine.box_identity import canonicalize_box_token_list
+
     rows = load_timeline(locator, include_events=True)
     events: list[dict[str, Any]] = []
     for row in sorted(rows, key=lambda r: int(r.get("frame_idx") or 0)):
         ts = float(row.get("timestamp_sec") or 0.0)
         fi = int(row.get("frame_idx") or 0)
         sfi = int(row.get("source_frame_idx") or fi)
-        alarms = [str(t) for t in (row.get("alarm_collisions") or []) if str(t).strip()]
-        collisions = [str(t) for t in (row.get("collisions") or []) if str(t).strip()]
+        alarms = canonicalize_box_token_list(
+            [str(t) for t in (row.get("alarm_collisions") or []) if str(t).strip()]
+        )
+        collisions = canonicalize_box_token_list(
+            [str(t) for t in (row.get("collisions") or []) if str(t).strip()]
+        )
         if alarms:
             events.append(
                 {
@@ -608,7 +614,8 @@ def load_events(locator: RecordLocator) -> list[dict[str, Any]]:
                     "box_tokens": alarms,
                 }
             )
-        coll_only = [t for t in collisions if t not in set(alarms)]
+        alarm_set = set(alarms)
+        coll_only = [t for t in collisions if t not in alarm_set]
         if coll_only:
             events.append(
                 {
@@ -623,8 +630,12 @@ def load_events(locator: RecordLocator) -> list[dict[str, Any]]:
 
 
 def event_signature(event_type: str, frame_idx: int, box_tokens: list[Any] | None) -> str:
-    """事件唯一键（与前端 eventRowKey 一致）。"""
-    tokens = sorted(str(t).strip() for t in (box_tokens or []) if str(t).strip())
+    """事件唯一键（与前端 eventRowKey 一致）；box_tokens 归一为 Box_{box_id}。"""
+    from event_engine.box_identity import canonicalize_box_token_list
+
+    tokens = canonicalize_box_token_list(
+        [str(t).strip() for t in (box_tokens or []) if str(t).strip()]
+    )
     return f"{str(event_type or '').strip()}:{int(frame_idx)}:{','.join(tokens)}"
 
 
@@ -683,14 +694,18 @@ def events_to_verified_entries(events: list[dict[str, Any]]) -> list[dict[str, A
 
 
 def extract_confirmed_box_tokens(entry: dict[str, Any]) -> list[str]:
-    """从复核条目读取已确认货框（兼容 confirmed_box_token 单值）。"""
+    """从复核条目读取已确认货框（兼容 confirmed_box_token 单值），归一为 Box_{box_id}。"""
+    from event_engine.box_identity import canonicalize_box_token_list
+
     raw_list = entry.get("confirmed_box_tokens")
     if isinstance(raw_list, list):
-        tokens = [str(t).strip() for t in raw_list if str(t).strip()]
+        tokens = canonicalize_box_token_list(
+            [str(t).strip() for t in raw_list if str(t).strip()]
+        )
         if tokens:
             return tokens
     single = str(entry.get("confirmed_box_token") or "").strip()
-    return [single] if single else []
+    return canonicalize_box_token_list([single]) if single else []
 
 
 def review_missing_box_annotation(review: dict[str, Any]) -> bool:
@@ -740,6 +755,8 @@ def patch_event_review_persisted_status(locator: RecordLocator, status: str) -> 
 def normalize_review_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
     if not isinstance(entry, dict):
         return None
+    from event_engine.box_identity import canonicalize_box_token_list
+
     event_type = str(entry.get("event_type") or "").strip()
     if event_type not in ("alarm", "collision"):
         return None
@@ -749,7 +766,9 @@ def normalize_review_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
         return None
     if frame_idx < 0:
         return None
-    tokens = [str(t).strip() for t in (entry.get("box_tokens") or []) if str(t).strip()]
+    tokens = canonicalize_box_token_list(
+        [str(t).strip() for t in (entry.get("box_tokens") or []) if str(t).strip()]
+    )
     if not tokens:
         return None
     try:

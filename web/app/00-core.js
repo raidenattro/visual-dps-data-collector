@@ -51,3 +51,32 @@ let rafId = null;
 let playbackId = null;
 let playbackVideoObjectUrl = null;
 
+/** 从碰撞 token 提取货位 box_id（Box_3098、MAP_19:3098 → 3098） */
+function parseBoxIdFromToken(token) {
+  const t = String(token || "").trim();
+  if (!t) return "";
+  if (t.startsWith("Box_")) return t.slice(4).trim();
+  if (t.includes(":")) return t.split(":").pop().trim();
+  return t;
+}
+
+/** 规范碰撞 token：统一为 Box_{box_id} */
+function canonicalBoxToken(token) {
+  const id = parseBoxIdFromToken(token);
+  return id ? `Box_${id}` : "";
+}
+
+/** 去重排序后的规范 token 列表 */
+function canonicalizeBoxTokenList(tokens) {
+  const seen = new Set();
+  const out = [];
+  (tokens || []).forEach((raw) => {
+    const canon = canonicalBoxToken(String(raw).trim());
+    if (!canon || seen.has(canon)) return;
+    seen.add(canon);
+    out.push(canon);
+  });
+  out.sort();
+  return out;
+}
+

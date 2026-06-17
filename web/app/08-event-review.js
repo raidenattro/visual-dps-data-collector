@@ -25,10 +25,7 @@ async function prepareEventReviewRecordSwitch() {
 
 /** 与后端 event_signature 一致 */
 function eventRowKey(ev) {
-  const tokens = [...(ev.box_tokens || [])]
-    .map((t) => String(t).trim())
-    .filter((t) => t.length > 0)
-    .sort();
+  const tokens = canonicalizeBoxTokenList(ev?.box_tokens);
   const frameIdx = parseInt(ev.frame_idx, 10) || 0;
   const eventType = String(ev.event_type || "").trim();
   return `${eventType}:${frameIdx}:${tokens.join(",")}`;
@@ -52,21 +49,13 @@ function countVerifiedFrameConfirmedBoxes(frameIdx) {
 }
 
 function isAnnotationBoxToken(token) {
-  const hit = String(token || "").trim();
+  const hit = canonicalBoxToken(token);
   if (!hit || !annotationBoxes.length) return false;
   return annotationBoxes.some((box) => boxCollisionToken(box) === hit);
 }
 
 function normalizeBoxTokenList(tokens) {
-  const seen = new Set();
-  const out = [];
-  (tokens || []).forEach((t) => {
-    const s = String(t).trim();
-    if (!s || seen.has(s)) return;
-    seen.add(s);
-    out.push(s);
-  });
-  return out;
+  return canonicalizeBoxTokenList(tokens);
 }
 
 function eventDisplayFrameIdx(ev) {
@@ -259,8 +248,8 @@ function buildEventsFromFrames(frames) {
     const ts = Number(fr.timestamp_sec) || 0;
     const fi = Number(fr.frame_idx) || 0;
     const sfi = Number(fr.source_frame_idx) || fi;
-    const alarms = [...(fr.alarm_collisions || [])].map(String).filter(Boolean);
-    const collisions = [...(fr.collisions || [])].map(String).filter(Boolean);
+    const alarms = canonicalizeBoxTokenList(fr.alarm_collisions || []);
+    const collisions = canonicalizeBoxTokenList(fr.collisions || []);
     if (alarms.length) {
       events.push({
         event_type: "alarm",
@@ -270,7 +259,8 @@ function buildEventsFromFrames(frames) {
         box_tokens: alarms,
       });
     }
-    const collOnly = collisions.filter((t) => !alarms.includes(t));
+    const alarmSet = new Set(alarms);
+    const collOnly = collisions.filter((t) => !alarmSet.has(t));
     if (collOnly.length) {
       events.push({
         event_type: "collision",
@@ -1138,7 +1128,9 @@ function updateReviewDock() {
 }
 
 function finishUpdateReviewDock() {
+  if (typeof invalidatePlaybackAccuracyOverlay === "function") invalidatePlaybackAccuracyOverlay();
   if (typeof updateStageBoxPickMode === "function") updateStageBoxPickMode();
+  if (typeof redrawCurrentFrame === "function") redrawCurrentFrame();
   scheduleEventReviewListScrollHeight();
 }
 

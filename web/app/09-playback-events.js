@@ -49,8 +49,8 @@ async function buildPlaybackEventsFromRealtime(recordId) {
     const ts = Number(fr.timestamp_sec) || 0;
     const fi = Number(fr.frame_idx) || 0;
     const sfi = Number(fr.source_frame_idx) || fi;
-    const alarms = [...(computed.alarm_collisions || [])].map(String).filter(Boolean);
-    const collisions = [...(computed.collisions || [])].map(String).filter(Boolean);
+    const alarms = canonicalizeBoxTokenList(computed.alarm_collisions || []);
+    const collisions = canonicalizeBoxTokenList(computed.collisions || []);
     if (alarms.length) {
       events.push({
         event_type: "alarm",
@@ -60,7 +60,8 @@ async function buildPlaybackEventsFromRealtime(recordId) {
         box_tokens: alarms,
       });
     }
-    const collOnly = collisions.filter((t) => !alarms.includes(t));
+    const alarmSet = new Set(alarms);
+    const collOnly = collisions.filter((t) => !alarmSet.has(t));
     if (collOnly.length) {
       events.push({
         event_type: "collision",
@@ -132,6 +133,7 @@ async function loadPlaybackEvents(recordId = null) {
     if (isEventVerified(ev)) applyAutoConfirmedBoxOnVerify(ev);
   });
   renderEventReviewList();
+  invalidatePlaybackAccuracyOverlay();
 }
 
 function getCurrentPlaybackTimeSec() {
@@ -306,6 +308,7 @@ function clearPlaybackEvents() {
   if (eventMarkersEl) eventMarkersEl.innerHTML = "";
   if (eventJumpList) eventJumpList.innerHTML = "";
   if (eventsPanel) eventsPanel.classList.add("hidden");
+  if (typeof invalidatePlaybackAccuracyOverlay === "function") invalidatePlaybackAccuracyOverlay();
   if (eventCountLabel) eventCountLabel.textContent = "—";
   setEventReviewSaveStatus("");
 }

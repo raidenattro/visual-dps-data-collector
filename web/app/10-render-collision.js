@@ -11,10 +11,9 @@ function clearVideoElement() {
 }
 
 function boxCollisionToken(box) {
-  const shelf = String(box.shelf_code || "").trim();
   const id = String(box.box_id ?? box.id ?? "").trim();
   if (!id) return "";
-  return shelf ? `${shelf}:${id}` : `Box_${id}`;
+  return `Box_${id}`;
 }
 
 /** 同一货位的多种 token 写法（Box_id 与 shelf:id）用于复核高亮查找 */
@@ -56,14 +55,6 @@ function tokenInTokenMap(token, map) {
     if (map.get(key)) return true;
   }
   return false;
-}
-
-function parseBoxIdFromToken(token) {
-  const t = String(token || "").trim();
-  if (!t) return "";
-  if (t.startsWith("Box_")) return t.slice(4).trim();
-  if (t.includes(":")) return t.split(":").pop().trim();
-  return t;
 }
 
 function boxIdsFromTokenList(tokens) {
@@ -114,12 +105,13 @@ function buildVerifiedGroundTruthSegments() {
     .map((ev) => {
       const confirmed =
         typeof getEventConfirmedBoxes === "function" ? getEventConfirmedBoxes(ev) : [];
-      const tokens =
+      const tokens = canonicalizeBoxTokenList(
         confirmed.length > 0
           ? confirmed
           : typeof normalizeBoxTokenList === "function"
             ? normalizeBoxTokenList(ev?.box_tokens)
-            : [];
+            : ev?.box_tokens
+      );
       return {
         frame: parseInt(ev.frame_idx, 10) || 0,
         tokens: tokens.filter(Boolean),
@@ -128,12 +120,7 @@ function buildVerifiedGroundTruthSegments() {
     .filter((e) => e.tokens.length);
   entries.sort((a, b) => a.frame - b.frame);
 
-  const tokenKey = (tokens) =>
-    [...tokens]
-      .map((t) => String(t).trim())
-      .filter(Boolean)
-      .sort()
-      .join(",");
+  const tokenKey = (tokens) => canonicalizeBoxTokenList(tokens).join(",");
 
   const segments = [];
   let current = null;
@@ -155,6 +142,117 @@ function buildVerifiedGroundTruthSegments() {
   }
   if (current) segments.push(current);
   return segments;
+}
+
+function collisionTokensEquivalent(a, b) {
+  const x = String(a || "").trim();
+  const y = String(b || "").trim();
+  if (!x || !y) return false;
+  if (x === y) return true;
+  const xi = parseBoxIdFromToken(x);
+  const yi = parseBoxIdFromToken(y);
+  return !!(xi && yi && xi === yi);
+}
+
+function tokenMatchesAnyList(token, candidates) {
+  return (candidates || []).some((c) => collisionTokensEquivalent(token, c));
+}
+
+function tokenInTokenSet(token, set) {
+  if (!token || !set?.size) return false;
+  for (const key of boxTokenLookupKeys(token)) {
+    if (set.has(key)) return true;
+  }
+  return false;
+}
+
+function addTokenKeysToSet(token, set) {
+  for (const key of boxTokenLookupKeys(token)) {
+    set.add(key);
+  }
+}
+
+let playbackAccuracyOverlayCache = null;
+
+function invalidatePlaybackAccuracyOverlay() {
+  playbackAccuracyOverlayCache = null;
+}
+
+function collectPlaybackAlarmIndex() {
+  const allAlarms = [];
+  (playbackEvents || []).forEach((ev) => {
+    if (String(ev.event_type || "").trim() !== "alarm") return;
+    const fi = parseInt(ev.frame_idx, 10) || 0;
+    const tokens =
+      typeof normalizeBoxTokenList === "function"
+        ? normalizeBoxTokenList(ev.box_tokens)
+        : (ev.box_tokens || []).map((t) => String(t).trim()).filter(Boolean);
+    tokens.forEach((token) => allAlarms.push([fi, token]));
+  });
+  return allAlarms;
+}
+
+function segmentHasMatchingAlarm(seg, allAlarms) {
+  return allAlarms.some(
+    ([frame, token]) =>
+      frame >= seg.frame_start && frame <= seg.frame_end && tokenMatchesAnyList(token, seg.tokens)
+  );
+}
+
+/** 与准确率 evaluate_segments 一致：标真范本段 + 全记录告警索引 */
+function buildPlaybackAccuracyOverlay() {
+  if (!playbackEvents?.length || !annotationBoxes.length) return null;
+  if (!eventsPanel || eventsPanel.classList.contains("hidden")) return null;
+
+  const segments = buildVerifiedGroundTruthSegments();
+  if (!segments.length) return null;
+
+  const allAlarms = collectPlaybackAlarmIndex();
+  return {
+    segments: segments.map((seg) => ({
+      ...seg,
+      detected: segmentHasMatchingAlarm(seg, allAlarms),
+    })),
+    allAlarms,
+  };
+}
+
+function getPlaybackAccuracyOverlay() {
+  if (!playbackAccuracyOverlayCache) {
+    playbackAccuracyOverlayCache = buildPlaybackAccuracyOverlay();
+  }
+  return playbackAccuracyOverlayCache;
+}
+
+/** 当前帧漏报（黑描边）/ 误报（白描边）货框 token 集合 */
+function getAccuracyOutlineForFrame(frameIdx, alarmSet) {
+  const empty = { missTokens: new Set(), falseAlarmTokens: new Set() };
+  const overlay = getPlaybackAccuracyOverlay();
+  if (!overlay) return empty;
+
+  const fi = Number(frameIdx) || 0;
+  if (fi <= 0) return empty;
+
+  const missTokens = new Set();
+  overlay.segments.forEach((seg) => {
+    if (seg.detected || fi < seg.frame_start || fi > seg.frame_end) return;
+    seg.tokens.forEach((token) => addTokenKeysToSet(token, missTokens));
+  });
+
+  const falseAlarmTokens = new Set();
+  if (alarmSet?.size) {
+    alarmSet.forEach((token) => {
+      const covered = overlay.segments.some(
+        (seg) =>
+          fi >= seg.frame_start &&
+          fi <= seg.frame_end &&
+          tokenMatchesAnyList(token, seg.tokens)
+      );
+      if (!covered) addTokenKeysToSet(token, falseAlarmTokens);
+    });
+  }
+
+  return { missTokens, falseAlarmTokens };
 }
 
 /** 射线法：点是否在多边形内（推理坐标系） */
@@ -296,6 +394,7 @@ let playbackCollisionTracker = null;
 
 function resetPlaybackCollisionTracker() {
   playbackCollisionTracker = null;
+  invalidatePlaybackAccuracyOverlay();
 }
 
 function getPlaybackCollisionTracker() {
@@ -572,7 +671,8 @@ function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null, review
     lastRenderedFrameIdx >= 1
       ? lastRenderedFrameIdx
       : Number(frame?.frame_idx) || Number(frame?.source_frame_idx) || 0;
-  reviewCtx = reviewCtx ?? getReviewBoxHighlightContext();
+  reviewCtx = reviewCtx ?? getReviewBoxHighlightContext(frameIdx);
+  const { missTokens, falseAlarmTokens } = getAccuracyOutlineForFrame(frameIdx, alarmSet);
 
   annotationBoxes.forEach((box) => {
     const poly = box.video_polygon;
@@ -589,6 +689,8 @@ function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null, review
     const isAlarm = tokenInCollisionSet(token, alarmSet);
     const isHit = tokenInCollisionSet(token, collisionSet);
     const isManuallyConfirmed = tokenInTokenMap(token, reviewCtx?.confirmedByToken);
+    const isMiss = tokenInTokenSet(token, missTokens);
+    const isFalseAlarm = tokenInTokenSet(token, falseAlarmTokens);
 
     ctx.beginPath();
     framePts.forEach(([x, y], i) => {
@@ -604,13 +706,35 @@ function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null, review
     }
 
     ctx.setLineDash([]);
-    ctx.strokeStyle = isAlarm
-      ? "rgba(255, 71, 87, 0.95)"
-      : isHit
-        ? "rgba(255, 209, 102, 0.95)"
-        : "rgba(0, 255, 0, 0.35)";
-    ctx.lineWidth = isAlarm || isHit ? 2.5 : 1.5;
-    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.shadowColor = "transparent";
+    ctx.lineWidth = 3;
+
+    if (isFalseAlarm) {
+      // 白描边 + 深色外缘，浅色画面上也可辨认
+      ctx.strokeStyle = "rgba(0, 0, 0, 0.9)";
+      ctx.lineWidth = 4.5;
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.98)";
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+    } else if (isMiss) {
+      ctx.strokeStyle = "rgba(0, 0, 0, 0.95)";
+      ctx.lineWidth = 3;
+      ctx.stroke();
+    } else if (isAlarm) {
+      ctx.strokeStyle = "rgba(255, 71, 87, 0.95)";
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+    } else if (isHit) {
+      ctx.strokeStyle = "rgba(255, 209, 102, 0.95)";
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+    } else {
+      ctx.strokeStyle = "rgba(0, 255, 0, 0.35)";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
   });
 }
 

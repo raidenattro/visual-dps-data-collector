@@ -1,18 +1,35 @@
-"""货位唯一标识：多货架场景下 shelf_code + box_id（与 visual-dps 一致）。"""
+"""货位唯一标识：统一为 Box_{box_id}（shelf:id 等旧格式在读取时归一化）。"""
 
 from __future__ import annotations
 
 
 def box_collision_token(box: dict) -> str:
+    """碰撞/告警落盘 token：仅使用 box_id，格式 Box_{box_id}。"""
     if not isinstance(box, dict):
         return ""
-    shelf = str(box.get("shelf_code", "") or "").strip()
     box_id = str(box.get("box_id", "") or box.get("id", "") or "").strip()
     if not box_id:
         return ""
-    if shelf:
-        return f"{shelf}:{box_id}"
     return f"Box_{box_id}"
+
+
+def canonical_box_token(token: str) -> str:
+    """任意碰撞 token 归一为 Box_{box_id}；无法解析则返回空串。"""
+    box_id = box_id_from_token(token)
+    return f"Box_{box_id}" if box_id else ""
+
+
+def canonicalize_box_token_list(tokens: list[str] | None) -> list[str]:
+    """去重、排序后的规范 token 列表。"""
+    seen: set[str] = set()
+    out: list[str] = []
+    for raw in tokens or []:
+        canon = canonical_box_token(str(raw).strip())
+        if canon and canon not in seen:
+            seen.add(canon)
+            out.append(canon)
+    out.sort()
+    return out
 
 
 def parse_collision_token(token: str) -> tuple[str, str]:

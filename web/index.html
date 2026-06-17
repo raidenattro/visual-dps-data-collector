@@ -536,6 +536,14 @@
                       <span class="box-legend-swatch box-legend-swatch--alarm" aria-hidden="true"></span>
                       <span>红色描边 · 告警</span>
                     </li>
+                    <li>
+                      <span class="box-legend-swatch box-legend-swatch--miss" aria-hidden="true"></span>
+                      <span>黑色描边 · 漏报（标真范本段内无匹配告警）</span>
+                    </li>
+                    <li>
+                      <span class="box-legend-swatch box-legend-swatch--false-alarm" aria-hidden="true"></span>
+                      <span>白色描边 · 误报（告警不在任标真范本段内）</span>
+                    </li>
                   </ul>
                 </details>
                 <button type="button" id="event-reset-box-btn" class="btn-review-reset-box">
@@ -583,7 +591,7 @@
   <script src="annotateGeometry.js"></script>
   <script src="annotateVisualMode.js?v=2"></script>
   <!-- 回放/采集主逻辑（由 app.monolith.js 拆分，按依赖顺序加载） -->
-  <script src="app/00-core.js?v=56"></script>
+  <script src="app/00-core.js?v=67"></script>
   <script src="app/01-layout-frames.js?v=48"></script>
   <script src="app/02-playback-selection.js?v=34"></script>
   <script src="app/03-tabs.js?v=36"></script>
@@ -591,9 +599,9 @@
   <script src="app/05-collect.js?v=42"></script>
   <script src="app/06-records.js?v=47"></script>
   <script src="app/07-playback-stage.js?v=48"></script>
-  <script src="app/08-event-review.js?v=65"></script>
-  <script src="app/09-playback-events.js?v=55"></script>
-  <script src="app/10-render-collision.js?v=65"></script>
+  <script src="app/08-event-review.js?v=67"></script>
+  <script src="app/09-playback-events.js?v=67"></script>
+  <script src="app/10-render-collision.js?v=67"></script>
   <script src="app/11-playback-controls.js?v=55"></script>
   <script src="annotate.js?v=17"></script>
   <script src="accuracy.js?v=6"></script>
