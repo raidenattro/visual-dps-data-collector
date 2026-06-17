@@ -17,6 +17,10 @@ function escHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
+function escAttr(s) {
+  return escHtml(s).replace(/'/g, "&#39;");
+}
+
 function setAccuracyStatus(html, isError = false) {
   const el = acc$("#accuracy-status");
   if (!el) return;
@@ -36,6 +40,10 @@ async function readApiError(res) {
     return res.statusText;
   }
 }
+
+/** 最近一次评估结果（供筛选与跳转回放） */
+let lastAccuracyClips = [];
+let lastAccuracyMeta = { pose_tier: "", camera_slug: "", camera_label: "" };
 
 function getAccuracyEvalMode() {
   return acc$("#accuracy-eval-mode")?.value || "evaluate_only";
@@ -142,44 +150,148 @@ function renderAccuracySummary(result) {
   `;
 }
 
-function renderAccuracyClips(clips) {
+function accuracyClipStatusMeta(st) {
+  const status = String(st || "").trim().toLowerCase();
+  if (status === "ok") {
+    return { label: "完成", className: "accuracy-st-ok", filter: "ok" };
+  }
+  if (status === "skipped") {
+    return { label: "跳过", className: "accuracy-st-skip", filter: "skipped" };
+  }
+  if (status === "excluded") {
+    return { label: "排除", className: "accuracy-st-skip", filter: "skipped" };
+  }
+  if (status === "error") {
+    return { label: "失败", className: "accuracy-st-err", filter: "error" };
+  }
+  return { label: status || "—", className: "accuracy-st-err", filter: "error" };
+}
+
+function accuracyClipMatchesFilter(clip, filter) {
+  const f = String(filter || "all").trim().toLowerCase();
+  if (f === "all" || !f) return true;
+  return accuracyClipStatusMeta(clip.status).filter === f;
+}
+
+function renderAccuracyRecordCell(recordId) {
+  const rid = String(recordId || "").trim();
+  if (!rid) return `<span class="hint">—</span>`;
+  const shortId = rid.split("/").pop() || rid;
+  return `<button type="button" class="link-btn accuracy-record-link" data-record-id="${escAttr(rid)}" title="${escAttr(rid)}"><code>${escHtml(shortId)}</code></button>`;
+}
+
+function renderAccuracyClipActions(c) {
+  const rid = String(c.record_id || "").trim();
+  if (!rid) return `<span class="hint">无记录</span>`;
+  return `<span class="accuracy-clip-actions">
+    <button type="button" class="link-btn accuracy-goto-playback" data-record-id="${escAttr(rid)}" data-autoplay="0">查看</button>
+    <button type="button" class="link-btn accuracy-goto-playback accuracy-goto-playback--play" data-record-id="${escAttr(rid)}" data-autoplay="1">回放</button>
+  </span>`;
+}
+
+function renderAccuracyClipRow(c) {
+  const rk = c.review_key || "";
+  const shortKey = rk.includes("/") ? rk.split("/").slice(1).join("/") : rk;
+  const meta = accuracyClipStatusMeta(c.status);
+  const detail = c.error ? escHtml(c.error) : "—";
+
+  if (c.status !== "ok") {
+    return `<tr class="accuracy-clip-row accuracy-clip-row--${escAttr(meta.filter)}" data-status="${escAttr(meta.filter)}">
+      <td title="${escAttr(rk)}">${escHtml(shortKey.slice(0, 48))}${shortKey.length > 48 ? "…" : ""}</td>
+      <td>${renderAccuracyRecordCell(c.record_id)}</td>
+      <td colspan="5" class="hint accuracy-clip-detail">${detail}</td>
+      <td><span class="${meta.className}">${meta.label}</span></td>
+      <td>${renderAccuracyClipActions(c)}</td>
+    </tr>`;
+  }
+
+  return `<tr class="accuracy-clip-row accuracy-clip-row--ok" data-status="ok">
+    <td title="${escAttr(rk)}">${escHtml(shortKey.slice(0, 40))}${shortKey.length > 40 ? "…" : ""}</td>
+    <td>${renderAccuracyRecordCell(c.record_id)}</td>
+    <td>${c.gt_segments ?? 0}</td>
+    <td class="accuracy-ok">${c.detected ?? 0}</td>
+    <td class="accuracy-warn">${c.missed ?? 0}</td>
+    <td class="accuracy-bad">${c.false_alarms ?? 0}</td>
+    <td>${pct(c.recall)}</td>
+    <td><span class="${meta.className}">${meta.label}</span></td>
+    <td>${renderAccuracyClipActions(c)}</td>
+  </tr>`;
+}
+
+function updateAccuracyClipsFilterCount(shown, total) {
+  const el = acc$("#accuracy-clips-filter-count");
+  if (!el) return;
+  if (!total) {
+    el.textContent = "";
+    return;
+  }
+  el.textContent = shown === total ? `共 ${total} 条` : `显示 ${shown} / ${total} 条`;
+}
+
+function renderAccuracyClips(clips, meta = lastAccuracyMeta) {
   const wrap = acc$("#accuracy-clips-wrap");
   const body = acc$("#accuracy-clips-body");
   if (!wrap || !body) return;
+
   const list = Array.isArray(clips) ? clips : [];
+  lastAccuracyClips = list;
+  if (meta) {
+    lastAccuracyMeta = {
+      pose_tier: meta.pose_tier || lastAccuracyMeta.pose_tier,
+      camera_slug: meta.camera_slug || lastAccuracyMeta.camera_slug,
+      camera_label: meta.camera_label || lastAccuracyMeta.camera_label,
+    };
+  }
+
   if (!list.length) {
     wrap.classList.add("hidden");
     return;
   }
+
+  const filter = acc$("#accuracy-clip-status-filter")?.value || "all";
+  const filtered = list.filter((c) => accuracyClipMatchesFilter(c, filter));
+
   wrap.classList.remove("hidden");
-  body.innerHTML = list
-    .map((c) => {
-      const rk = c.review_key || "";
-      const shortKey = rk.includes("/") ? rk.split("/").slice(1).join("/") : rk;
-      const st = c.status || "";
-      const stLabel =
-        st === "ok" ? "完成" : st === "skipped" ? "跳过" : st === "error" ? "失败" : st;
-      const stClass =
-        st === "ok" ? "accuracy-st-ok" : st === "skipped" ? "accuracy-st-skip" : "accuracy-st-err";
-      if (st !== "ok") {
-        return `<tr>
-          <td title="${escHtml(rk)}">${escHtml(shortKey.slice(0, 48))}${shortKey.length > 48 ? "…" : ""}</td>
-          <td colspan="6" class="hint">${escHtml(c.error || "—")}</td>
-          <td><span class="${stClass}">${stLabel}</span></td>
-        </tr>`;
-      }
-      return `<tr>
-        <td title="${escHtml(rk)}">${escHtml(shortKey.slice(0, 40))}${shortKey.length > 40 ? "…" : ""}</td>
-        <td title="${escHtml(c.record_id || "")}"><code>${escHtml((c.record_id || "").split("/").pop() || "—")}</code></td>
-        <td>${c.gt_segments ?? 0}</td>
-        <td class="accuracy-ok">${c.detected ?? 0}</td>
-        <td class="accuracy-warn">${c.missed ?? 0}</td>
-        <td class="accuracy-bad">${c.false_alarms ?? 0}</td>
-        <td>${pct(c.recall)}</td>
-        <td><span class="${stClass}">${stLabel}</span></td>
-      </tr>`;
-    })
-    .join("");
+  updateAccuracyClipsFilterCount(filtered.length, list.length);
+
+  if (!filtered.length) {
+    body.innerHTML = `<tr><td colspan="9" class="hint accuracy-clips-empty-filter">当前筛选无匹配分片</td></tr>`;
+    return;
+  }
+
+  body.innerHTML = filtered.map(renderAccuracyClipRow).join("");
+}
+
+async function gotoPlaybackFromAccuracy(recordId, autoPlay = false) {
+  const rid = String(recordId || "").trim();
+  if (!rid) return;
+  if (typeof window.navigateToPlaybackRecord !== "function") {
+    setAccuracyStatus("❌ 回放模块未加载，请刷新页面后重试", true);
+    return;
+  }
+  setAccuracyStatus(autoPlay ? "正在跳转并加载回放…" : "正在跳转到回放列表…");
+  try {
+    const found = await window.navigateToPlaybackRecord({
+      recordId: rid,
+      poseTier: lastAccuracyMeta.pose_tier,
+      cameraSlug: lastAccuracyMeta.camera_slug,
+      autoPlay,
+    });
+    if (!found) {
+      setAccuracyStatus(
+        `⚠️ 已在回放页定位模型层，但列表中未找到记录 <code>${escHtml(rid)}</code>（可能尚未加载完，可点「加载更多」）`,
+        true
+      );
+      return;
+    }
+    setAccuracyStatus(
+      autoPlay
+        ? `✅ 已打开回放：<code>${escHtml(rid)}</code>`
+        : `✅ 已在回放页定位：<code>${escHtml(rid)}</code>（模型 ${escHtml(lastAccuracyMeta.pose_tier || "—")} · 机位 ${escHtml(lastAccuracyMeta.camera_slug || "—")}）`
+    );
+  } catch (err) {
+    setAccuracyStatus(`❌ 跳转失败：${escHtml(err.message)}`, true);
+  }
 }
 
 function syncAccuracyCollisionUi() {
@@ -214,6 +326,7 @@ async function runAccuracyJob() {
   setAccuracyStatus(statusMsg);
   acc$("#accuracy-summary")?.classList.add("hidden");
   acc$("#accuracy-clips-wrap")?.classList.add("hidden");
+  lastAccuracyClips = [];
 
   try {
     const res = await fetch(endpoint, {
@@ -241,8 +354,17 @@ async function runAccuracyJob() {
       return;
     }
 
+    lastAccuracyMeta = {
+      pose_tier: result.pose_tier || body.pose_tier,
+      camera_slug: result.camera_slug || "",
+      camera_label: result.camera_label || body.camera,
+    };
+
+    const filterSel = acc$("#accuracy-clip-status-filter");
+    if (filterSel) filterSel.value = "all";
+
     renderAccuracySummary(result);
-    renderAccuracyClips(result.clips);
+    renderAccuracyClips(result.clips, lastAccuracyMeta);
     const s = result.summary || {};
     const rc = result.recompute;
     const recomputeHint = rc
@@ -280,6 +402,16 @@ function initAccuracyPanel() {
   });
   acc$("#accuracy-camera")?.addEventListener("change", () => {
     void refreshAccuracyContext();
+  });
+  acc$("#accuracy-clip-status-filter")?.addEventListener("change", () => {
+    renderAccuracyClips(lastAccuracyClips);
+  });
+  acc$("#accuracy-clips-body")?.addEventListener("click", (e) => {
+    const btn = e.target.closest(".accuracy-goto-playback, .accuracy-record-link");
+    if (!btn?.dataset?.recordId) return;
+    e.preventDefault();
+    const autoPlay = btn.dataset.autoplay === "1";
+    void gotoPlaybackFromAccuracy(btn.dataset.recordId, autoPlay);
   });
   acc$("#accuracy-run")?.addEventListener("click", () => {
     void runAccuracyJob();

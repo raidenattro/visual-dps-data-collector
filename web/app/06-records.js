@@ -807,6 +807,84 @@ async function loadRecords({ quiet = false, force = false } = {}) {
   }
 }
 
+/** 分页加载直至目标记录出现在当前模型层列表中 */
+async function ensurePlaybackRecordInList(recordId, tier = playbackPoseTier) {
+  const rid = String(recordId || "").trim();
+  const key = String(tier || playbackPoseTier || "rtmpose-t").trim();
+  if (!rid) return false;
+
+  const hasRecord = () => (playbackRecordsByTier.get(key) || []).some((s) => s.record_id === rid);
+  if (hasRecord()) return true;
+
+  const savedTier = playbackPoseTier;
+  playbackPoseTier = key;
+  try {
+    while (getTierLoadState(key).hasMore) {
+      await loadMoreRecords();
+      if (hasRecord()) return true;
+    }
+    return hasRecord();
+  } finally {
+    playbackPoseTier = savedTier;
+  }
+}
+
+/**
+ * 从准确率等模块跳转到回放：切换模型层、下钻机位并高亮记录。
+ * autoPlay=true 时自动加载并回放。
+ */
+async function navigateToPlaybackRecord({
+  recordId = "",
+  poseTier = "",
+  cameraSlug = "",
+  autoPlay = false,
+} = {}) {
+  const rid = String(recordId || "").trim();
+  if (!rid) return false;
+
+  const tier = String(poseTier || poseTierFromRecordId(rid) || "rtmpose-t").trim();
+  const slug = String(cameraSlug || cameraSlugFromRecordId(rid) || "").trim();
+
+  tabs.forEach((b) => b.classList.toggle("active", b.dataset.tab === "playback"));
+  Object.values(panels).forEach((p) => p.classList.remove("active"));
+  panels.playback.classList.add("active");
+
+  playbackPoseTier = tier;
+  const tierSel = $("#playback-pose-tier");
+  if (tierSel) tierSel.value = tier;
+
+  playbackSelectedCameraSlug = slug || null;
+  playbackCameraListPinned = false;
+
+  await loadRecords({ quiet: Boolean(playbackRecordsByTier.get(tier)?.length) });
+  const found = await ensurePlaybackRecordInList(rid, tier);
+
+  playbackPoseTier = tier;
+  if (tierSel) tierSel.value = tier;
+  playbackRecordsCache = playbackRecordsByTier.get(tier) || [];
+
+  if (slug) playbackSelectedCameraSlug = slug;
+  else focusPlaybackCameraForRecord(rid);
+
+  renderPlaybackRecordsList(playbackRecordsCache);
+  highlightPlaybackRecordInList(rid);
+
+  const li = document.querySelector(
+    `#session-list .record-item[data-record-id="${CSS.escape(rid)}"]`
+  );
+  li?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+
+  if (typeof restorePlaybackPanelUi === "function") restorePlaybackPanelUi();
+
+  if (autoPlay && found && typeof startPlaybackFromSelectedRecord === "function") {
+    await startPlaybackFromSelectedRecord();
+  }
+
+  return found;
+}
+
+window.navigateToPlaybackRecord = navigateToPlaybackRecord;
+
 function initPlaybackRecordFilter() {
   const input = $("#playback-record-filter");
   const tagInput = $("#playback-tag-filter");

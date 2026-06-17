@@ -2038,6 +2038,84 @@ button.danger-btn {
   font-size: 1.05rem;
 }
 
+.accuracy-clips-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.accuracy-clips-header .accuracy-clips-heading {
+  margin: 0;
+}
+
+.accuracy-clips-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+}
+
+.accuracy-clips-filter-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.88rem;
+  color: #8b9cb3;
+}
+
+.accuracy-clips-filter-label select {
+  min-width: 8rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid #3d4f66;
+  background: #1a2332;
+  color: #e7ecf3;
+}
+
+.accuracy-clips-filter-count {
+  margin: 0;
+}
+
+.accuracy-clip-detail {
+  max-width: 28rem;
+  line-height: 1.35;
+}
+
+.accuracy-clip-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.65rem;
+  white-space: nowrap;
+}
+
+.accuracy-goto-playback--play {
+  color: #7dd3fc;
+}
+
+.accuracy-record-link {
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.accuracy-record-link code {
+  color: #93c5fd;
+}
+
+.accuracy-clips-empty-filter {
+  text-align: center;
+  padding: 1rem !important;
+}
+
+.accuracy-clip-row--error .accuracy-clip-detail {
+  color: #f87171;
+}
+
 .accuracy-metrics-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
