@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>骨架采集与回放</title>
-  <link rel="stylesheet" href="style.css?v=61" />
+  <link rel="stylesheet" href="style.css?v=63" />
 </head>
 <body>
   <header>
@@ -477,7 +477,10 @@
             </div>
             <div class="seek-stack">
               <div id="seek-event-markers" class="seek-event-markers" aria-hidden="true"></div>
-              <input type="range" id="seek-bar" min="0" max="1000" value="0" />
+              <div class="seek-bar-wrap">
+                <div id="seek-accuracy-markers" class="seek-accuracy-markers" aria-hidden="true"></div>
+                <input type="range" id="seek-bar" min="0" max="1000" value="0" />
+              </div>
             </div>
           </div>
           <p id="playback-info" class="hint"></p>
@@ -497,6 +500,8 @@
                     <option value="verified">已标真</option>
                     <option value="alarm">告警</option>
                     <option value="collision">碰撞</option>
+                    <option value="miss">漏报</option>
+                    <option value="false_alarm">误报</option>
                   </select>
                 </label>
                 <span id="event-count-label" class="hint">—</span>
@@ -598,11 +603,11 @@
   <script src="app/04-collision-config.js?v=35"></script>
   <script src="app/05-collect.js?v=42"></script>
   <script src="app/06-records.js?v=47"></script>
-  <script src="app/07-playback-stage.js?v=48"></script>
-  <script src="app/08-event-review.js?v=67"></script>
-  <script src="app/09-playback-events.js?v=67"></script>
-  <script src="app/10-render-collision.js?v=67"></script>
-  <script src="app/11-playback-controls.js?v=55"></script>
+  <script src="app/07-playback-stage.js?v=68"></script>
+  <script src="app/08-event-review.js?v=69"></script>
+  <script src="app/09-playback-events.js?v=69"></script>
+  <script src="app/10-render-collision.js?v=69"></script>
+  <script src="app/11-playback-controls.js?v=69"></script>
   <script src="annotate.js?v=17"></script>
   <script src="accuracy.js?v=6"></script>
 </body>

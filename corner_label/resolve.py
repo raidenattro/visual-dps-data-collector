@@ -11,7 +11,6 @@ from corner_label.reflection import (
     ReflectionMap,
     merge_annotation_files,
     normalize_corner_label,
-    resolve_annotation_paths_for_camera,
 )
 
 
@@ -35,6 +34,48 @@ def _write_merged_temp(data: dict, camera_label: str) -> Path:
     return Path(tmp.name)
 
 
+def collect_annotation_paths_for_camera(
+    camera_label: str,
+    reflection: ReflectionMap,
+    annotations_dir: Path,
+    *fallback_dirs: Path,
+) -> list[Path]:
+    """在 primary / fallback 目录查找机位对应的全部标注文件（reflection 多编号）。"""
+    from corner_label.reflection import annotation_json_path
+
+    label = normalize_corner_label(camera_label)
+    ann_ids = reflection.annotations_for_camera(label)
+    if not ann_ids:
+        raise FileNotFoundError(f"机位 {label!r} 在 reflection 中无 annotation")
+    out: list[Path] = []
+    searched: list[str] = []
+    for aid in ann_ids:
+        found: Path | None = None
+        for d in (annotations_dir, *fallback_dirs):
+            if d is None:
+                continue
+            root = Path(d)
+            searched.append(str(root))
+            p = annotation_json_path(aid, root)
+            if p.is_file():
+                found = p
+                break
+        if not found:
+            raise FileNotFoundError(
+                f"机位 {label!r} 缺少标注 {aid}（目录: {', '.join(searched)})"
+            )
+        out.append(found)
+    return out
+
+
+def materialize_annotation_paths(paths: list[Path], camera_label: str) -> Path:
+    """单文件直接返回；多文件合并为临时 JSON。"""
+    if len(paths) == 1:
+        return paths[0]
+    merged = merge_annotation_files(paths)
+    return _write_merged_temp(merged, camera_label)
+
+
 def resolve_annotation_for_camera(
     camera_label: str,
     *,
@@ -54,9 +95,10 @@ def resolve_annotation_for_camera(
         )
 
     ann_ids = reflection.annotations_for_camera(label)
-    src_paths = resolve_annotation_paths_for_camera(label, reflection, Path(annotations_dir))
-    merged = merge_annotation_files(src_paths)
-    out_path = _write_merged_temp(merged, label) if len(src_paths) > 1 else src_paths[0]
+    src_paths = collect_annotation_paths_for_camera(
+        label, reflection, Path(annotations_dir)
+    )
+    out_path = materialize_annotation_paths(src_paths, label)
 
     return ResolveResult(
         camera_label=label,

@@ -26,7 +26,11 @@ from annotation_store import (
 )
 from api.annotate_service import normalize_pose_tier
 from api.collision_recompute_service import recompute_record_collisions
-from api.record_service import meta_path_for_record, resolve_annotation_path_for_record
+from api.record_service import (
+    meta_path_for_record,
+    resolve_annotation_path_for_record,
+    resolve_reflection_annotation_path,
+)
 from event_engine.box_identity import (
     canonical_box_token,
     canonicalize_box_token_list,
@@ -499,7 +503,7 @@ def resolve_annotation_for_accuracy_record(
     *,
     pose_tier: str,
 ) -> Path | None:
-    """优先模型层 annotations，再回退母本 / reflection。"""
+    """解析记录碰撞重算用标注：优先 reflection 多编号合并，再模型层 / 母本 / 包内。"""
     tier = normalize_pose_tier(pose_tier)
     sidecar = meta_path_for_record(locator.record_id, locator)
     meta = None
@@ -508,13 +512,23 @@ def resolve_annotation_for_accuracy_record(
             meta = json.loads(sidecar.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             meta = None
+
+    tier_dir = annotation_dir_for_source(paths, tier)
+    # 多货架机位：合并 reflection 下全部标注（避免只算第一个编号导致漏报）
+    reflection_merged = resolve_reflection_annotation_path(
+        meta if isinstance(meta, dict) else None,
+        ann_dir=tier_dir,
+        fallback_ann_dir=paths.annotation_dir,
+    )
+    if reflection_merged and reflection_merged.is_file():
+        return reflection_merged
+
     video_stem = resolve_video_stem_from_record(
         locator.record_id,
         json_dir=paths.json_dir,
         pose_path=locator.path,
         meta=meta if isinstance(meta, dict) else None,
     )
-    tier_dir = annotation_dir_for_source(paths, tier)
     tier_path = annotation_path_for_video_stem(video_stem, annotation_dir=tier_dir)
     if tier_path.is_file():
         return tier_path

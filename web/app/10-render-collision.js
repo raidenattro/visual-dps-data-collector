@@ -174,8 +174,11 @@ function addTokenKeysToSet(token, set) {
 
 let playbackAccuracyOverlayCache = null;
 
+const MAX_SEEK_ACCURACY_DOTS = 120;
+
 function invalidatePlaybackAccuracyOverlay() {
   playbackAccuracyOverlayCache = null;
+  if (typeof renderAccuracySeekMarkers === "function") renderAccuracySeekMarkers();
 }
 
 function collectPlaybackAlarmIndex() {
@@ -200,9 +203,8 @@ function segmentHasMatchingAlarm(seg, allAlarms) {
 }
 
 /** 与准确率 evaluate_segments 一致：标真范本段 + 全记录告警索引 */
-function buildPlaybackAccuracyOverlay() {
+function buildPlaybackAccuracyOverlayData() {
   if (!playbackEvents?.length || !annotationBoxes.length) return null;
-  if (!eventsPanel || eventsPanel.classList.contains("hidden")) return null;
 
   const segments = buildVerifiedGroundTruthSegments();
   if (!segments.length) return null;
@@ -217,11 +219,107 @@ function buildPlaybackAccuracyOverlay() {
   };
 }
 
+function buildPlaybackAccuracyOverlay() {
+  return buildPlaybackAccuracyOverlayData();
+}
+
 function getPlaybackAccuracyOverlay() {
   if (!playbackAccuracyOverlayCache) {
-    playbackAccuracyOverlayCache = buildPlaybackAccuracyOverlay();
+    playbackAccuracyOverlayCache = buildPlaybackAccuracyOverlayData();
   }
   return playbackAccuracyOverlayCache;
+}
+
+function sampleSeekMarkerFrames(frames, maxDots = MAX_SEEK_ACCURACY_DOTS) {
+  const sorted = [...new Set(frames)].filter((f) => f > 0).sort((a, b) => a - b);
+  if (sorted.length <= maxDots) return sorted;
+  const out = [];
+  const step = sorted.length / maxDots;
+  for (let i = 0; i < maxDots; i += 1) {
+    out.push(sorted[Math.floor(i * step)]);
+  }
+  return out;
+}
+
+/** 漏报 / 误报帧号（与画面黑/白描边规则一致） */
+function collectAccuracySeekMarkerFrames() {
+  const overlay = getPlaybackAccuracyOverlay();
+  if (!overlay) return { missFrames: [], falseAlarmFrames: [] };
+
+  const missFrames = [];
+  overlay.segments.forEach((seg) => {
+    if (seg.detected) return;
+    for (let fi = seg.frame_start; fi <= seg.frame_end; fi += 1) {
+      missFrames.push(fi);
+    }
+  });
+
+  const falseAlarmFrames = [];
+  overlay.allAlarms.forEach(([frame, token]) => {
+    const fi = Number(frame) || 0;
+    if (fi <= 0) return;
+    const covered = overlay.segments.some(
+      (seg) =>
+        fi >= seg.frame_start &&
+        fi <= seg.frame_end &&
+        tokenMatchesAnyList(token, seg.tokens)
+    );
+    if (!covered) falseAlarmFrames.push(fi);
+  });
+
+  return {
+    missFrames: sampleSeekMarkerFrames(missFrames),
+    falseAlarmFrames: sampleSeekMarkerFrames(falseAlarmFrames),
+  };
+}
+
+function frameIdxToSeekPct(frameIdx) {
+  const dur =
+    typeof getPlaybackDurationSec === "function" ? getPlaybackDurationSec() : 0;
+  if (!dur || !frameByTime?.length) return null;
+  const fi = Number(frameIdx) || 0;
+  const row = frameByTime.find((r) => Number(r.frameIdx) === fi);
+  if (row && Number.isFinite(row.t)) {
+    return Math.min(100, Math.max(0, (row.t / dur) * 100));
+  }
+  const idx = frameByTime.findIndex((r) => Number(r.frameIdx) === fi);
+  if (idx < 0) return null;
+  return Math.min(100, Math.max(0, (idx / frameByTime.length) * 100));
+}
+
+function renderAccuracySeekMarkers() {
+  if (!accuracyMarkersEl) return;
+  accuracyMarkersEl.innerHTML = "";
+
+  const { missFrames, falseAlarmFrames } = collectAccuracySeekMarkerFrames();
+  if (!missFrames.length && !falseAlarmFrames.length) return;
+
+  const appendDot = (frameIdx, kind, title) => {
+    const pct = frameIdxToSeekPct(frameIdx);
+    if (pct == null) return;
+    const dot = document.createElement("button");
+    dot.type = "button";
+    dot.className = `accuracy-marker ${kind}`;
+    dot.dataset.frameIdx = String(frameIdx);
+    dot.style.left = `${pct}%`;
+    dot.title = title;
+    dot.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const fi = parseInt(dot.dataset.frameIdx, 10) || 0;
+      const row = frameByTime.find((r) => Number(r.frameIdx) === fi);
+      if (row && typeof seekToTimestamp === "function") {
+        void seekToTimestamp(row.t, fi, { skipEventSync: false });
+      }
+    });
+    accuracyMarkersEl.appendChild(dot);
+  };
+
+  missFrames.forEach((fi) => {
+    appendDot(fi, "miss", `漏报 · 帧 ${fi}`);
+  });
+  falseAlarmFrames.forEach((fi) => {
+    appendDot(fi, "false-alarm", `误报 · 帧 ${fi}`);
+  });
 }
 
 /** 当前帧漏报（黑描边）/ 误报（白描边）货框 token 集合 */
@@ -253,6 +351,65 @@ function getAccuracyOutlineForFrame(frameIdx, alarmSet) {
   }
 
   return { missTokens, falseAlarmTokens };
+}
+
+/** 事件范本 token（与 buildVerifiedGroundTruthSegments 一致） */
+function eventGroundTruthTokens(ev) {
+  if (!ev) return [];
+  const confirmed =
+    typeof getEventConfirmedBoxes === "function" ? getEventConfirmedBoxes(ev) : [];
+  if (confirmed.length) return canonicalizeBoxTokenList(confirmed);
+  return typeof normalizeBoxTokenList === "function"
+    ? normalizeBoxTokenList(ev.box_tokens)
+    : canonicalizeBoxTokenList(ev.box_tokens);
+}
+
+/** 已标真且落在未检出范本段内 → 漏报相关事件 */
+function isPlaybackEventMiss(ev) {
+  if (!ev || typeof isEventVerified !== "function" || !isEventVerified(ev)) return false;
+  const overlay = getPlaybackAccuracyOverlay();
+  if (!overlay?.segments?.length) return false;
+  const fi = parseInt(ev.frame_idx, 10) || 0;
+  if (fi <= 0) return false;
+  const tokens = eventGroundTruthTokens(ev);
+  if (!tokens.length) return false;
+  return overlay.segments.some(
+    (seg) =>
+      !seg.detected &&
+      fi >= seg.frame_start &&
+      fi <= seg.frame_end &&
+      tokens.some((t) => tokenMatchesAnyList(t, seg.tokens))
+  );
+}
+
+/** 告警不在任标真范本段内 → 误报 */
+function isPlaybackEventFalseAlarm(ev) {
+  if (!ev || String(ev.event_type || "").trim() !== "alarm") return false;
+  const overlay = getPlaybackAccuracyOverlay();
+  if (!overlay?.segments?.length) return false;
+  const fi = parseInt(ev.frame_idx, 10) || 0;
+  if (fi <= 0) return false;
+  const tokens = typeof normalizeBoxTokenList === "function"
+    ? normalizeBoxTokenList(ev.box_tokens)
+    : canonicalizeBoxTokenList(ev.box_tokens);
+  if (!tokens.length) return false;
+  return tokens.some((token) => {
+    const covered = overlay.segments.some(
+      (seg) =>
+        fi >= seg.frame_start &&
+        fi <= seg.frame_end &&
+        tokenMatchesAnyList(token, seg.tokens)
+    );
+    return !covered;
+  });
+}
+
+function countPlaybackMissEvents() {
+  return (playbackEvents || []).filter((ev) => isPlaybackEventMiss(ev)).length;
+}
+
+function countPlaybackFalseAlarmEvents() {
+  return (playbackEvents || []).filter((ev) => isPlaybackEventFalseAlarm(ev)).length;
 }
 
 /** 射线法：点是否在多边形内（推理坐标系） */
@@ -519,10 +676,14 @@ function buildFrameIndex(recordId = null) {
           });
         });
         frameByTime.sort((a, b) => a.t - b.t);
+        if (typeof renderAccuracySeekMarkers === "function") renderAccuracySeekMarkers();
       });
   }
 
-  if (!poseData?.frames?.length) return Promise.resolve();
+  if (!poseData?.frames?.length) {
+    if (typeof renderAccuracySeekMarkers === "function") renderAccuracySeekMarkers();
+    return Promise.resolve();
+  }
   poseData.frames.forEach((f) => {
     frameByTime.push({
       t: f.timestamp_sec ?? 0,
@@ -534,6 +695,7 @@ function buildFrameIndex(recordId = null) {
     if (f.frame_idx != null) frameCache.set(f.frame_idx, f);
   });
   frameByTime.sort((a, b) => a.t - b.t);
+  if (typeof renderAccuracySeekMarkers === "function") renderAccuracySeekMarkers();
   return Promise.resolve();
 }
 

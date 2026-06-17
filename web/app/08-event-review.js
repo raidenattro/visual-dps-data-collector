@@ -325,7 +325,15 @@ function refreshEventCountLabel() {
   const list = filteredPlaybackEvents();
   const rtHint = playbackEventsFromRealtime ? " · 回放实时计算" : "";
   const filterHint = list.length !== playbackEvents.length ? ` · 队列 ${list.length}` : "";
-  eventCountLabel.textContent = `告警 ${alarmN} · 碰撞 ${collN} · 标真 ${verifiedN}${rtHint}${filterHint}`;
+  let accuracyHint = "";
+  if (typeof countPlaybackMissEvents === "function") {
+    const missN = countPlaybackMissEvents();
+    const falseN = countPlaybackFalseAlarmEvents();
+    if (missN > 0 || falseN > 0) {
+      accuracyHint = ` · 漏报 ${missN} · 误报 ${falseN}`;
+    }
+  }
+  eventCountLabel.textContent = `告警 ${alarmN} · 碰撞 ${collN} · 标真 ${verifiedN}${accuracyHint}${rtHint}${filterHint}`;
 }
 
 function syncVerifiedKeysFromEvents(events, reviewPayload = null) {
@@ -806,6 +814,16 @@ function filteredPlaybackEvents() {
   if (mode === "alarm" || mode === "collision") {
     return playbackEvents.filter((e) => e.event_type === mode);
   }
+  if (mode === "miss") {
+    return typeof isPlaybackEventMiss === "function"
+      ? playbackEvents.filter((e) => isPlaybackEventMiss(e))
+      : [];
+  }
+  if (mode === "false_alarm") {
+    return typeof isPlaybackEventFalseAlarm === "function"
+      ? playbackEvents.filter((e) => isPlaybackEventFalseAlarm(e))
+      : [];
+  }
   return playbackEvents;
 }
 
@@ -1027,7 +1045,14 @@ function updateReviewDock() {
 
   if (!list.length) {
     if (posEl) posEl.textContent = "队列已清空";
-    if (metaEl) metaEl.textContent = "当前筛选下无待复核事件";
+    const mode = eventFilterSelect?.value || "all";
+    const emptyHint =
+      mode === "miss"
+        ? "无漏报事件（需有标真范本且段内无匹配告警）"
+        : mode === "false_alarm"
+          ? "无误报事件（告警均落在标真范本段内）"
+          : "当前筛选下无待复核事件";
+    if (metaEl) metaEl.textContent = emptyHint;
     if (tokensEl) {
       tokensEl.textContent = "\u00a0";
       tokensEl.setAttribute("aria-hidden", "true");
@@ -1060,7 +1085,13 @@ function updateReviewDock() {
     badgeEl.className = `event-badge ${ev.event_type}`;
   }
   if (metaEl) {
-    metaEl.textContent = `${formatTime(ev.timestamp_sec)} · 帧 ${ev.frame_idx}`;
+    let accuracyNote = "";
+    if (typeof isPlaybackEventFalseAlarm === "function" && isPlaybackEventFalseAlarm(ev)) {
+      accuracyNote = " · 误报";
+    } else if (typeof isPlaybackEventMiss === "function" && isPlaybackEventMiss(ev)) {
+      accuracyNote = " · 漏报";
+    }
+    metaEl.textContent = `${formatTime(ev.timestamp_sec)} · 帧 ${ev.frame_idx}${accuracyNote}`;
   }
   if (tokensEl) {
     const tokenText = formatEventTokens(ev.box_tokens);
@@ -1131,6 +1162,12 @@ function finishUpdateReviewDock() {
   if (typeof invalidatePlaybackAccuracyOverlay === "function") invalidatePlaybackAccuracyOverlay();
   if (typeof updateStageBoxPickMode === "function") updateStageBoxPickMode();
   if (typeof redrawCurrentFrame === "function") redrawCurrentFrame();
+  const filterMode = eventFilterSelect?.value || "all";
+  if (filterMode === "miss" || filterMode === "false_alarm") {
+    refreshEventCountLabel();
+    if ($("#event-review-list-details")?.open) renderEventReviewTable();
+    renderEventMarkers();
+  }
   scheduleEventReviewListScrollHeight();
 }
 
@@ -1180,9 +1217,15 @@ function renderEventReviewTable(list = null) {
       const verifiedCls = verified ? " verified-true" : "";
       const checked = verified ? " checked" : "";
       const disabled = canSave ? "" : " disabled";
+      let accuracyTag = "";
+      if (typeof isPlaybackEventFalseAlarm === "function" && isPlaybackEventFalseAlarm(ev)) {
+        accuracyTag = '<span class="event-accuracy-tag false-alarm" title="误报">误</span>';
+      } else if (typeof isPlaybackEventMiss === "function" && isPlaybackEventMiss(ev)) {
+        accuracyTag = '<span class="event-accuracy-tag miss" title="漏报">漏</span>';
+      }
       return `<tr class="event-review-row${active}${verifiedCls}" data-event-key="${key}">
         <td class="col-verify"><input type="checkbox" class="event-verify-check" data-event-key="${key}"${checked}${disabled} aria-label="标为真实碰撞" /></td>
-        <td class="col-type"><span class="event-badge ${ev.event_type}">${typeLabel}</span></td>
+        <td class="col-type"><span class="event-badge ${ev.event_type}">${typeLabel}</span>${accuracyTag}</td>
         <td class="col-time">${formatTime(ev.timestamp_sec)}</td>
         <td class="col-frame">${ev.frame_idx}</td>
         <td class="col-tokens" title="${formatEventTokens(ev.box_tokens)}">${formatEventTokens(ev.box_tokens)}${getEventConfirmedBoxes(ev).length ? ` → ${formatConfirmedBoxes(getEventConfirmedBoxes(ev))}` : ""}</td>
@@ -1358,6 +1401,7 @@ function renderEventMarkers() {
     });
     eventMarkersEl.appendChild(dot);
   });
+  if (typeof renderAccuracySeekMarkers === "function") renderAccuracySeekMarkers();
 }
 
 function renderEventReviewList() {

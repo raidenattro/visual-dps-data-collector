@@ -1180,6 +1180,57 @@ main:has(#panel-playback.active) {
   min-width: 120px;
 }
 
+.seek-bar-wrap {
+  position: relative;
+  margin-top: 0;
+}
+
+.seek-accuracy-markers {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 0;
+  transform: translateY(-50%);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.seek-accuracy-markers .accuracy-marker {
+  position: absolute;
+  top: 0;
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+  margin-top: -2.5px;
+  border-radius: 50%;
+  pointer-events: auto;
+  cursor: pointer;
+  padding: 0;
+  border: none;
+}
+
+.seek-accuracy-markers .accuracy-marker.miss {
+  background: #0a0a0a;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.45);
+}
+
+.seek-accuracy-markers .accuracy-marker.false-alarm {
+  background: #f8fafc;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+}
+
+.seek-accuracy-markers .accuracy-marker:hover {
+  transform: scale(1.35);
+  z-index: 3;
+}
+
+.seek-bar-wrap #seek-bar {
+  position: relative;
+  z-index: 1;
+  display: block;
+}
+
 .playback-transport {
   margin-top: 0.75rem;
 }
@@ -1249,6 +1300,29 @@ main:has(#panel-playback.active) {
 .seek-event-markers .event-marker.verified {
   box-shadow: 0 0 0 2px #4ade80;
   z-index: 2;
+}
+
+.event-accuracy-tag {
+  display: inline-block;
+  margin-left: 0.25rem;
+  padding: 0 0.28rem;
+  font-size: 0.68rem;
+  line-height: 1.25;
+  border-radius: 3px;
+  vertical-align: middle;
+  font-weight: 600;
+}
+
+.event-accuracy-tag.miss {
+  color: #f8fafc;
+  background: #0a0a0a;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+.event-accuracy-tag.false-alarm {
+  color: #0f172a;
+  background: #f8fafc;
+  border: 1px solid rgba(0, 0, 0, 0.35);
 }
 
 .playback-events-panel {

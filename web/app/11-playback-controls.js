@@ -142,10 +142,12 @@ videoEl.addEventListener("loadedmetadata", () => {
 eventFilterSelect?.addEventListener("change", () => {
   const list = filteredPlaybackEvents();
   renderEventMarkers();
+  if (typeof renderAccuracySeekMarkers === "function") renderAccuracySeekMarkers();
   if ($("#event-review-list-details")?.open) {
     renderEventReviewTable(list);
   }
   refreshEventCountLabel();
+  updateReviewDock();
   const first = list[0];
   if (first) {
     void seekToEvent(first);

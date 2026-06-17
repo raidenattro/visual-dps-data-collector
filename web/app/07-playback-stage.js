@@ -6,6 +6,7 @@ const ctx = canvas.getContext("2d");
 const seekBar = $("#seek-bar");
 const timeLabel = $("#time-label");
 const eventMarkersEl = $("#seek-event-markers");
+const accuracyMarkersEl = $("#seek-accuracy-markers");
 const eventJumpList = $("#event-jump-list");
 const eventFilterSelect = $("#event-filter");
 const eventCountLabel = $("#event-count-label");

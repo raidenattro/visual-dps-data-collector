@@ -306,6 +306,7 @@ function clearPlaybackEvents() {
     eventReviewSaveTimer = null;
   }
   if (eventMarkersEl) eventMarkersEl.innerHTML = "";
+  if (accuracyMarkersEl) accuracyMarkersEl.innerHTML = "";
   if (eventJumpList) eventJumpList.innerHTML = "";
   if (eventsPanel) eventsPanel.classList.add("hidden");
   if (typeof invalidatePlaybackAccuracyOverlay === "function") invalidatePlaybackAccuracyOverlay();

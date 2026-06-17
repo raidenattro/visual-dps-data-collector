@@ -667,23 +667,43 @@ def _try_reflection_annotation_files_in_dir(
     meta: dict[str, Any] | None,
     *,
     ann_dir: Path,
+    fallback_ann_dir: Path | None = None,
 ) -> Path | None:
-    """按 reflection 机位→标注编号，在指定 annotations 目录查找文件（如 94.json）。"""
+    """按 reflection 机位解析标注；多编号时合并全部货框。"""
+    return resolve_reflection_annotation_path(
+        meta,
+        ann_dir=ann_dir,
+        fallback_ann_dir=fallback_ann_dir,
+    )
+
+
+def resolve_reflection_annotation_path(
+    meta: dict[str, Any] | None,
+    *,
+    ann_dir: Path,
+    fallback_ann_dir: Path | None = None,
+) -> Path | None:
+    """机位 reflection → 单文件或合并后的标注 JSON（用于碰撞重算 / 回放）。"""
     if not meta:
         return None
     cam = str(meta.get("camera_label") or "").strip()
     if not cam or not REFLECTION_OK or not normalize_corner_label:
         return None
     try:
+        from corner_label.resolve import (
+            collect_annotation_paths_for_camera,
+            materialize_annotation_paths,
+        )
+
         reflection = load_reflection_or_http()
-        ann_ids = reflection.annotations_for_camera(normalize_corner_label(cam))
-        for aid in ann_ids:
-            for candidate in _annotation_file_candidates(ann_dir, aid):
-                if candidate.is_file():
-                    return candidate
-    except (HTTPException, ValueError, FileNotFoundError):
+        label = normalize_corner_label(cam)
+        fallbacks = (fallback_ann_dir,) if fallback_ann_dir else ()
+        src_paths = collect_annotation_paths_for_camera(
+            label, reflection, ann_dir, *fallbacks
+        )
+        return materialize_annotation_paths(src_paths, label)
+    except (HTTPException, ValueError, FileNotFoundError, OSError):
         return None
-    return None
 
 
 def _resolve_annotation_in_dir(
@@ -704,34 +724,23 @@ def _resolve_annotation_in_dir(
                     return candidate
 
     # meta.annotation_file 常为采集包内 annotation.json，与 reflection 编号（如 94.json）不一致
-    reflection_hit = _try_reflection_annotation_files_in_dir(meta, ann_dir=ann_dir)
+    reflection_hit = _try_reflection_annotation_files_in_dir(
+        meta,
+        ann_dir=ann_dir,
+        fallback_ann_dir=paths.annotation_dir if ann_dir != paths.annotation_dir else None,
+    )
     if reflection_hit:
         return reflection_hit
 
     if allow_reflection and meta:
         cam = str(meta.get("camera_label") or "").strip()
         if cam and REFLECTION_OK and normalize_corner_label:
-            try:
-                from corner_label.resolve import resolve_annotation_for_camera as resolve_cam
-
-                reflection = load_reflection_or_http()
-                resolved = resolve_cam(
-                    normalize_corner_label(cam),
-                    reflection=reflection,
-                    annotations_dir=paths.annotation_dir,
-                )
-                if resolved.annotation_path.is_file():
-                    try:
-                        if ann_dir.resolve() == paths.annotation_dir.resolve():
-                            return resolved.annotation_path
-                        # 模型层目录：reflection 文件在母本时，尝试同名文件是否已复制到 tier
-                        tier_copy = ann_dir / resolved.annotation_path.name
-                        if tier_copy.is_file():
-                            return tier_copy
-                    except ValueError:
-                        return resolved.annotation_path
-            except (HTTPException, ValueError, FileNotFoundError):
-                pass
+            merged = resolve_reflection_annotation_path(
+                meta,
+                ann_dir=paths.annotation_dir,
+            )
+            if merged and merged.is_file():
+                return merged
 
     video_stem = resolve_video_stem_from_record(
         record_id,
@@ -821,6 +830,13 @@ def resolve_annotation_path_for_record(
             meta = json.loads(sidecar.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             meta = None
+
+    reflection_merged = resolve_reflection_annotation_path(
+        meta if isinstance(meta, dict) else None,
+        ann_dir=paths.annotation_dir,
+    )
+    if reflection_merged and reflection_merged.is_file():
+        return reflection_merged
 
     if locator.path.is_dir():
         pkg_ann = locator.path / "annotation.json"
