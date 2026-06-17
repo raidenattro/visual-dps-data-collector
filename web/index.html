@@ -372,6 +372,12 @@
                   <option value="rtmpose-m">RTMPose-M</option>
                 </select>
               </div>
+              <div class="playback-records-annotation-source-filter">
+                <select id="playback-annotation-source" title="回放货框叠加来源：母本或当前所选模型层标注目录">
+                  <option value="tier" selected>rtmpose-t 模型标注</option>
+                  <option value="master">母本标注</option>
+                </select>
+              </div>
               <div class="playback-records-search-filter">
                 <input type="search" id="playback-record-filter" placeholder="搜索名称 / 路径…" autocomplete="off" />
               </div>
@@ -574,7 +580,7 @@
   <script src="app/03-tabs.js?v=36"></script>
   <script src="app/04-collision-config.js?v=35"></script>
   <script src="app/05-collect.js?v=42"></script>
-  <script src="app/06-records.js?v=45"></script>
+  <script src="app/06-records.js?v=47"></script>
   <script src="app/07-playback-stage.js?v=48"></script>
   <script src="app/08-event-review.js?v=64"></script>
   <script src="app/09-playback-events.js?v=54"></script>

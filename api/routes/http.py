@@ -20,6 +20,7 @@ from annotation_store import (
     resolve_video_stem_from_record,
     validate_annotation_payload,
     annotation_dir_display_rel,
+    annotation_dir_for_source,
 )
 from collect_core import validate_video_path
 from config_loader import (
@@ -96,6 +97,7 @@ from api.record_service import (
     record_meta_for_list,
     record_summary_for_list,
     resolve_annotation_path_for_record,
+    resolve_annotation_path_for_source,
     video_path_for_record,
     video_path_for_video_stem,
 )
@@ -578,7 +580,8 @@ def get_record_video(record_id: str) -> FileResponse:
 
 
 @router.get("/api/records/{record_id:path}/annotation.json")
-def get_record_annotation(record_id: str) -> FileResponse:
+def get_record_annotation(record_id: str, annotation_source: str = "") -> Any:
+    """读取记录关联标注。annotation_source=master 为母本；rtmpose-t/s/m 为对应模型目录（可回退母本内容）。"""
     locator = locate_record_by_id(record_id)
     if not locator:
         raise HTTPException(404, "记录不存在")
@@ -590,10 +593,54 @@ def get_record_annotation(record_id: str) -> FileResponse:
             meta = json.loads(sidecar.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             meta = None
-    ann_path = resolve_annotation_path_for_record(record_id, locator=locator, meta=meta)
+
+    if not str(annotation_source or "").strip():
+        ann_path = resolve_annotation_path_for_record(record_id, locator=locator, meta=meta)
+        if not ann_path or not ann_path.is_file():
+            raise HTTPException(404, "标注 JSON 不存在")
+        return FileResponse(ann_path, media_type="application/json")
+
+    try:
+        norm = normalize_annotation_source(annotation_source)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    ann_path, resolved_from = resolve_annotation_path_for_source(
+        record_id,
+        source=norm,
+        paths=paths,
+        locator=locator,
+        meta=meta,
+    )
     if not ann_path or not ann_path.is_file():
         raise HTTPException(404, "标注 JSON 不存在")
-    return FileResponse(ann_path, media_type="application/json")
+
+    try:
+        data = json.loads(ann_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(500, f"读取标注失败: {exc}") from exc
+    if not isinstance(data, dict):
+        raise HTTPException(500, "标注 JSON 格式无效")
+
+    ann_dir = annotation_dir_for_source(paths, norm)
+    video_stem = resolve_video_stem_from_record(
+        record_id,
+        json_dir=paths.json_dir,
+        pose_path=locator.path,
+        meta=meta if isinstance(meta, dict) else None,
+    )
+    tier_path = annotation_path_for_video_stem(video_stem, annotation_dir=ann_dir)
+    return {
+        **data,
+        "_meta": {
+            "annotation_source": norm,
+            "resolved_from": resolved_from,
+            "annotation_path": str(ann_path),
+            "annotation_dir": annotation_dir_display_rel(paths, norm),
+            "has_tier_file": tier_path.is_file() if norm != "master" else True,
+            "readonly": norm == "master",
+        },
+    }
 
 
 @router.get("/api/records/{record_id:path}/annotation/frame")

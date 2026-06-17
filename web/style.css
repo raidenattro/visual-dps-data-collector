@@ -644,6 +644,7 @@ main:has(#panel-playback.active) {
 }
 
 .playback-records-tier-filter select,
+.playback-records-annotation-source-filter select,
 .playback-records-review-filter select,
 .playback-records-verified-filter select,
 .playback-records-search-filter input[type="search"],
@@ -659,6 +660,7 @@ main:has(#panel-playback.active) {
 }
 
 .playback-records-tier-filter select,
+.playback-records-annotation-source-filter select,
 .playback-records-review-filter select,
 .playback-records-verified-filter select {
   width: 100%;

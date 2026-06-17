@@ -6,6 +6,8 @@ let playbackCameraListPinned = false;
 let playbackRecordsCache = [];
 /** 回放列表当前筛选的模型数据层（rtmpose-t / rtmpose-s / rtmpose-m） */
 let playbackPoseTier = "rtmpose-t";
+/** 回放标注来源：tier=当前模型层目录，master=母本 json/annotations */
+let playbackAnnotationSource = "tier";
 /** 已知标签（来自 /api/tags） */
 let playbackKnownTags = [];
 /** 按模型层缓存的记录列表，切换 tier 时即时展示 */
@@ -852,6 +854,11 @@ async function navigateToPlaybackRecord({
   playbackPoseTier = tier;
   const tierSel = $("#playback-pose-tier");
   if (tierSel) tierSel.value = tier;
+  const annSrcSel = $("#playback-annotation-source");
+  if (annSrcSel) {
+    const opt = annSrcSel.querySelector('option[value="tier"]');
+    if (opt) opt.textContent = `${tier} 模型标注`;
+  }
 
   playbackSelectedCameraSlug = slug || null;
   playbackCameraListPinned = false;
@@ -889,14 +896,43 @@ function initPlaybackRecordFilter() {
   const input = $("#playback-record-filter");
   const tagInput = $("#playback-tag-filter");
   const tierSel = $("#playback-pose-tier");
+  const annSrcSel = $("#playback-annotation-source");
+
+  function syncPlaybackAnnotationSourceOptionLabel() {
+    const opt = annSrcSel?.querySelector('option[value="tier"]');
+    if (opt) {
+      const tier = playbackPoseTier || "rtmpose-t";
+      opt.textContent = `${tier} 模型标注`;
+    }
+  }
+
+  if (annSrcSel && !annSrcSel.dataset.bound) {
+    annSrcSel.dataset.bound = "1";
+    playbackAnnotationSource = annSrcSel.value === "master" ? "master" : "tier";
+    syncPlaybackAnnotationSourceOptionLabel();
+    annSrcSel.addEventListener("change", () => {
+      playbackAnnotationSource = annSrcSel.value === "master" ? "master" : "tier";
+      void onPlaybackAnnotationSourceChanged();
+    });
+  }
+
   if (tierSel && !tierSel.dataset.bound) {
     tierSel.dataset.bound = "1";
     playbackPoseTier = tierSel.value || "rtmpose-t";
+    syncPlaybackAnnotationSourceOptionLabel();
     tierSel.addEventListener("change", async () => {
       playbackPoseTier = tierSel.value || "rtmpose-t";
       playbackSelectedCameraSlug = null;
       playbackCameraListPinned = false;
+      syncPlaybackAnnotationSourceOptionLabel();
       await loadRecords({ quiet: playbackRecordsByTier.has(playbackPoseTier) });
+      if (currentRecordId && playbackAnnotationSource === "tier") {
+        const annResult = await applyPlaybackRecordAnnotation(currentRecordId);
+        redrawCurrentFrame();
+        if (annResult.ok) {
+          setPlaybackInfo(`已随模型层切换标注：${annResult.label}（${annotationBoxes.length} 个货框）`);
+        }
+      }
     });
   }
   if (input && !input.dataset.bound) {
@@ -924,6 +960,83 @@ function initPlaybackRecordFilter() {
   };
   bindFilterSelect(reviewSel);
   bindFilterSelect(verifiedSel);
+}
+
+function playbackAnnotationSourceApiParam() {
+  if (playbackAnnotationSource === "master") return "master";
+  return playbackPoseTier || "rtmpose-t";
+}
+
+function playbackAnnotationSourceLabel() {
+  if (playbackAnnotationSource === "master") {
+    return "母本 json/annotations";
+  }
+  const tier = playbackPoseTier || "rtmpose-t";
+  return `${tier} json/${tier}/annotations`;
+}
+
+/** 按所选来源加载记录标注；失败时回退 pose 内嵌 annotation */
+async function applyPlaybackRecordAnnotation(recordId) {
+  const rid = String(recordId || "").trim();
+  if (!rid) return { ok: false, label: "", fromPose: false };
+
+  const src = playbackAnnotationSourceApiParam();
+  const url = `${recordApiUrl(rid, "/annotation.json")}?annotation_source=${encodeURIComponent(src)}`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      syncAnnotationBoxesFromPose();
+      let detail = "";
+      try {
+        const errBody = await res.json();
+        detail = errBody.detail || "";
+      } catch {
+        detail = res.statusText || "";
+      }
+      return {
+        ok: false,
+        label: playbackAnnotationSourceLabel(),
+        fromPose: annotationBoxes.length > 0,
+        error: detail ? String(detail) : `HTTP ${res.status}`,
+      };
+    }
+    const data = await res.json();
+    const meta = data._meta && typeof data._meta === "object" ? data._meta : {};
+    loadAnnotationBoxesFromData(data);
+    let label = playbackAnnotationSourceLabel();
+    if (meta.resolved_from === "master" && src !== "master") {
+      label += "（模型目录无文件，已用母本内容）";
+    }
+    return { ok: true, label, meta };
+  } catch {
+    syncAnnotationBoxesFromPose();
+    return {
+      ok: false,
+      label: playbackAnnotationSourceLabel(),
+      fromPose: annotationBoxes.length > 0,
+    };
+  }
+}
+
+async function onPlaybackAnnotationSourceChanged() {
+  if (!currentRecordId) return;
+  const result = await applyPlaybackRecordAnnotation(currentRecordId);
+  if (typeof loadPlaybackEvents === "function") {
+    await loadPlaybackEvents(currentRecordId);
+    if (playbackEvents.length && typeof beginEventReview === "function") {
+      await beginEventReview();
+    }
+  }
+  redrawCurrentFrame();
+  if (result.ok) {
+    setPlaybackInfo(`已切换标注：${result.label}（${annotationBoxes.length} 个货框）`);
+  } else if (result.fromPose) {
+    const errNote = result.error ? `（${result.error}）` : "";
+    setPlaybackInfo(`未找到所选标注${errNote}，使用 pose 内嵌货框（${annotationBoxes.length} 个）`);
+  } else {
+    const errNote = result.error ? `：${result.error}` : "";
+    setPlaybackInfo(`未找到所选标注${errNote}（${result.label}）`);
+  }
 }
 
 async function loadSavedRecordVideo(recordId) {
@@ -997,6 +1110,9 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
     playbackPoseTier = recordTier;
     const tierSel = $("#playback-pose-tier");
     if (tierSel) tierSel.value = recordTier;
+    const annSrcSel = $("#playback-annotation-source");
+    const tierOpt = annSrcSel?.querySelector('option[value="tier"]');
+    if (tierOpt) tierOpt.textContent = `${recordTier} 模型标注`;
   }
   if (!playbackRecordsByTier.get(playbackPoseTier)?.length) {
     await loadRecords({ quiet: true });
@@ -1027,21 +1143,17 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
   }
   await buildFrameIndex(recordId);
   await prefetchFrameChunk(1, FRAME_CHUNK_SIZE);
-  if (!annotationBoxes.length) {
-    try {
-      const annRes = await fetch(recordApiUrl(recordId, "/annotation.json"));
-      if (annRes.ok) {
-        loadAnnotationBoxesFromData(await annRes.json());
-      }
-    } catch {
-      /* 无独立标注文件时忽略 */
-    }
-  }
+  const annResult = await applyPlaybackRecordAnnotation(recordId);
   await loadPlaybackEvents(recordId);
+  const annHint = annResult.ok
+    ? ` · 标注：${annResult.label}`
+    : annResult.fromPose
+      ? " · 使用 pose 内嵌标注"
+      : "";
   const collisionHint =
     annotationBoxes.length && !collisionPersistedAtCollect()
-      ? " · 已加载标注，回放时将实时计算碰撞"
-      : "";
+      ? `${annHint} · 回放时将实时计算碰撞`
+      : annHint;
   $("#playback-video").value = "";
   const label = displayName || recordId;
   const jsonFile = jsonFileName || poseData?.pose_file || `${recordId}/manifest.json`;
