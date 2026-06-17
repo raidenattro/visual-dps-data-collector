@@ -1070,7 +1070,34 @@ def enrich_events_with_review(
     events: list[dict[str, Any]],
     locator: RecordLocator,
 ) -> list[dict[str, Any]]:
+    from collections import defaultdict
+
+    from event_engine.box_identity import box_id_from_token
+
     verified_by_sig = load_verified_review_by_signature(locator)
+    review = load_event_review(locator)
+    verified_items = [
+        item for item in (review.get("verified_true") or []) if isinstance(item, dict)
+    ]
+    by_frame_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
+
+    def _entry_box_ids(entry: dict[str, Any]) -> set[str]:
+        ids: set[str] = set()
+        for raw in entry.get("box_tokens") or []:
+            bid = box_id_from_token(str(raw))
+            if bid:
+                ids.add(bid)
+        for raw in extract_confirmed_box_tokens(entry):
+            bid = box_id_from_token(str(raw))
+            if bid:
+                ids.add(bid)
+        return ids
+
+    for item in verified_items:
+        et = str(item.get("event_type") or "").strip()
+        fi = int(item.get("frame_idx") or 0)
+        by_frame_type[f"{et}:{fi}"].append(item)
+
     out: list[dict[str, Any]] = []
     for ev in events:
         row = dict(ev)
@@ -1080,6 +1107,15 @@ def enrich_events_with_review(
             ev.get("box_tokens"),
         )
         review_item = verified_by_sig.get(sig)
+        if review_item is None:
+            ev_ids = _entry_box_ids(ev)
+            if ev_ids:
+                et = str(ev.get("event_type") or "").strip()
+                fi = int(ev.get("frame_idx") or 0)
+                for cand in by_frame_type.get(f"{et}:{fi}", []):
+                    if ev_ids & _entry_box_ids(cand):
+                        review_item = cand
+                        break
         row["verified_true"] = review_item is not None
         confirmed_list = extract_confirmed_box_tokens(review_item or {})
         if confirmed_list:

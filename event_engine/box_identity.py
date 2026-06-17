@@ -25,3 +25,26 @@ def parse_collision_token(token: str) -> tuple[str, str]:
         shelf, _, box_id = text.partition(":")
         return shelf.strip(), box_id.strip()
     return "", text
+
+
+def box_id_from_token(token: str) -> str:
+    """从碰撞 token 提取货位 id（Box_3100 与 MAP_19:3100 → 3100）。"""
+    _, box_id = parse_collision_token(token)
+    return box_id
+
+
+def collision_tokens_equivalent(left: str, right: str) -> bool:
+    """同一货位不同写法视为等价（仅比较 box_id）。"""
+    a = str(left or "").strip()
+    b = str(right or "").strip()
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    a_id = box_id_from_token(a)
+    b_id = box_id_from_token(b)
+    return bool(a_id and a_id == b_id)
+
+
+def token_matches_any(token: str, candidates: set[str] | frozenset[str] | list[str]) -> bool:
+    return any(collision_tokens_equivalent(token, c) for c in candidates)

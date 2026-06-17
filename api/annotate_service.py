@@ -215,17 +215,84 @@ def build_annotate_context(
     }
 
 
+def resolve_camera_video_bucket_dir(
+    paths: AppPaths,
+    camera_label: str,
+    *,
+    pose_tier: str,
+) -> tuple[str, Path] | None:
+    """返回机位视频目录 (slug, bucket_dir)；目录内至少有一个视频文件。"""
+    tier = normalize_pose_tier(pose_tier)
+    tier_root = paths.video_dir / tier
+    if not tier_root.is_dir():
+        return None
+
+    base_slug = camera_storage_slug(camera_label)
+    slug_order: list[str] = []
+    seen: set[str] = set()
+
+    def add_slug(name: str) -> None:
+        if name and name not in seen:
+            seen.add(name)
+            slug_order.append(name)
+
+    add_slug(base_slug)
+    if base_slug:
+        prefix = f"{base_slug}-("
+        for p in sorted(tier_root.iterdir(), key=lambda x: x.name.lower()):
+            if not p.is_dir():
+                continue
+            if p.name == base_slug or p.name.startswith(prefix):
+                add_slug(p.name)
+
+    for slug in slug_order:
+        bucket = tier_root / slug
+        if _list_video_files(bucket):
+            return slug, bucket
+    return None
+
+
+def list_camera_videos(
+    paths: AppPaths,
+    camera_label: str,
+    *,
+    pose_tier: str,
+) -> tuple[str, list[Path]]:
+    """列出机位目录下全部视频（按文件名排序）。"""
+    hit = resolve_camera_video_bucket_dir(paths, camera_label, pose_tier=pose_tier)
+    if not hit:
+        return "", []
+    slug, bucket = hit
+    return slug, _list_video_files(bucket)
+
+
+def resolve_camera_video_path(
+    paths: AppPaths,
+    camera_label: str,
+    *,
+    pose_tier: str,
+    video_file: str = "",
+) -> Path:
+    slug, videos = list_camera_videos(paths, camera_label, pose_tier=pose_tier)
+    if not videos:
+        tier = normalize_pose_tier(pose_tier)
+        raise FileNotFoundError(
+            f"未在 localdata/video/{tier}/{slug or camera_storage_slug(camera_label)} "
+            f"找到配套视频，请先完成该机位采集"
+        )
+    name = str(video_file or "").strip()
+    if name:
+        for path in videos:
+            if path.name == name:
+                return path
+        raise FileNotFoundError(f"视频 {name!r} 不在该机位目录中")
+    return videos[0]
+
+
 def first_frame_video_for_camera(
     paths: AppPaths,
     camera_label: str,
     *,
     pose_tier: str,
 ) -> Path:
-    hit = resolve_camera_video_bucket(paths, camera_label, pose_tier=pose_tier)
-    if not hit:
-        tier = normalize_pose_tier(pose_tier)
-        slug = camera_storage_slug(camera_label)
-        raise FileNotFoundError(
-            f"未在 localdata/video/{tier}/{slug} 找到配套视频，请先完成该机位采集"
-        )
-    return hit[1]
+    return resolve_camera_video_path(paths, camera_label, pose_tier=pose_tier)

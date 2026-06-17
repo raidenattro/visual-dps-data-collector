@@ -27,6 +27,7 @@ from annotation_store import (
 from api.annotate_service import normalize_pose_tier
 from api.collision_recompute_service import recompute_record_collisions
 from api.record_service import meta_path_for_record, resolve_annotation_path_for_record
+from event_engine.box_identity import token_matches_any
 from record_tag_store import normalize_tag_name, record_ids_with_all_tags
 
 
@@ -134,15 +135,19 @@ def _extract_alarms(timeline: list[dict[str, Any]]) -> list[tuple[int, str]]:
 
 
 def _segment_detected(segment: GroundTruthSegment, alarms: list[tuple[int, str]]) -> bool:
-    gt_set = set(segment.gt_tokens)
+    gt_tokens = list(segment.gt_tokens)
     for frame, token in alarms:
-        if segment.frame_start <= frame <= segment.frame_end and token in gt_set:
+        if segment.frame_start <= frame <= segment.frame_end and token_matches_any(
+            token, gt_tokens
+        ):
             return True
     return False
 
 
 def _alarm_covered_by_segment(frame: int, token: str, segment: GroundTruthSegment) -> bool:
-    return segment.frame_start <= frame <= segment.frame_end and token in set(segment.gt_tokens)
+    if not (segment.frame_start <= frame <= segment.frame_end):
+        return False
+    return token_matches_any(token, list(segment.gt_tokens))
 
 
 def evaluate_segments(

@@ -218,8 +218,19 @@ function syncConfirmedBoxFromReview(reviewPayload, events = playbackEvents) {
   }
   (events || []).forEach((ev) => {
     const key = eventRowKey(ev);
-    if (!byKey.has(key)) return;
-    const tokens = byKey.get(key);
+    let tokens = byKey.get(key);
+    if (!tokens) {
+      for (const item of list) {
+        if (eventMatchesReviewEntry(ev, item)) {
+          tokens = normalizeBoxTokenList(
+            item.confirmed_box_tokens ||
+              (item.confirmed_box_token ? [item.confirmed_box_token] : [])
+          );
+          break;
+        }
+      }
+    }
+    if (!tokens) return;
     if (tokens.length) {
       ev.confirmed_box_tokens = [...tokens];
       delete ev.confirmed_box_token;
@@ -336,8 +347,13 @@ function syncVerifiedKeysFromEvents(events, reviewPayload = null) {
   if (Array.isArray(reviewList)) {
     for (const item of reviewList) {
       if (!item || typeof item !== "object") continue;
-      const key = eventRowKey(item);
-      verifiedTrueKeys.add(key);
+      verifiedTrueKeys.add(eventRowKey(item));
+      (events || []).forEach((ev) => {
+        if (eventMatchesReviewEntry(ev, item)) {
+          verifiedTrueKeys.add(eventRowKey(ev));
+          ev.verified_true = true;
+        }
+      });
     }
   }
   syncConfirmedBoxFromReview(reviewPayload, events);
@@ -345,7 +361,7 @@ function syncVerifiedKeysFromEvents(events, reviewPayload = null) {
 
 function applyVerifiedFlagsToEvents() {
   playbackEvents.forEach((ev) => {
-    ev.verified_true = isEventVerified(ev);
+    ev.verified_true = !!(ev.verified_true || isEventVerified(ev));
   });
 }
 

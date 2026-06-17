@@ -59,7 +59,7 @@ from pose_store import (
     resolve_event_review_status,
     save_event_review,
 )
-from video_frame import first_frame_base64
+from video_frame import first_frame_base64, frame_base64_at_index
 
 from api.accuracy_service import (
     build_accuracy_context,
@@ -72,7 +72,9 @@ from api.accuracy_service import (
 from api.annotate_service import (
     build_annotate_context,
     first_frame_video_for_camera,
+    list_camera_videos,
     normalize_pose_tier,
+    resolve_camera_video_path,
     video_pose_tier_for_annotate,
 )
 from api.collect_service import (
@@ -250,8 +252,13 @@ def get_annotate_context(annotation_source: str = "rtmpose-t", camera: str = "")
 
 
 @router.get("/api/annotate/frame")
-def get_annotate_frame(annotation_source: str = "rtmpose-t", camera: str = "") -> dict[str, Any]:
-    """标注页：从 localdata/video/{模型}/{机位}/ 取首个视频的首帧。"""
+def get_annotate_frame(
+    annotation_source: str = "rtmpose-t",
+    camera: str = "",
+    video_file: str = "",
+    frame_index: int = 0,
+) -> dict[str, Any]:
+    """标注页：从 localdata/video/{模型}/{机位}/ 提取指定视频帧（默认首个视频首帧）。"""
     label = normalize_corner_label(camera) if normalize_corner_label else str(camera or "").strip()
     if not label:
         raise HTTPException(400, "请选择机位")
@@ -262,17 +269,26 @@ def get_annotate_frame(annotation_source: str = "rtmpose-t", camera: str = "") -
         raise HTTPException(400, str(exc)) from exc
     paths = resolve_app_paths()
     try:
-        path = first_frame_video_for_camera(paths, label, pose_tier=video_tier)
+        path = resolve_camera_video_path(
+            paths, label, pose_tier=video_tier, video_file=str(video_file or "").strip()
+        )
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc
+    fi = max(0, int(frame_index))
     try:
-        frame = first_frame_base64(path)
+        frame = frame_base64_at_index(path, fi)
     except RuntimeError as exc:
         raise HTTPException(400, str(exc)) from exc
+    _slug, videos = list_camera_videos(paths, label, pose_tier=video_tier)
+    video_names = [p.name for p in videos]
+    video_index = next((i for i, p in enumerate(videos) if p.name == path.name), 0)
     frame["video_file"] = path.name
     frame["camera_label"] = label
     frame["annotation_source"] = norm
     frame["video_pose_tier"] = video_tier
+    frame["video_index"] = video_index
+    frame["video_count"] = len(video_names)
+    frame["video_names"] = video_names
     return frame
 
 
@@ -630,6 +646,10 @@ def get_record_annotation(record_id: str, annotation_source: str = "") -> Any:
         meta=meta if isinstance(meta, dict) else None,
     )
     tier_path = annotation_path_for_video_stem(video_stem, annotation_dir=ann_dir)
+    try:
+        resolved_in_tier = ann_path.resolve().is_relative_to(ann_dir.resolve())
+    except AttributeError:
+        resolved_in_tier = str(ann_path.resolve()).startswith(str(ann_dir.resolve()))
     return {
         **data,
         "_meta": {
@@ -637,7 +657,7 @@ def get_record_annotation(record_id: str, annotation_source: str = "") -> Any:
             "resolved_from": resolved_from,
             "annotation_path": str(ann_path),
             "annotation_dir": annotation_dir_display_rel(paths, norm),
-            "has_tier_file": tier_path.is_file() if norm != "master" else True,
+            "has_tier_file": resolved_from == "tier" or tier_path.is_file() or resolved_in_tier,
             "readonly": norm == "master",
         },
     }

@@ -210,6 +210,68 @@
     return [(clientX - rect.left) * scaleX, (clientY - rect.top) * scaleY];
   }
 
+  function canvasHitRadius(canvas, basePx) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / (rect.width || 1);
+    const scaleY = canvas.height / (rect.height || 1);
+    return basePx * Math.max(scaleX, scaleY, 1);
+  }
+
+  /** 命中四边形角点则返回角索引，否则 -1 */
+  function hitCellCornerIndex(poly, x, y, cornerHit) {
+    if (!poly || poly.length < 4) return -1;
+    let nearestCi = 0;
+    let nearestDist = Infinity;
+    for (let ci = 0; ci < poly.length; ci += 1) {
+      const d = geo().getPointDist([x, y], poly[ci]);
+      if (d < nearestDist) {
+        nearestDist = d;
+        nearestCi = ci;
+      }
+    }
+    return nearestDist < cornerHit ? nearestCi : -1;
+  }
+
+  function beginCellDrag(i, j, poly, x, y, cornerHit) {
+    const ci = hitCellCornerIndex(poly, x, y, cornerHit);
+    if (ci >= 0) {
+      dragTarget = { type: "cell-corner", row: i, col: j, ci };
+      return;
+    }
+    dragTarget = {
+      type: "cell-body",
+      row: i,
+      col: j,
+      startX: x,
+      startY: y,
+      startPoly: clonePoly(poly),
+      moved: false,
+    };
+  }
+
+  function tryBeginCellInteraction(i, j, x, y, cornerHit, { allowOutsideCorner = false } = {}) {
+    const poly = getCellPoly(i, j);
+    if (!poly || poly.length < 4) return false;
+    const inside = geo().pointInPolygon([x, y], poly);
+    const cornerCi = hitCellCornerIndex(poly, x, y, cornerHit);
+    if (inside || (allowOutsideCorner && cornerCi >= 0)) {
+      beginCellDrag(i, j, poly, x, y, cornerHit);
+      return true;
+    }
+    return false;
+  }
+
+  function findTopCellAtPoint(rows, cols, x, y) {
+    for (let i = rows - 1; i >= 0; i -= 1) {
+      for (let j = cols - 1; j >= 0; j -= 1) {
+        const poly = getCellPoly(i, j);
+        if (!poly || poly.length < 4) continue;
+        if (geo().pointInPolygon([x, y], poly)) return { row: i, col: j, poly };
+      }
+    }
+    return null;
+  }
+
   function drawShelfOutline(ctx) {
     if (!shelfPoints.length) return;
     ctx.lineWidth = 3;
@@ -247,8 +309,8 @@
             (dragTarget.type === "cell-body" || dragTarget.type === "cell-corner") &&
             dragTarget.row === i &&
             dragTarget.col === j);
-        ctx.strokeStyle = isSelected ? "#00d4aa" : "rgba(241, 196, 15, 0.45)";
-        ctx.lineWidth = isSelected ? 2.5 : 1.5;
+        ctx.strokeStyle = isSelected ? "#00d4aa" : "rgba(241, 196, 15, 0.28)";
+        ctx.lineWidth = isSelected ? 2.5 : 1;
         if (isSelected) {
           ctx.fillStyle = "rgba(0, 212, 170, 0.12)";
           ctx.beginPath();
@@ -470,11 +532,8 @@
         const pt = clientToCanvas(canvas, e.clientX, e.clientY);
         if (!pt) return;
         const [x, y] = pt;
-        const rect = canvas.getBoundingClientRect();
-        const scaleX = canvas.width / rect.width;
-        const scaleY = canvas.height / rect.height;
-        const cornerHit = 10 * Math.max(scaleX, scaleY, 1);
-        const shelfHit = 12 * Math.max(scaleX, scaleY, 1);
+        const cornerHit = canvasHitRadius(canvas, 10);
+        const shelfHit = canvasHitRadius(canvas, 12);
 
         if (shelfPoints.length === 4) {
           for (let i = 0; i < shelfPoints.length; i += 1) {
@@ -489,58 +548,38 @@
         if (!gridReady) return;
         const { rows, cols } = getGridExtent();
 
-        for (let i = rows - 1; i >= 0; i -= 1) {
-          for (let j = cols - 1; j >= 0; j -= 1) {
-            const poly = getCellPoly(i, j);
-            if (!poly || poly.length < 4 || !geo().pointInPolygon([x, y], poly)) continue;
-            let nearestCi = 0;
-            let nearestDist = Infinity;
-            for (let ci = 0; ci < poly.length; ci += 1) {
-              const d = geo().getPointDist([x, y], poly[ci]);
-              if (d < nearestDist) {
-                nearestDist = d;
-                nearestCi = ci;
-              }
-            }
-            if (nearestDist < cornerHit) {
-              dragTarget = { type: "cell-corner", row: i, col: j, ci: nearestCi };
-            } else {
-              dragTarget = {
-                type: "cell-body",
-                row: i,
-                col: j,
-                startX: x,
-                startY: y,
-                startPoly: clonePoly(poly),
-                moved: false,
-              };
-            }
+        // 已选中货位：仅操作该货位（角点可在多边形外少量延伸），其它货位不误触
+        if (selectedCell) {
+          const { rowIdx, colIdx } = selectedCell;
+          if (
+            tryBeginCellInteraction(rowIdx, colIdx, x, y, cornerHit, {
+              allowOutsideCorner: true,
+            })
+          ) {
             bump();
             return;
           }
-        }
 
-        let best = null;
-        let bestDist = cornerHit;
-        for (let i = 0; i < rows; i += 1) {
-          for (let j = 0; j < cols; j += 1) {
-            const poly = getCellPoly(i, j);
-            if (!poly) continue;
-            for (let ci = 0; ci < poly.length; ci += 1) {
-              const d = geo().getPointDist([x, y], poly[ci]);
-              if (d < bestDist) {
-                bestDist = d;
-                best = { type: "cell-corner", row: i, col: j, ci };
-              }
-            }
+          const hitOther = findTopCellAtPoint(rows, cols, x, y);
+          if (hitOther && (hitOther.row !== rowIdx || hitOther.col !== colIdx)) {
+            beginCellDrag(hitOther.row, hitOther.col, hitOther.poly, x, y, cornerHit);
+            bump();
+            return;
           }
-        }
-        if (best) {
-          dragTarget = best;
+
+          selectedCell = null;
+          if (onSelectionChange) onSelectionChange(null);
           bump();
           return;
         }
-        selectedCell = null;
+
+        const hit = findTopCellAtPoint(rows, cols, x, y);
+        if (hit) {
+          beginCellDrag(hit.row, hit.col, hit.poly, x, y, cornerHit);
+          bump();
+          return;
+        }
+
         if (onSelectionChange) onSelectionChange(null);
         bump();
       };

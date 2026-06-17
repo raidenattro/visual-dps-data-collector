@@ -229,6 +229,7 @@ function syncActiveEventFromPlaybackPosition(opts = {}) {
   if ($("#event-review-list-details")?.open) renderEventReviewTable();
   updateEventMarkerActiveState();
   if (typeof updateStageBoxPickMode === "function") updateStageBoxPickMode();
+  if (typeof redrawCurrentFrame === "function") redrawCurrentFrame();
 }
 
 function updateEventMarkerActiveState() {

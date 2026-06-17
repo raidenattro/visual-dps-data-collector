@@ -165,7 +165,7 @@
 
     <section id="panel-annotate" class="panel">
       <div class="card">
-        <p class="hint annotate-hint">选择标注来源与机位，编辑货框标注；母本只读对照，修改保存至对应模型目录；首帧来自该机位已采集的内置视频。</p>
+        <p class="hint annotate-hint">选择标注来源与机位，编辑货框标注；母本只读对照，修改保存至对应模型目录。背景帧来自该机位已采集视频，若首帧有遮挡可切换「下一帧」或「下个视频」。</p>
         <div class="row">
           <label>
             <span class="label-with-tip">标注来源
@@ -229,6 +229,15 @@
           <button type="button" id="annotate-reload">重新加载</button>
           <button type="button" id="annotate-restart">重置货架</button>
           <button type="button" id="annotate-download">下载当前 JSON</button>
+        </div>
+        <div id="annotate-frame-nav" class="annotate-frame-nav hidden">
+          <button type="button" id="annotate-prev-frame" title="上一帧">◀ 上一帧</button>
+          <span id="annotate-frame-pos" class="hint">帧 —</span>
+          <button type="button" id="annotate-next-frame" title="下一帧">下一帧 ▶</button>
+          <span class="hint" aria-hidden="true">|</span>
+          <button type="button" id="annotate-prev-video" title="上个视频">◀ 上个视频</button>
+          <span id="annotate-video-pos" class="hint">视频 —</span>
+          <button type="button" id="annotate-next-video" title="下个视频">下个视频 ▶</button>
         </div>
       </div>
       <div id="annotate-status" class="status annotate-status-bar hidden" role="status" aria-live="polite"></div>
@@ -572,7 +581,7 @@
   <script src="collectVideoPreview.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.8.0/math.js"></script>
   <script src="annotateGeometry.js"></script>
-  <script src="annotateVisualMode.js"></script>
+  <script src="annotateVisualMode.js?v=2"></script>
   <!-- 回放/采集主逻辑（由 app.monolith.js 拆分，按依赖顺序加载） -->
   <script src="app/00-core.js?v=56"></script>
   <script src="app/01-layout-frames.js?v=48"></script>
@@ -582,11 +591,11 @@
   <script src="app/05-collect.js?v=42"></script>
   <script src="app/06-records.js?v=47"></script>
   <script src="app/07-playback-stage.js?v=48"></script>
-  <script src="app/08-event-review.js?v=64"></script>
-  <script src="app/09-playback-events.js?v=54"></script>
-  <script src="app/10-render-collision.js?v=63"></script>
+  <script src="app/08-event-review.js?v=65"></script>
+  <script src="app/09-playback-events.js?v=55"></script>
+  <script src="app/10-render-collision.js?v=65"></script>
   <script src="app/11-playback-controls.js?v=55"></script>
-  <script src="annotate.js?v=15"></script>
+  <script src="annotate.js?v=17"></script>
   <script src="accuracy.js?v=6"></script>
 </body>
 </html>

@@ -41,6 +41,122 @@ function boxTokenLookupKeys(token) {
   return [...keys];
 }
 
+/** 采集落盘碰撞 token 与当前货框 token 可能格式不同（Box_id vs shelf:id） */
+function tokenInCollisionSet(token, set) {
+  if (!token || !set?.size) return false;
+  for (const key of boxTokenLookupKeys(token)) {
+    if (set.has(key)) return true;
+  }
+  return false;
+}
+
+function tokenInTokenMap(token, map) {
+  if (!token || !map?.size) return false;
+  for (const key of boxTokenLookupKeys(token)) {
+    if (map.get(key)) return true;
+  }
+  return false;
+}
+
+function parseBoxIdFromToken(token) {
+  const t = String(token || "").trim();
+  if (!t) return "";
+  if (t.startsWith("Box_")) return t.slice(4).trim();
+  if (t.includes(":")) return t.split(":").pop().trim();
+  return t;
+}
+
+function boxIdsFromTokenList(tokens) {
+  const ids = new Set();
+  (tokens || []).forEach((raw) => {
+    const id = parseBoxIdFromToken(raw);
+    if (id) ids.add(id);
+  });
+  return ids;
+}
+
+function eventTypeFrameKey(ev) {
+  return `${String(ev?.event_type || "").trim()}:${parseInt(ev?.frame_idx, 10) || 0}`;
+}
+
+function reviewEntryBoxIds(entry) {
+  const ids = boxIdsFromTokenList(entry?.box_tokens);
+  const confirmed =
+    typeof normalizeBoxTokenList === "function"
+      ? normalizeBoxTokenList(
+          entry?.confirmed_box_tokens ||
+            (entry?.confirmed_box_token ? [entry.confirmed_box_token] : [])
+        )
+      : [];
+  confirmed.forEach((t) => {
+    const id = parseBoxIdFromToken(t);
+    if (id) ids.add(id);
+  });
+  return ids;
+}
+
+function eventMatchesReviewEntry(ev, entry) {
+  if (!ev || !entry) return false;
+  if (eventTypeFrameKey(ev) !== eventTypeFrameKey(entry)) return false;
+  const evIds = boxIdsFromTokenList(ev?.box_tokens);
+  const revIds = reviewEntryBoxIds(entry);
+  for (const id of evIds) {
+    if (revIds.has(id)) return true;
+  }
+  return false;
+}
+
+/** 与准确率 build_ground_truth_segments 一致：连续相同范本货框合并为段 */
+function buildVerifiedGroundTruthSegments() {
+  if (!playbackEvents?.length) return [];
+  const entries = playbackEvents
+    .filter((ev) => typeof isEventVerified === "function" && isEventVerified(ev))
+    .map((ev) => {
+      const confirmed =
+        typeof getEventConfirmedBoxes === "function" ? getEventConfirmedBoxes(ev) : [];
+      const tokens =
+        confirmed.length > 0
+          ? confirmed
+          : typeof normalizeBoxTokenList === "function"
+            ? normalizeBoxTokenList(ev?.box_tokens)
+            : [];
+      return {
+        frame: parseInt(ev.frame_idx, 10) || 0,
+        tokens: tokens.filter(Boolean),
+      };
+    })
+    .filter((e) => e.tokens.length);
+  entries.sort((a, b) => a.frame - b.frame);
+
+  const tokenKey = (tokens) =>
+    [...tokens]
+      .map((t) => String(t).trim())
+      .filter(Boolean)
+      .sort()
+      .join(",");
+
+  const segments = [];
+  let current = null;
+  for (const entry of entries) {
+    const key = tokenKey(entry.tokens);
+    if (current && current.key === key) {
+      current.frame_end = Math.max(current.frame_end, entry.frame);
+      current.entry_count += 1;
+    } else {
+      if (current) segments.push(current);
+      current = {
+        key,
+        tokens: entry.tokens,
+        frame_start: entry.frame,
+        frame_end: entry.frame,
+        entry_count: 1,
+      };
+    }
+  }
+  if (current) segments.push(current);
+  return segments;
+}
+
 /** 射线法：点是否在多边形内（推理坐标系） */
 function pointInPolygon(point, polygon) {
   if (!Array.isArray(polygon) || polygon.length < 3) return false;
@@ -256,12 +372,8 @@ function loadAnnotationBoxesFromData(data) {
     return;
   }
   annotationSize = data?.annotation_size || null;
-  if (Array.isArray(data?.boxes)) {
-    annotationBoxes = data.boxes;
-    resetPlaybackCollisionTracker();
-    return;
-  }
-  if (Array.isArray(data?.shelves)) {
+  // 同时存在顶层 boxes 与 shelves 时优先 shelves（visual-dps 规范），避免 legacy boxes 与模型层格式 token 不一致
+  if (Array.isArray(data?.shelves) && data.shelves.length) {
     annotationBoxes = [];
     data.shelves.forEach((shelf) => {
       const code = String(shelf?.shelf_code || "").trim();
@@ -269,6 +381,11 @@ function loadAnnotationBoxesFromData(data) {
         annotationBoxes.push({ ...b, shelf_code: b.shelf_code || code });
       });
     });
+    resetPlaybackCollisionTracker();
+    return;
+  }
+  if (Array.isArray(data?.boxes)) {
+    annotationBoxes = data.boxes;
     resetPlaybackCollisionTracker();
     return;
   }
@@ -344,26 +461,45 @@ function syncCanvasSize() {
   return { cw: cssW, ch: cssH };
 }
 
-/** 回放/复核时当前选中事件货框高亮（复核面板打开即展示，不依赖播放帧对齐） */
-function getReviewBoxHighlightContext(_frameIdx = null) {
+/** 回放/复核时标真范本货框高亮（含连续标真片段覆盖的帧范围） */
+function getReviewBoxHighlightContext(frameIdx = null) {
   if (!playbackEvents?.length || !annotationBoxes.length) return null;
   if (!eventsPanel || eventsPanel.classList.contains("hidden")) return null;
+
+  const fi =
+    frameIdx != null && Number(frameIdx) > 0
+      ? Number(frameIdx)
+      : lastRenderedFrameIdx >= 1
+        ? lastRenderedFrameIdx
+        : typeof getCurrentPlaybackFrameIdx === "function"
+          ? getCurrentPlaybackFrameIdx()
+          : null;
+
+  const confirmedByToken = new Map();
+
+  if (fi != null && fi > 0) {
+    for (const seg of buildVerifiedGroundTruthSegments()) {
+      if (fi < seg.frame_start || fi > seg.frame_end) continue;
+      seg.tokens.forEach((token) => {
+        for (const key of boxTokenLookupKeys(token)) {
+          confirmedByToken.set(key, true);
+        }
+      });
+    }
+  }
 
   const activeEv =
     (typeof getActiveEvent === "function" ? getActiveEvent() : null) ??
     (typeof getActiveFilteredEvent === "function" ? getActiveFilteredEvent() : null);
-  if (!activeEv) return null;
-
-  const boxes =
-    typeof getEventConfirmedBoxes === "function"
-      ? getEventConfirmedBoxes(activeEv)
-      : [];
-  const confirmedByToken = new Map();
-  boxes.forEach((token) => {
-    for (const key of boxTokenLookupKeys(token)) {
-      confirmedByToken.set(key, true);
-    }
-  });
+  if (activeEv) {
+    const boxes =
+      typeof getEventConfirmedBoxes === "function" ? getEventConfirmedBoxes(activeEv) : [];
+    boxes.forEach((token) => {
+      for (const key of boxTokenLookupKeys(token)) {
+        confirmedByToken.set(key, true);
+      }
+    });
+  }
 
   if (!confirmedByToken.size) return null;
 
@@ -450,9 +586,9 @@ function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null, review
     );
     if (framePts.length < 3) return;
     const token = boxCollisionToken(box);
-    const isAlarm = alarmSet.has(token);
-    const isHit = collisionSet.has(token);
-    const isManuallyConfirmed = !!reviewCtx?.confirmedByToken?.get(token);
+    const isAlarm = tokenInCollisionSet(token, alarmSet);
+    const isHit = tokenInCollisionSet(token, collisionSet);
+    const isManuallyConfirmed = tokenInTokenMap(token, reviewCtx?.confirmedByToken);
 
     ctx.beginPath();
     framePts.forEach(([x, y], i) => {

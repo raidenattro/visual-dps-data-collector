@@ -663,6 +663,29 @@ def _annotation_file_candidates(ann_dir: Path, ann_name: str) -> list[Path]:
     return out
 
 
+def _try_reflection_annotation_files_in_dir(
+    meta: dict[str, Any] | None,
+    *,
+    ann_dir: Path,
+) -> Path | None:
+    """按 reflection 机位→标注编号，在指定 annotations 目录查找文件（如 94.json）。"""
+    if not meta:
+        return None
+    cam = str(meta.get("camera_label") or "").strip()
+    if not cam or not REFLECTION_OK or not normalize_corner_label:
+        return None
+    try:
+        reflection = load_reflection_or_http()
+        ann_ids = reflection.annotations_for_camera(normalize_corner_label(cam))
+        for aid in ann_ids:
+            for candidate in _annotation_file_candidates(ann_dir, aid):
+                if candidate.is_file():
+                    return candidate
+    except (HTTPException, ValueError, FileNotFoundError):
+        return None
+    return None
+
+
 def _resolve_annotation_in_dir(
     record_id: str,
     *,
@@ -679,6 +702,11 @@ def _resolve_annotation_in_dir(
             for candidate in _annotation_file_candidates(ann_dir, ann_name):
                 if candidate.is_file():
                     return candidate
+
+    # meta.annotation_file 常为采集包内 annotation.json，与 reflection 编号（如 94.json）不一致
+    reflection_hit = _try_reflection_annotation_files_in_dir(meta, ann_dir=ann_dir)
+    if reflection_hit:
+        return reflection_hit
 
     if allow_reflection and meta:
         cam = str(meta.get("camera_label") or "").strip()
@@ -751,10 +779,14 @@ def resolve_annotation_path_for_source(
         ann_dir=ann_dir,
         locator=locator,
         meta=meta,
-        allow_reflection=(norm == ANNOTATION_SOURCE_MASTER),
+        allow_reflection=True,
     )
     if path:
-        tag = "master" if norm == ANNOTATION_SOURCE_MASTER else "tier"
+        try:
+            in_tier = path.resolve().is_relative_to(ann_dir.resolve())
+        except AttributeError:
+            in_tier = str(path.resolve()).startswith(str(ann_dir.resolve()))
+        tag = "tier" if norm != ANNOTATION_SOURCE_MASTER and in_tier else "master"
         return path, tag
 
     if norm != ANNOTATION_SOURCE_MASTER:
