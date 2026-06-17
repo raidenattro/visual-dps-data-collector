@@ -27,6 +27,36 @@ from annotation_store import (
 from api.annotate_service import normalize_pose_tier
 from api.collision_recompute_service import recompute_record_collisions
 from api.record_service import meta_path_for_record, resolve_annotation_path_for_record
+from record_tag_store import normalize_tag_name, record_ids_with_all_tags
+
+
+def parse_accuracy_tag_filter(raw: Any) -> list[str]:
+    """解析准确率标签筛选（逗号分隔或列表）；多条须同时命中。"""
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        parts = [str(x) for x in raw]
+    else:
+        parts = str(raw).replace("，", ",").split(",")
+    names: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        text = str(part or "").strip()
+        if not text:
+            continue
+        name = normalize_tag_name(text)
+        key = name.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        names.append(name)
+    return names
+
+
+def _allowed_record_ids_for_tags(tags: list[str]) -> set[str] | None:
+    if not tags:
+        return None
+    return record_ids_with_all_tags(tags)
 
 
 def _ground_truth_tokens(entry: dict[str, Any]) -> list[str]:
@@ -351,9 +381,12 @@ def evaluate_camera_batch(
     *,
     pose_tier: str,
     camera_label: str,
+    tags: list[str] | None = None,
 ) -> dict[str, Any]:
     tier = normalize_pose_tier(pose_tier)
     slug = camera_storage_slug(camera_label)
+    tag_filter = list(tags or [])
+    allowed_ids = _allowed_record_ids_for_tags(tag_filter)
     clips_meta = list_evaluable_review_clips(paths, slug)
     if not clips_meta:
         raise ValueError(f"机位 {camera_label!r}（{slug}）下无「已复核」的 review 分片")
@@ -369,6 +402,7 @@ def evaluate_camera_batch(
     evaluated = 0
     skipped = 0
     errors = 0
+    tag_filtered = 0
 
     for meta in clips_meta:
         review_key = meta["review_key"]
@@ -381,6 +415,16 @@ def evaluate_camera_batch(
                 "error": f"该模型层 {tier} 下无匹配 pose 记录",
             })
             errors += 1
+            continue
+
+        if allowed_ids is not None and record_id not in allowed_ids:
+            clip_results.append({
+                "review_key": review_key,
+                "record_id": record_id,
+                "status": "excluded",
+                "error": f"记录标签未同时包含：{', '.join(tag_filter)}",
+            })
+            tag_filtered += 1
             continue
 
         result = evaluate_single_clip(
@@ -408,6 +452,8 @@ def evaluate_camera_batch(
         "evaluated": evaluated,
         "skipped": skipped,
         "errors": errors,
+        "tag_filter": tag_filter,
+        "tag_filtered": tag_filtered,
         **totals,
         "recall": (totals["detected"] / total_seg) if total_seg else None,
         "miss_rate": (totals["missed"] / total_seg) if total_seg else None,
@@ -428,6 +474,7 @@ def evaluate_camera_batch(
         "rules": {
             "eligible": "仅复核状态为 completed（已复核）的分片参与评估",
             "excluded": "no_collision 及其它未复核状态不纳入测试、不计入统计",
+            "tag_filter": "指定记录标签时，仅评估回放中同时带有全部标签的 pose 记录",
             "ground_truth": "verified_true：优先 confirmed_box_tokens，否则 box_tokens",
             "segment": "连续 verified_true 条目范本货框相同则合并为一段",
             "success": "段内 [frame_start, frame_end] 出现匹配货框的告警（alarm_collisions）",
@@ -479,10 +526,13 @@ def recompute_camera_records_batch(
     camera_label: str,
     alarm_min_consecutive_frames: int,
     alarm_cooldown_frames: int,
+    tags: list[str] | None = None,
 ) -> dict[str, Any]:
     """对指定模型层 + 机位下与 review 匹配的全部记录重算碰撞/告警并写回 timeline（不改 review）。"""
     tier = normalize_pose_tier(pose_tier)
     slug = camera_storage_slug(camera_label)
+    tag_filter = list(tags or [])
+    allowed_ids = _allowed_record_ids_for_tags(tag_filter)
     record_index = build_review_key_index(paths, tier)
     clips_meta = list_evaluable_review_clips(paths, slug)
     if not clips_meta:
@@ -493,6 +543,7 @@ def recompute_camera_records_batch(
     recomputed: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
     seen_records: set[str] = set()
+    tag_skipped = 0
 
     for meta in clips_meta:
         review_key = meta["review_key"]
@@ -500,6 +551,9 @@ def recompute_camera_records_batch(
         if not record_id or record_id in seen_records:
             continue
         seen_records.add(record_id)
+        if allowed_ids is not None and record_id not in allowed_ids:
+            tag_skipped += 1
+            continue
         locator = locate_record(paths.json_dir, record_id)
         if not locator:
             errors.append({"record_id": record_id, "review_key": review_key, "error": "记录不存在"})
@@ -532,6 +586,8 @@ def recompute_camera_records_batch(
         "pose_tier": tier,
         "camera_label": camera_label,
         "camera_slug": slug,
+        "tag_filter": tag_filter,
+        "tag_skipped": tag_skipped,
         "alarm_min_consecutive_frames": alarm_min,
         "alarm_cooldown_frames": alarm_cd,
         "record_count": len(seen_records),
@@ -550,6 +606,7 @@ def recompute_and_evaluate_camera_batch(
     camera_label: str,
     alarm_min_consecutive_frames: int,
     alarm_cooldown_frames: int,
+    tags: list[str] | None = None,
 ) -> dict[str, Any]:
     """先按新碰撞参数重算匹配记录，再执行准确率批量评估。"""
     recompute_result = recompute_camera_records_batch(
@@ -558,6 +615,7 @@ def recompute_and_evaluate_camera_batch(
         camera_label=camera_label,
         alarm_min_consecutive_frames=alarm_min_consecutive_frames,
         alarm_cooldown_frames=alarm_cooldown_frames,
+        tags=tags,
     )
     if not recompute_result.get("recomputed_count") and recompute_result.get("error_count"):
         raise ValueError(
@@ -565,23 +623,47 @@ def recompute_and_evaluate_camera_batch(
             if recompute_result.get("errors")
             else "无记录被重算"
         )
-    eval_result = evaluate_camera_batch(paths, pose_tier=pose_tier, camera_label=camera_label)
+    eval_result = evaluate_camera_batch(
+        paths,
+        pose_tier=pose_tier,
+        camera_label=camera_label,
+        tags=tags,
+    )
     eval_result["recompute"] = recompute_result
     return eval_result
 
 
-def build_accuracy_context(paths: AppPaths, reflection: Any, *, pose_tier: str, camera_label: str) -> dict[str, Any]:
+def build_accuracy_context(
+    paths: AppPaths,
+    reflection: Any,
+    *,
+    pose_tier: str,
+    camera_label: str,
+    tags: list[str] | None = None,
+) -> dict[str, Any]:
     tier = normalize_pose_tier(pose_tier)
     slug = camera_storage_slug(camera_label)
+    tag_filter = list(tags or [])
+    allowed_ids = _allowed_record_ids_for_tags(tag_filter)
     clips = list_evaluable_review_clips(paths, slug)
     record_index = build_review_key_index(paths, tier)
-    matched = sum(1 for c in clips if record_index.get(c["review_key"]))
+    matched = 0
+    tag_eligible = 0
+    for c in clips:
+        rid = record_index.get(c["review_key"], "")
+        if not rid:
+            continue
+        matched += 1
+        if allowed_ids is None or rid in allowed_ids:
+            tag_eligible += 1
     return {
         "pose_tier": tier,
         "camera_label": camera_label,
         "camera_slug": slug,
         "clip_count": len(clips),
         "matched_record_count": matched,
+        "tag_filter": tag_filter,
+        "tag_eligible_clip_count": tag_eligible if tag_filter else matched,
         "review_filter": REVIEW_STATUS_COMPLETED,
         "clips": [
             {**c, "record_id": record_index.get(c["review_key"], "")}

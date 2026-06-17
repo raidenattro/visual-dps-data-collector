@@ -49,19 +49,29 @@ function getAccuracyEvalMode() {
   return acc$("#accuracy-eval-mode")?.value || "evaluate_only";
 }
 
+function parseAccuracyTagFilterQuery() {
+  return String(acc$("#accuracy-tag-filter")?.value || "")
+    .split(/[,，]/)
+    .map((t) => t.trim())
+    .filter(Boolean);
+}
+
 function readAccuracyRequestBody() {
   const poseTier = acc$("#accuracy-pose-tier")?.value || "rtmpose-m";
   const camera = acc$("#accuracy-camera")?.value || "";
+  const tags = parseAccuracyTagFilterQuery();
   const collision =
     typeof window.readAccuracyCollisionConfigFromForm === "function"
       ? window.readAccuracyCollisionConfigFromForm()
       : { alarm_min_consecutive_frames: 3, alarm_cooldown_frames: 6 };
-  return {
+  const body = {
     pose_tier: poseTier,
     camera,
     alarm_min_consecutive_frames: collision.alarm_min_consecutive_frames,
     alarm_cooldown_frames: collision.alarm_cooldown_frames,
   };
+  if (tags.length) body.tags = tags.join(",");
+  return body;
 }
 
 function updateAccuracyContextHint(ctx) {
@@ -71,7 +81,27 @@ function updateAccuracyContextHint(ctx) {
     return;
   }
   el.classList.remove("hidden");
-  el.innerHTML = `机位 <strong>${escHtml(ctx.camera_label)}</strong>（<code>${escHtml(ctx.camera_slug)}</code>）· <strong>已复核</strong>分片 <strong>${ctx.clip_count}</strong> 个 · 模型层 <code>${escHtml(ctx.pose_tier)}</code> 可匹配记录 <strong>${ctx.matched_record_count}</strong> 个`;
+  const tagFilter = Array.isArray(ctx.tag_filter) ? ctx.tag_filter : [];
+  const tagPart = tagFilter.length
+    ? ` · 标签 <code>${escHtml(tagFilter.join(", "))}</code>（须同时命中）可评估 <strong>${ctx.tag_eligible_clip_count ?? 0}</strong> 片`
+    : "";
+  el.innerHTML = `机位 <strong>${escHtml(ctx.camera_label)}</strong>（<code>${escHtml(ctx.camera_slug)}</code>）· <strong>已复核</strong>分片 <strong>${ctx.clip_count}</strong> 个 · 模型层 <code>${escHtml(ctx.pose_tier)}</code> 可匹配记录 <strong>${ctx.matched_record_count}</strong> 个${tagPart}`;
+}
+
+async function loadAccuracyTagSuggestions() {
+  const list = acc$("#accuracy-tag-suggestions");
+  if (!list) return;
+  try {
+    const res = await fetch("/api/tags");
+    if (!res.ok) return;
+    const data = await res.json();
+    const tags = Array.isArray(data.tags) ? data.tags : [];
+    list.innerHTML = tags
+      .map((item) => `<option value="${escAttr(item.name || "")}"></option>`)
+      .join("");
+  } catch {
+    /* 忽略 */
+  }
 }
 
 async function loadAccuracyCameras() {
@@ -107,6 +137,8 @@ async function refreshAccuracyContext() {
   }
   try {
     const qs = new URLSearchParams({ pose_tier: poseTier, camera });
+    const tags = parseAccuracyTagFilterQuery();
+    if (tags.length) qs.set("tags", tags.join(","));
     const res = await fetch(`/api/accuracy/context?${qs}`);
     if (!res.ok) throw new Error(await readApiError(res));
     updateAccuracyContextHint(await res.json());
@@ -119,8 +151,13 @@ function renderAccuracyRecomputeSummary(recompute) {
   if (!recompute) return "";
   const ok = recompute.recomputed_count ?? 0;
   const err = recompute.error_count ?? 0;
+  const tagSkipped = recompute.tag_skipped ?? 0;
   const params = `alarm_min=${recompute.alarm_min_consecutive_frames ?? "—"}, cooldown=${recompute.alarm_cooldown_frames ?? "—"}`;
-  return `<p class="hint accuracy-recompute-hint">碰撞重算：成功 <strong>${ok}</strong> 条，失败 <strong>${err}</strong> 条（${escHtml(params)}）· ${escHtml(recompute.note || "")}</p>`;
+  const tagHint =
+    Array.isArray(recompute.tag_filter) && recompute.tag_filter.length
+      ? ` · 标签未命中跳过 <strong>${tagSkipped}</strong> 条`
+      : "";
+  return `<p class="hint accuracy-recompute-hint">碰撞重算：成功 <strong>${ok}</strong> 条，失败 <strong>${err}</strong> 条${tagHint}（${escHtml(params)}）· ${escHtml(recompute.note || "")}</p>`;
 }
 
 function renderAccuracySummary(result) {
@@ -128,13 +165,18 @@ function renderAccuracySummary(result) {
   if (!el) return;
   const s = result.summary || {};
   const recomputeBlock = renderAccuracyRecomputeSummary(result.recompute);
-  if (!s.evaluated && !recomputeBlock) {
+  const tagFilter = Array.isArray(s.tag_filter) ? s.tag_filter : [];
+  const tagHint = tagFilter.length
+    ? `<p class="hint accuracy-tag-hint">记录标签筛选：<code>${escHtml(tagFilter.join(", "))}</code>（须同时命中）· 标签未命中排除 <strong>${s.tag_filtered ?? 0}</strong> 片</p>`
+    : "";
+  if (!s.evaluated && !recomputeBlock && !tagHint) {
     el.classList.add("hidden");
     return;
   }
   el.classList.remove("hidden");
   el.innerHTML = `
     ${recomputeBlock}
+    ${tagHint}
     <h2 class="accuracy-summary-heading">汇总 · ${escHtml(result.camera_label)} · ${escHtml(result.pose_tier)}</h2>
     <div class="accuracy-metrics-grid">
       <div class="accuracy-metric"><span class="accuracy-metric-label">评估分片</span><span class="accuracy-metric-value">${s.evaluated ?? 0} / ${s.clip_count ?? 0}</span></div>
@@ -384,6 +426,7 @@ function initAccuracyPanel() {
   if (accuracyPanelInited) return;
   accuracyPanelInited = true;
   loadAccuracyCameras();
+  void loadAccuracyTagSuggestions();
   syncAccuracyCollisionUi();
 
   if (typeof window.applyAccuracyCollisionConfigToForm === "function") {
@@ -403,6 +446,15 @@ function initAccuracyPanel() {
   acc$("#accuracy-camera")?.addEventListener("change", () => {
     void refreshAccuracyContext();
   });
+  const tagInput = acc$("#accuracy-tag-filter");
+  if (tagInput && !tagInput.dataset.bound) {
+    tagInput.dataset.bound = "1";
+    let tagTimer = null;
+    tagInput.addEventListener("input", () => {
+      if (tagTimer) clearTimeout(tagTimer);
+      tagTimer = setTimeout(() => void refreshAccuracyContext(), 300);
+    });
+  }
   acc$("#accuracy-clip-status-filter")?.addEventListener("change", () => {
     renderAccuracyClips(lastAccuracyClips);
   });

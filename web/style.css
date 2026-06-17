@@ -2024,6 +2024,29 @@ button.danger-btn {
   margin-top: 0.5rem;
 }
 
+.accuracy-tag-filter {
+  flex: 1 1 12rem;
+  min-width: 10rem;
+}
+
+.accuracy-tag-filter input[type="search"] {
+  width: 100%;
+  min-width: 10rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 6px;
+  border: 1px solid #3d4f66;
+  background: #1a2332;
+  color: #e7ecf3;
+}
+
+.accuracy-tag-hint {
+  margin: 0 0 0.75rem;
+  padding: 0.45rem 0.65rem;
+  background: #0f172a;
+  border-radius: 6px;
+  border: 1px solid #334155;
+}
+
 .accuracy-recompute-hint {
   margin-bottom: 0.75rem;
   padding: 0.5rem 0.65rem;

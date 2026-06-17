@@ -276,7 +276,20 @@
               <option value="">— 加载中 —</option>
             </select>
           </label>
+          <label class="accuracy-tag-filter">
+            <span class="label-with-tip">记录标签
+              <button type="button" class="field-tip" data-tip="与回放页记录标签一致；多个标签用逗号分隔，须同时命中才参与评估/重算。留空表示该机位下全部已匹配记录。">?</button>
+            </span>
+            <input
+              type="search"
+              id="accuracy-tag-filter"
+              list="accuracy-tag-suggestions"
+              placeholder="例如：单人, 遮挡"
+              autocomplete="off"
+            />
+          </label>
         </div>
+        <datalist id="accuracy-tag-suggestions"></datalist>
         <fieldset class="collision-config accuracy-collision-config">
           <legend class="legend-with-tip">碰撞检测参数（重算时使用）
             <button type="button" class="field-tip" data-tip="与采集页一致：基于已有骨架 keypoints 重算 collisions / alarm_collisions，仅覆盖写回 timeline 与 manifest.collision；不修改 localdata/review 人工复核。">?</button>
@@ -568,6 +581,6 @@
   <script src="app/10-render-collision.js?v=63"></script>
   <script src="app/11-playback-controls.js?v=55"></script>
   <script src="annotate.js?v=15"></script>
-  <script src="accuracy.js?v=5"></script>
+  <script src="accuracy.js?v=6"></script>
 </body>
 </html>

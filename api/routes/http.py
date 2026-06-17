@@ -64,6 +64,7 @@ from api.accuracy_service import (
     build_accuracy_context,
     evaluate_camera_batch,
     list_accuracy_camera_options,
+    parse_accuracy_tag_filter,
     recompute_and_evaluate_camera_batch,
     recompute_camera_records_batch,
 )
@@ -284,8 +285,8 @@ def list_accuracy_cameras() -> dict[str, Any]:
 
 
 @router.get("/api/accuracy/context")
-def get_accuracy_context(pose_tier: str = "", camera: str = "") -> dict[str, Any]:
-    """准确率页：模型 + 机位 → 可评估 clip 与匹配记录。"""
+def get_accuracy_context(pose_tier: str = "", camera: str = "", tags: str = "") -> dict[str, Any]:
+    """准确率页：模型 + 机位 → 可评估 clip 与匹配记录；tags 逗号分隔多标签（须全部匹配）。"""
     label = normalize_corner_label(camera) if normalize_corner_label else str(camera or "").strip()
     if not label:
         raise HTTPException(400, "请选择机位")
@@ -293,9 +294,16 @@ def get_accuracy_context(pose_tier: str = "", camera: str = "") -> dict[str, Any
         tier = normalize_pose_tier(pose_tier)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+    tag_filter = parse_accuracy_tag_filter(tags)
     reflection = load_reflection_or_http()
     paths = resolve_app_paths()
-    return build_accuracy_context(paths, reflection, pose_tier=tier, camera_label=label)
+    return build_accuracy_context(
+        paths,
+        reflection,
+        pose_tier=tier,
+        camera_label=label,
+        tags=tag_filter or None,
+    )
 
 
 @router.post("/api/accuracy/evaluate")
@@ -306,8 +314,14 @@ def post_accuracy_evaluate(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
     if not camera:
         raise HTTPException(400, "请选择机位")
     paths = resolve_app_paths()
+    tag_filter = parse_accuracy_tag_filter(body.get("tags"))
     try:
-        return evaluate_camera_batch(paths, pose_tier=pose_tier, camera_label=camera)
+        return evaluate_camera_batch(
+            paths,
+            pose_tier=pose_tier,
+            camera_label=camera,
+            tags=tag_filter or None,
+        )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -325,6 +339,7 @@ def post_accuracy_recompute(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
     except (TypeError, ValueError) as exc:
         raise HTTPException(400, "碰撞参数须为整数") from exc
     paths = resolve_app_paths()
+    tag_filter = parse_accuracy_tag_filter(body.get("tags"))
     try:
         return recompute_camera_records_batch(
             paths,
@@ -332,6 +347,7 @@ def post_accuracy_recompute(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
             camera_label=camera,
             alarm_min_consecutive_frames=alarm_min,
             alarm_cooldown_frames=alarm_cd,
+            tags=tag_filter or None,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -350,6 +366,7 @@ def post_accuracy_recompute_evaluate(body: dict[str, Any] = Body(...)) -> dict[s
     except (TypeError, ValueError) as exc:
         raise HTTPException(400, "碰撞参数须为整数") from exc
     paths = resolve_app_paths()
+    tag_filter = parse_accuracy_tag_filter(body.get("tags"))
     try:
         return recompute_and_evaluate_camera_batch(
             paths,
@@ -357,6 +374,7 @@ def post_accuracy_recompute_evaluate(body: dict[str, Any] = Body(...)) -> dict[s
             camera_label=camera,
             alarm_min_consecutive_frames=alarm_min,
             alarm_cooldown_frames=alarm_cd,
+            tags=tag_filter or None,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
