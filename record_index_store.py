@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from typing import Any
 
 from config_loader import AppPaths, resolve_app_paths
@@ -15,6 +16,14 @@ from pose_store import (
     iter_active_records,
 )
 from record_tag_store import _utc_now, get_db, init_data_store
+
+_sync_lock = threading.Lock()
+_synced_tiers: set[str] = set()
+
+
+def _tier_sync_key(pose_tier: str | None) -> str:
+    return (str(pose_tier or "").strip().lower() or "__all__")
+
 
 REVIEW_STATUS_FILTERS = frozenset(
     {
@@ -133,6 +142,40 @@ def sync_record_summaries(paths: AppPaths | None = None, pose_tier: str | None =
                     conn.execute("DELETE FROM record_index WHERE record_id = ?", (rid,))
         conn.commit()
     return refreshed
+
+
+def maybe_sync_record_summaries(
+    paths: AppPaths | None = None,
+    pose_tier: str | None = None,
+    *,
+    force: bool = False,
+    offset: int = 0,
+) -> int | None:
+    """按需同步 record_index：分页不 sync；每个 pose_tier 每进程首屏自动 sync 一次。
+
+    force=True 时强制全量同步（仍仅在 offset=0 时执行，避免分页重复扫描）。
+    返回本次刷新条数；跳过时返回 None。
+    """
+    if offset > 0:
+        return None
+
+    tier_key = _tier_sync_key(pose_tier)
+    with _sync_lock:
+        if not force and tier_key in _synced_tiers:
+            return None
+
+    paths = paths or resolve_app_paths()
+    refreshed = sync_record_summaries(paths, pose_tier)
+
+    with _sync_lock:
+        _synced_tiers.add(tier_key)
+    return refreshed
+
+
+def clear_record_index_sync_state() -> None:
+    """测试或运维：清除进程内「已同步 tier」标记，使下次列表首屏可再次自动 sync。"""
+    with _sync_lock:
+        _synced_tiers.clear()
 
 
 def refresh_record_summary(record_id: str, paths: AppPaths | None = None) -> bool:

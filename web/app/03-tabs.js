@@ -18,7 +18,7 @@ tabs.forEach((btn) => {
       if (typeof window.initAccuracyPanel === "function") window.initAccuracyPanel();
     }
     if (btn.dataset.tab === "playback") {
-      loadRecords();
+      void loadRecords({ quiet: playbackRecordsByTier.has(playbackPoseTier || "rtmpose-t") });
       restorePlaybackPanelUi();
     }
   });

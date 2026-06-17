@@ -509,7 +509,7 @@ collectForm.addEventListener("submit", async (e) => {
       <p>✅ 已保存至 <code>localdata/json</code>${hasVideo ? " 与 <code>localdata/video</code>" : ""}${annNoteResult}，共 <strong>${job.frame_count ?? "?"}</strong> 帧</p>
       <p><a href="${job.pose_url}" download>下载 JSON</a> · 管理记录与骨架回放请到「回放」页</p>`;
     hideStatus();
-    loadRecords();
+    notifyPlaybackRecordsChanged(poseTierFromRecordId(rid));
   } catch (err) {
     showStatus(`❌ ${err.message}`, true);
   } finally {
@@ -570,7 +570,7 @@ collectBatchBtn?.addEventListener("click", async () => {
       <p>数据目录：<code>localdata/json/${slug}</code>${params.save_video === "1" ? ` · 视频：<code>localdata/video/${slug}</code>` : ""}</p>
       <p>管理记录与回放请到「回放」页（按机位分组）</p>`;
     hideStatus();
-    loadRecords();
+    notifyPlaybackRecordsChanged();
   } catch (err) {
     showStatus(`❌ ${err.message}`, true);
   } finally {

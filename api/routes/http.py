@@ -103,7 +103,7 @@ from record_index_store import (
     import_event_reviews_to_index,
     list_record_summaries,
     refresh_record_summary,
-    sync_record_summaries,
+    maybe_sync_record_summaries,
 )
 from record_tag_store import (
     delete_record_tags,
@@ -396,6 +396,11 @@ def import_event_reviews_api(pose_tier: str = "") -> dict[str, Any]:
     return {"ok": True, **stats}
 
 
+def _parse_sync_query(raw: str) -> bool:
+    text = str(raw or "").strip().lower()
+    return text in {"1", "true", "yes", "y"}
+
+
 def _parse_has_verified_query(raw: str) -> bool | None:
     text = str(raw or "").strip().lower()
     if not text or text in {"all", "any"}:
@@ -416,8 +421,13 @@ def list_records(
     tags: str = "",
     review_status: str = "",
     has_verified: str = "",
+    sync: str = "",
 ) -> list[dict[str, Any]]:
-    """列出采集记录。pose_tier 过滤 rtmpose-t/s/m；tags 逗号分隔多标签（需全部匹配）。"""
+    """列出采集记录。pose_tier 过滤 rtmpose-t/s/m；tags 逗号分隔多标签（需全部匹配）。
+
+    summary=1 时默认只读 data.db 索引；sync=1 且 offset=0 时强制与磁盘对齐（删除/迁移后刷新用）。
+    每个 pose_tier 在服务进程内首屏会自动 sync 一次以回填空索引。
+    """
     paths = resolve_app_paths()
     paths.json_dir.mkdir(parents=True, exist_ok=True)
     tier_filter = str(pose_tier or "").strip().lower() or None
@@ -428,7 +438,12 @@ def list_records(
     lim = int(limit)
 
     if summary:
-        sync_record_summaries(paths, tier_filter)
+        maybe_sync_record_summaries(
+            paths,
+            tier_filter,
+            force=_parse_sync_query(sync),
+            offset=off,
+        )
         allowed_ids = record_ids_with_all_tags(tag_filter) if tag_filter else None
         items = list_record_summaries(
             pose_tier=tier_filter,

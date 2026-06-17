@@ -836,6 +836,11 @@ main:has(#panel-playback.active) {
   background: #0c1220;
 }
 
+.playback-records-load-more {
+  margin: 0.75rem 0 0;
+  text-align: center;
+}
+
 .playback-records-empty {
   margin: 0.75rem;
 }

@@ -174,6 +174,13 @@ def recompute_record_collisions(
         except (OSError, json.JSONDecodeError):
             pass
 
+    try:
+        from record_index_store import refresh_record_summary
+
+        refresh_record_summary(locator.record_id)
+    except Exception:
+        pass
+
     return {
         "record_id": locator.record_id,
         "frame_count": len(frames),

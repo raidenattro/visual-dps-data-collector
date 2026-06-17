@@ -34,6 +34,7 @@ from pose_store import (
     locate_record,
     meta_sidecar_path,
 )
+from record_index_store import refresh_record_summary
 
 from api.job_store import batch_timing_from_progress, update_job
 from api.job_store import _jobs, _jobs_lock
@@ -277,6 +278,10 @@ def run_job(
                     )
             except (RuntimeError, OSError, ValueError):
                 pass
+        try:
+            refresh_record_summary(record_id, paths)
+        except Exception:
+            pass
         if collect_config and pose_path.is_dir():
             manifest_path = pose_path / "manifest.json"
             if manifest_path.is_file():

@@ -10,7 +10,12 @@ let playbackPoseTier = "rtmpose-t";
 let playbackKnownTags = [];
 /** 按模型层缓存的记录列表，切换 tier 时即时展示 */
 const playbackRecordsByTier = new Map();
+/** 每层分页加载状态：items / nextOffset / hasMore / loadingMore */
+const playbackTierLoadState = new Map();
+/** 同 tier 并发 load 去重 */
+const playbackRecordsLoadInflight = new Map();
 
+const RECORD_LIST_PAGE_SIZE = 200;
 const POSE_MODEL_TIERS = new Set(["rtmpose-t", "rtmpose-s", "rtmpose-m"]);
 
 function cameraSlugFromRecordId(recordId) {
@@ -177,15 +182,64 @@ async function patchRecordTags(recordId, { add = [], remove = [] } = {}) {
   const data = await res.json();
   const tags = Array.isArray(data.tags) ? data.tags : [];
   patchRecordTagsInCache(recordId, tags);
-  playbackRecordsByTier.set(playbackPoseTier, [...playbackRecordsCache]);
+  commitPlaybackRecordsCacheToTier();
   await fetchKnownTags();
   renderPlaybackRecordsList(playbackRecordsCache);
   return tags;
 }
 
+function getTierLoadState(tier) {
+  const key = String(tier || "rtmpose-t").trim();
+  if (!playbackTierLoadState.has(key)) {
+    playbackTierLoadState.set(key, {
+      items: [],
+      nextOffset: 0,
+      hasMore: true,
+      loadingMore: false,
+    });
+  }
+  return playbackTierLoadState.get(key);
+}
+
+function commitPlaybackRecordsCacheToTier(tier = playbackPoseTier) {
+  const key = String(tier || "rtmpose-t").trim();
+  playbackRecordsByTier.set(key, [...playbackRecordsCache]);
+  const state = playbackTierLoadState.get(key);
+  if (state) state.items = playbackRecordsCache;
+}
+
+function resetTierLoadState(tier) {
+  const key = String(tier || "").trim();
+  if (!key) return;
+  playbackTierLoadState.delete(key);
+  playbackRecordsByTier.delete(key);
+}
+
 function invalidatePlaybackTierCache(tier = "") {
-  if (tier) playbackRecordsByTier.delete(tier);
-  else playbackRecordsByTier.clear();
+  if (tier) resetTierLoadState(tier);
+  else {
+    playbackTierLoadState.clear();
+    playbackRecordsByTier.clear();
+  }
+}
+
+function poseTierFromRecordId(recordId) {
+  const parts = String(recordId || "")
+    .split("/")
+    .filter(Boolean);
+  if (parts.length >= 1 && POSE_MODEL_TIERS.has(parts[0])) return parts[0];
+  return "";
+}
+
+/** 采集/删除等变更后：失效缓存；若正在回放页且为当前层则静默刷新 */
+function notifyPlaybackRecordsChanged(tier = "") {
+  if (tier) resetTierLoadState(tier);
+  else invalidatePlaybackTierCache();
+  if (!panels?.playback?.classList.contains("active")) return;
+  const active = playbackPoseTier || "rtmpose-t";
+  if (!tier || tier === active) {
+    void loadRecords({ quiet: true, force: true });
+  }
 }
 
 let activeRecordTagPicker = null;
@@ -341,7 +395,7 @@ function patchPlaybackRecordReviewStatus(recordId, status, label = "") {
     };
   });
   if (changed) {
-    playbackRecordsByTier.set(playbackPoseTier, [...playbackRecordsCache]);
+    commitPlaybackRecordsCacheToTier();
     renderPlaybackRecordsList(playbackRecordsCache);
   }
 }
@@ -421,7 +475,27 @@ function renderCameraGroupItem(key, groupItems) {
     </li>`;
 }
 
+function playbackRecordsCountSuffix(tier = playbackPoseTier) {
+  const state = playbackTierLoadState.get(String(tier || "rtmpose-t").trim());
+  if (!state?.hasMore) return "";
+  return "（已加载部分，可加载更多）";
+}
+
+function renderRecordsLoadMoreFooter() {
+  const tier = playbackPoseTier || "rtmpose-t";
+  const state = playbackTierLoadState.get(tier);
+  if (!state?.hasMore) return "";
+  if (state.loadingMore) {
+    return `<p class="hint playback-records-load-more">加载更多…</p>`;
+  }
+  return `<p class="playback-records-load-more"><button type="button" class="link-btn playback-load-more-btn">加载更多记录…</button></p>`;
+}
+
 function bindRecordListEvents(list) {
+  list.querySelector(".playback-load-more-btn")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    void loadMoreRecords();
+  });
   list.querySelectorAll(".record-back-cameras").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.preventDefault();
@@ -570,13 +644,14 @@ function renderPlaybackRecordsList(items) {
   if (!playbackSelectedCameraSlug) {
     if (countEl) {
       const tierLabel = playbackPoseTier || "rtmpose-t";
+      const moreHint = playbackRecordsCountSuffix(tierLabel);
       countEl.textContent = hasFilter
-        ? `${tierLabel} · ${keys.length} 个机位 · 匹配 ${filtered.length} / ${items.length} 条`
-        : `${tierLabel} · ${keys.length} 个机位 · 共 ${items.length} 条`;
+        ? `${tierLabel} · ${keys.length} 个机位 · 匹配 ${filtered.length} / ${items.length} 条${moreHint}`
+        : `${tierLabel} · ${keys.length} 个机位 · 共 ${items.length} 条${moreHint}`;
     }
     list.innerHTML = `<ul class="camera-group-list">${keys
       .map((key) => renderCameraGroupItem(key, groups.get(key)))
-      .join("")}</ul>`;
+      .join("")}</ul>${renderRecordsLoadMoreFooter()}`;
     bindRecordListEvents(list);
     return;
   }
@@ -604,95 +679,131 @@ function renderPlaybackRecordsList(items) {
     </div>
     ${
       rows
-        ? `<ul class="session-list">${rows}</ul>`
+        ? `<ul class="session-list">${rows}</ul>${renderRecordsLoadMoreFooter()}`
         : "<p class='hint playback-records-empty'>该机位下无匹配记录</p>"
     }`;
   bindRecordListEvents(list);
   if (keepId) highlightPlaybackRecordInList(keepId);
 }
 
-/** 分页拉取全部记录（突破历史 500 条上限） */
-async function fetchAllRecordSummaries({ onProgress = null, poseTier = playbackPoseTier, quiet = false } = {}) {
-  const pageSize = 500;
-  const all = [];
+/** 拉取单页记录；仅 offset=0 可带 sync=1 */
+async function fetchRecordSummariesPage({
+  poseTier = playbackPoseTier,
+  offset = 0,
+  limit = RECORD_LIST_PAGE_SIZE,
+  sync = false,
+} = {}) {
   const tier = String(poseTier || "rtmpose-t").trim();
-  for (let offset = 0; ; offset += pageSize) {
-    const res = await fetch(
-      `/api/records?summary=1&offset=${offset}&limit=${pageSize}&pose_tier=${encodeURIComponent(tier)}`
-    );
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || res.statusText || "加载记录失败");
-    }
-    const batch = await res.json();
-    if (!Array.isArray(batch) || batch.length === 0) break;
-    all.push(...batch);
-    if (typeof onProgress === "function") onProgress(all.length);
-    if (batch.length < pageSize) break;
+  const syncQs = offset === 0 && sync ? "&sync=1" : "";
+  const res = await fetch(
+    `/api/records?summary=1&offset=${offset}&limit=${limit}&pose_tier=${encodeURIComponent(tier)}${syncQs}`
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || res.statusText || "加载记录失败");
   }
-  return all;
+  const batch = await res.json();
+  return Array.isArray(batch) ? batch : [];
+}
+
+async function loadRecordsPage(tier, { sync = false, append = false } = {}) {
+  const key = String(tier || "rtmpose-t").trim();
+  const state = getTierLoadState(key);
+  if (append && !state.hasMore) return state.items;
+
+  const offset = append ? state.nextOffset : 0;
+  if (!append) {
+    state.items = [];
+    state.nextOffset = 0;
+    state.hasMore = true;
+  }
+
+  const batch = await fetchRecordSummariesPage({
+    poseTier: key,
+    offset,
+    limit: RECORD_LIST_PAGE_SIZE,
+    sync: !append && sync,
+  });
+
+  if (append) state.items.push(...batch);
+  else state.items = batch;
+  state.nextOffset = state.items.length;
+  state.hasMore = batch.length >= RECORD_LIST_PAGE_SIZE;
+  playbackRecordsByTier.set(key, [...state.items]);
+  return state.items;
+}
+
+async function loadMoreRecords() {
+  const tier = playbackPoseTier || "rtmpose-t";
+  const state = getTierLoadState(tier);
+  if (!state.hasMore || state.loadingMore) return;
+  state.loadingMore = true;
+  renderPlaybackRecordsList(playbackRecordsCache);
+  try {
+    const items = await loadRecordsPage(tier, { append: true });
+    playbackRecordsCache = items;
+    await fetchKnownTags();
+    renderPlaybackRecordsList(items);
+  } catch (err) {
+    const msg = err?.message ? `加载更多失败：${err.message}` : "加载更多失败";
+    setPlaybackInfo(`❌ ${msg}`);
+  } finally {
+    state.loadingMore = false;
+    renderPlaybackRecordsList(playbackRecordsCache);
+  }
 }
 
 async function loadRecords({ quiet = false, force = false } = {}) {
   const list = $("#session-list");
   const tier = playbackPoseTier || "rtmpose-t";
-  const cached = playbackRecordsByTier.get(tier);
 
-  if (!force && cached?.length) {
-    playbackRecordsCache = cached;
-    await fetchKnownTags();
-    renderPlaybackRecordsList(playbackRecordsCache);
-    void refreshRecordsForTier(tier, { quiet: true });
+  if (!force) {
+    const cached = playbackRecordsByTier.get(tier);
+    if (cached?.length) {
+      playbackRecordsCache = cached;
+      await fetchKnownTags();
+      renderPlaybackRecordsList(playbackRecordsCache);
+      return;
+    }
+  }
+
+  if (playbackRecordsLoadInflight.has(tier)) {
+    try {
+      await playbackRecordsLoadInflight.get(tier);
+    } catch {
+      /* 由首次请求展示错误 */
+    }
+    if ((playbackPoseTier || "rtmpose-t") === tier) {
+      playbackRecordsCache = playbackRecordsByTier.get(tier) || [];
+      if (playbackRecordsCache.length) renderPlaybackRecordsList(playbackRecordsCache);
+    }
     return;
   }
 
-  if (!quiet && !playbackRecordsCache.length) {
-    list.innerHTML = "<p class='hint playback-records-empty'>加载记录中…</p>";
-  }
-  try {
-    const items = await fetchAllRecordSummaries({
-      poseTier: tier,
-      onProgress: (n) => {
-        if (quiet || playbackRecordsCache.length) return;
-        if (list) {
-          list.innerHTML = `<p class='hint playback-records-empty'>加载记录中…已获取 ${n} 条</p>`;
-        }
-      },
-    });
+  const run = (async () => {
+    if (force) resetTierLoadState(tier);
+    if (!quiet && !playbackRecordsByTier.get(tier)?.length) {
+      if (list) list.innerHTML = "<p class='hint playback-records-empty'>加载记录中…</p>";
+    }
+    const items = await loadRecordsPage(tier, { sync: Boolean(force), append: false });
+    if ((playbackPoseTier || "rtmpose-t") !== tier) return items;
     playbackRecordsCache = items;
-    playbackRecordsByTier.set(tier, items);
     await fetchKnownTags();
     renderPlaybackRecordsList(items);
-    void prefetchOtherPoseTiers(tier);
+    return items;
+  })();
+
+  playbackRecordsLoadInflight.set(tier, run);
+  try {
+    await run;
   } catch (err) {
     const msg = err?.message ? `无法加载列表：${err.message}` : "无法加载列表";
-    if (list) list.innerHTML = `<p class='hint playback-records-empty'>${msg}</p>`;
-  }
-}
-
-async function refreshRecordsForTier(tier, { quiet = true } = {}) {
-  try {
-    const items = await fetchAllRecordSummaries({ poseTier: tier, quiet });
-    playbackRecordsByTier.set(tier, items);
-    if ((playbackPoseTier || "rtmpose-t") === tier) {
-      playbackRecordsCache = items;
-      renderPlaybackRecordsList(items);
+    if ((playbackPoseTier || "rtmpose-t") === tier && list) {
+      list.innerHTML = `<p class='hint playback-records-empty'>${msg}</p>`;
     }
-  } catch {
-    /* 后台刷新失败时保留缓存 */
-  }
-}
-
-async function prefetchOtherPoseTiers(activeTier) {
-  const tiers = ["rtmpose-t", "rtmpose-s", "rtmpose-m"].filter((t) => t !== activeTier);
-  for (const tier of tiers) {
-    if (playbackRecordsByTier.has(tier)) continue;
-    try {
-      const items = await fetchAllRecordSummaries({ poseTier: tier, quiet: true });
-      playbackRecordsByTier.set(tier, items);
-    } catch {
-      break;
-    }
+    throw err;
+  } finally {
+    playbackRecordsLoadInflight.delete(tier);
   }
 }
 
@@ -803,6 +914,17 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
   await cleanupPlaybackVideo();
   clearVideoElement();
   currentRecordId = recordId;
+  const recordTier = poseTierFromRecordId(recordId);
+  if (recordTier) {
+    playbackPoseTier = recordTier;
+    const tierSel = $("#playback-pose-tier");
+    if (tierSel) tierSel.value = recordTier;
+  }
+  if (!playbackRecordsByTier.get(playbackPoseTier)?.length) {
+    await loadRecords({ quiet: true });
+  } else {
+    playbackRecordsCache = playbackRecordsByTier.get(playbackPoseTier) || [];
+  }
   focusPlaybackCameraForRecord(recordId);
   renderPlaybackRecordsList(playbackRecordsCache);
   highlightPlaybackRecordInList(recordId);

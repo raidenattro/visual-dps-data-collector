@@ -268,7 +268,6 @@ seekBar.addEventListener("input", async () => {
 bindStageLayoutWatch();
 initPlaybackSpeedControl();
 initEventReviewControls();
-loadRecords();
 initPlaybackRecordFilter();
 void loadInferenceConfigDefaults();
 void loadReflectionCameras();

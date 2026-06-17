@@ -781,7 +781,6 @@ async function markEventReviewCompleted() {
         setEventReviewSaveStatus("已标记为复核完成");
         updateReviewDock();
       }
-      await loadRecords({ quiet: true });
     } catch (err) {
       setEventReviewSaveStatus(err.message || "操作失败", "error");
     }
