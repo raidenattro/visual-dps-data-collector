@@ -130,9 +130,7 @@ def load_annotation_config(path: str | Path) -> dict[str, Any]:
     return data
 
 
-def load_scaled_boxes(json_path: str | Path, infer_w: int, infer_h: int) -> list[dict[str, Any]]:
-    config_data = load_annotation_config(json_path)
-    raw_boxes = flatten_annotation_boxes(config_data)
+def _annotation_size_from_config(config_data: dict[str, Any]) -> tuple[float | None, float | None]:
     annotation_size = config_data.get("annotation_size", {})
     if not isinstance(annotation_size, dict):
         annotation_size = {}
@@ -143,7 +141,25 @@ def load_scaled_boxes(json_path: str | Path, infer_w: int, infer_h: int) -> list
         ann_h = float(ann_h) if ann_h is not None else None
     except (TypeError, ValueError):
         ann_w, ann_h = None, None
+    return ann_w, ann_h
+
+
+def load_scaled_boxes_from_config(
+    config_data: dict[str, Any],
+    infer_w: int,
+    infer_h: int,
+) -> list[dict[str, Any]]:
+    """从标注 dict 加载并缩放到推理分辨率（与 load_scaled_boxes 一致）。"""
+    if not isinstance(config_data, dict):
+        return []
+    raw_boxes = flatten_annotation_boxes(config_data)
+    ann_w, ann_h = _annotation_size_from_config(config_data)
     return build_scaled_boxes(raw_boxes, ann_w, ann_h, infer_w, infer_h)
+
+
+def load_scaled_boxes(json_path: str | Path, infer_w: int, infer_h: int) -> list[dict[str, Any]]:
+    config_data = load_annotation_config(json_path)
+    return load_scaled_boxes_from_config(config_data, infer_w, infer_h)
 
 
 def boxes_for_json_export(scaled_boxes: list[dict[str, Any]]) -> list[dict[str, Any]]:

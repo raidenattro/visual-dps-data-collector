@@ -77,7 +77,7 @@ python scripts/data/extract_wrist_features.py --tier rtmpose-m --dry-run
 
 v2 记录写在包目录内并更新 `manifest.json` 的 `files.wrist_*`；v1 JSON 记录写 sidecar：`{stem}.wrist_velocity.parquet`。
 
-**依赖**：记录需有骨架帧；碰撞段优先使用包内 `annotation.json`（与采集碰撞一致），否则回退机位 reflection 标注。`person_track_id` 由脚本后处理分配。
+**依赖**：记录需有骨架帧。货框优先按机位 **reflection 多编号合并**（与采集碰撞一致）；若包内 `annotation.json` 仅单货架且少于 manifest 内嵌框数，则回退 `manifest.annotation`。`person_track_id` 由脚本后处理分配。
 
 ```bash
 # 全库

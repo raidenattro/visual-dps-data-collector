@@ -87,6 +87,7 @@ def _append_export_rows(export_dir: Path, result: dict) -> None:
         "velocity_path": result.get("velocity_path"),
         "segments_path": result.get("segments_path"),
         "annotation": result.get("annotation"),
+        "annotation_source": result.get("annotation_source"),
         "error": result.get("error"),
     }
     with open(summary_path, "a", encoding="utf-8") as f:
@@ -188,7 +189,8 @@ def main() -> int:
                 print(
                     f"{rid}: ok 速度行 {result.get('velocity_count')} "
                     f"碰撞段 {result.get('segment_count')} "
-                    f"货框 {result.get('box_count')}"
+                    f"货框 {result.get('box_count')} "
+                    f"标注 {result.get('annotation_source') or result.get('annotation') or '—'}"
                 )
             if export_dir:
                 _append_export_rows(export_dir, result)
