@@ -53,6 +53,7 @@ python scripts/data/merge_staging_batches.py --consolidate-after
 | `data/backfill_no_collision_review.py` | 批量为无碰撞记录写入 `event_review`（无碰撞） |
 | `data/migrate_event_review_to_review_dir.py` | 将包内 `event_review` 迁到 `localdata/review/`（见 [docs/migrate-event-review.md](../docs/migrate-event-review.md)） |
 | `data/extract_wrist_features.py` | **手腕速度 + 碰撞段位移**特征提取（无需重跑模型） |
+| `data/analyze_wrist_feature_discrimination.py` | 按标签/机位批量提取并生成特征区分度报告（`docs/`） |
 
 ```bash
 # 本机 slug 归并（先 --dry-run）
@@ -97,6 +98,25 @@ python scripts/data/extract_wrist_features.py --tier rtmpose-m --skip-existing \
 # 碰撞段边界抖动合并（默认允许 1 帧间隙）
 python scripts/data/extract_wrist_features.py --tier rtmpose-m --max-gap-frames 2
 ```
+
+### 手腕特征区分度分析（`analyze_wrist_feature_discrimination.py`）
+
+按回放「已保存记录」同款筛选（默认标签 `单人,无遮挡`、**已复核**、**有标真**，机位见 `DEFAULT_CAMERAS`），**重新提取**手腕特征并输出 Markdown 报告：
+
+```bash
+# 提取 + 分析（31 条 rtmpose-m 优质样本）
+python scripts/data/analyze_wrist_feature_discrimination.py
+
+# 仅分析已有 parquet
+python scripts/data/analyze_wrist_feature_discrimination.py --skip-extract
+
+# 自定义输出
+python scripts/data/analyze_wrist_feature_discrimination.py \
+  --out docs/wrist-features-discrimination-rtmpose-m.md \
+  --json-out docs/wrist-features-discrimination-rtmpose-m.json
+```
+
+报告示例：[docs/wrist-features-discrimination-rtmpose-m.md](../docs/wrist-features-discrimination-rtmpose-m.md)
 
 读取示例（Python）：
 
