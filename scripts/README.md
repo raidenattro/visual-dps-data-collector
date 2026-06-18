@@ -101,7 +101,7 @@ python scripts/data/extract_wrist_features.py --tier rtmpose-m --max-gap-frames 
 
 ### 手腕特征区分度分析（`analyze_wrist_feature_discrimination.py`）
 
-按回放「已保存记录」同款筛选（默认标签 `单人,无遮挡`、**已复核**、**有标真**，机位见 `DEFAULT_CAMERAS`），**重新提取**手腕特征并输出 Markdown 报告：
+按回放「已保存记录」同款筛选（默认标签 `单人,无遮挡`、**已复核**、**有标真**，机位见 `DEFAULT_CAMERAS`），**重新提取**手腕特征并输出 Markdown 报告。正/负样本以 `event_review.verified_true` 合并的 ground truth 段为准（范本货框优先 `confirmed_box_tokens`，否则 `box_tokens`）；另单独统计**误报碰撞段**（与未被标真覆盖的 `alarm_collisions` 重叠的手腕段，与准确率误报定义一致）。
 
 ```bash
 # 提取 + 分析（31 条 rtmpose-m 优质样本）

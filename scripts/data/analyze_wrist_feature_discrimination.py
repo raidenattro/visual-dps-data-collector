@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""批量提取手腕特征并统计：速度 / 碰撞段位移等对告警的区分度。
+"""批量提取手腕特征并统计：速度 / 碰撞段位移等对人工标真的区分度。
 
-用于评估特征是否可作为碰撞识别的辅助依据。默认筛选与准确率评估一致的
-标签（单人 + 无遮挡）及指定机位 slug。
+正/负样本以 event_review.verified_true 合并的 ground truth 段为准（范本货框
+优先 confirmed_box_tokens，否则 box_tokens，与准确率评估一致）。默认筛选标签
+（单人 + 无遮挡）及指定机位 slug。
 
 用法（项目根目录）:
   python scripts/data/analyze_wrist_feature_discrimination.py
@@ -28,11 +29,12 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from config_loader import parse_record_path_segments, resolve_app_paths, resolve_config_path
-from event_engine.box_identity import collision_tokens_equivalent
-from pose_store import load_timeline
+from event_engine.box_identity import token_matches_any
+from pose_store import load_event_review, load_timeline
 from record_index_store import list_record_summaries, maybe_sync_record_summaries
 from record_tag_store import normalize_tag_name, record_ids_with_all_tags
 
+from api.accuracy_service import GroundTruthSegment, build_ground_truth_segments
 from api.record_service import locate_record_by_id
 from api.wrist_features_service import extract_wrist_features_for_record
 
@@ -131,14 +133,75 @@ def _collect_record_ids(
     return sorted(out)
 
 
-def _seg_overlaps_alarm(seg: dict[str, Any], alarm_by_frame: dict[int, list[str]]) -> bool:
+def _load_ground_truth_segments(locator) -> tuple[list[GroundTruthSegment], dict[str, Any]]:
+    """加载人工复核标真并合并为 ground truth 时间段（与准确率评估一致）。"""
+    review = load_event_review(locator)
+    verified = [e for e in (review.get("verified_true") or []) if isinstance(e, dict)]
+    return build_ground_truth_segments(verified), review
+
+
+def _ranges_overlap(a0: int, a1: int, b0: int, b1: int) -> bool:
+    return a0 <= b1 and b0 <= a1
+
+
+def _seg_overlaps_gt(seg: dict[str, Any], gt_segments: list[GroundTruthSegment]) -> bool:
+    """手腕碰撞段是否与某条人工标真段在时间与范本货框上重叠。"""
     a = int(seg.get("frame_enter") or 0)
     b = int(seg.get("frame_exit") or 0)
-    tok = str(seg.get("box_token") or "")
+    tok = str(seg.get("box_token") or "").strip()
+    if not tok or not gt_segments:
+        return False
+    for gt in gt_segments:
+        if not _ranges_overlap(a, b, gt.frame_start, gt.frame_end):
+            continue
+        if token_matches_any(tok, list(gt.gt_tokens)):
+            return True
+    return False
+
+
+def _frame_in_gt(fi: int, gt_segments: list[GroundTruthSegment]) -> bool:
+    for gt in gt_segments:
+        if gt.frame_start <= fi <= gt.frame_end:
+            return True
+    return False
+
+
+def _build_false_alarm_by_frame(
+    timeline: list[dict[str, Any]],
+    gt_segments: list[GroundTruthSegment],
+) -> dict[int, list[str]]:
+    """误报告警帧：timeline alarm_collisions 未被任何标真段（时间+范本货框）覆盖。"""
+    by_frame: dict[int, list[str]] = {}
+    for row in timeline:
+        fi = int(row.get("frame_idx") or 0)
+        for raw in row.get("alarm_collisions") or []:
+            token = str(raw).strip()
+            if not token:
+                continue
+            covered = any(
+                gt.frame_start <= fi <= gt.frame_end and token_matches_any(token, list(gt.gt_tokens))
+                for gt in gt_segments
+            )
+            if not covered:
+                by_frame.setdefault(fi, []).append(token)
+    return by_frame
+
+
+def _seg_overlaps_false_alarm(
+    seg: dict[str, Any],
+    false_alarm_by_frame: dict[int, list[str]],
+) -> bool:
+    """手腕碰撞段是否与误报告警在帧范围 + 货位 token 上重叠。"""
+    if not false_alarm_by_frame:
+        return False
+    a = int(seg.get("frame_enter") or 0)
+    b = int(seg.get("frame_exit") or 0)
+    tok = str(seg.get("box_token") or "").strip()
+    if not tok:
+        return False
     for fi in range(a, b + 1):
-        for at in alarm_by_frame.get(fi, ()):
-            if collision_tokens_equivalent(tok, at):
-                return True
+        if token_matches_any(tok, false_alarm_by_frame.get(fi, ())):
+            return True
     return False
 
 
@@ -171,24 +234,33 @@ def _threshold_scan(
 
 @dataclass
 class PoolAccumulator:
-    speed_alarm: list[float] = field(default_factory=list)
+    speed_gt: list[float] = field(default_factory=list)
     speed_coll: list[float] = field(default_factory=list)
     speed_idle: list[float] = field(default_factory=list)
-    speed_norm_alarm: list[float] = field(default_factory=list)
+    speed_norm_gt: list[float] = field(default_factory=list)
     speed_norm_idle: list[float] = field(default_factory=list)
-    disp_alarm_seg: list[float] = field(default_factory=list)
+    disp_gt_seg: list[float] = field(default_factory=list)
+    disp_false_alarm_seg: list[float] = field(default_factory=list)
     disp_other_seg: list[float] = field(default_factory=list)
-    dur_alarm_seg: list[float] = field(default_factory=list)
+    dur_gt_seg: list[float] = field(default_factory=list)
+    dur_false_alarm_seg: list[float] = field(default_factory=list)
     dur_other_seg: list[float] = field(default_factory=list)
-    fc_alarm_seg: list[float] = field(default_factory=list)
+    fc_gt_seg: list[float] = field(default_factory=list)
+    fc_false_alarm_seg: list[float] = field(default_factory=list)
     fc_other_seg: list[float] = field(default_factory=list)
-    path_alarm_seg: list[float] = field(default_factory=list)
+    path_gt_seg: list[float] = field(default_factory=list)
+    path_false_alarm_seg: list[float] = field(default_factory=list)
     path_other_seg: list[float] = field(default_factory=list)
+    speed_false_alarm: list[float] = field(default_factory=list)
     records: int = 0
-    alarm_frames: int = 0
+    gt_frames: int = 0
+    false_alarm_frames: int = 0
+    false_alarm_events: int = 0
     coll_frames: int = 0
+    gt_segments: int = 0
     segments: int = 0
-    segments_alarm_overlap: int = 0
+    segments_gt_overlap: int = 0
+    segments_false_alarm: int = 0
 
 
 def _analyze_record(record_id: str) -> dict[str, Any] | None:
@@ -211,31 +283,43 @@ def _analyze_record(record_id: str) -> dict[str, Any] | None:
     seg = pq.read_table(seg_path).to_pylist() if seg_path.is_file() else []
     tl = load_timeline(loc, include_events=True)
 
-    alarm_by_frame: dict[int, list[str]] = {}
+    gt_segments, review = _load_ground_truth_segments(loc)
+    if not gt_segments:
+        return {
+            "record_id": record_id,
+            "error": "无人工标真 ground truth（verified_true 为空或无法合并为段）",
+        }
+
     coll_frames: set[int] = set()
-    alarm_frames: set[int] = set()
+    gt_frame_set: set[int] = set()
+    for gt in gt_segments:
+        for fi in range(gt.frame_start, gt.frame_end + 1):
+            gt_frame_set.add(fi)
+    false_alarm_by_frame = _build_false_alarm_by_frame(tl, gt_segments)
+    false_alarm_frame_set = set(false_alarm_by_frame.keys())
+    false_alarm_events = sum(len(v) for v in false_alarm_by_frame.values())
     for row in tl:
         fi = int(row.get("frame_idx") or 0)
-        alarms = list(row.get("alarm_collisions") or [])
         colls = list(row.get("collisions") or [])
-        if alarms:
-            alarm_by_frame[fi] = alarms
-            alarm_frames.add(fi)
         if colls:
             coll_frames.add(fi)
 
-    seg_alarm: list[dict[str, Any]] = []
+    seg_gt: list[dict[str, Any]] = []
+    seg_false_alarm: list[dict[str, Any]] = []
     seg_other: list[dict[str, Any]] = []
     for s in seg:
-        if _seg_overlaps_alarm(s, alarm_by_frame):
-            seg_alarm.append(s)
+        if _seg_overlaps_gt(s, gt_segments):
+            seg_gt.append(s)
+        elif _seg_overlaps_false_alarm(s, false_alarm_by_frame):
+            seg_false_alarm.append(s)
         else:
             seg_other.append(s)
 
-    speed_alarm: list[float] = []
+    speed_gt: list[float] = []
+    speed_false_alarm: list[float] = []
     speed_coll: list[float] = []
     speed_idle: list[float] = []
-    norm_alarm: list[float] = []
+    norm_gt: list[float] = []
     norm_idle: list[float] = []
 
     for r in vel:
@@ -244,9 +328,11 @@ def _analyze_record(record_id: str) -> dict[str, Any] | None:
         fi = int(r.get("frame_idx") or 0)
         sp = float(r["speed"])
         sn = float(r.get("speed_norm") or 0)
-        if fi in alarm_frames:
-            speed_alarm.append(sp)
-            norm_alarm.append(sn)
+        if fi in gt_frame_set:
+            speed_gt.append(sp)
+            norm_gt.append(sn)
+        elif fi in false_alarm_frame_set:
+            speed_false_alarm.append(sp)
         elif fi in coll_frames:
             speed_coll.append(sp)
         else:
@@ -264,143 +350,200 @@ def _analyze_record(record_id: str) -> dict[str, Any] | None:
         "frame_count": int(manifest.get("frame_count") or 0),
         "fps": float(manifest.get("fps") or 15),
         "alarm_min_frames": int(collision_cfg.get("alarm_min_consecutive_frames") or coll_cfg.get("alarm_min_consecutive_frames") or 0),
-        "alarm_frames": len(alarm_frames),
+        "gt_segments": len(gt_segments),
+        "gt_frames": len(gt_frame_set),
+        "false_alarm_frames": len(false_alarm_frame_set),
+        "false_alarm_events": false_alarm_events,
         "coll_frames": len(coll_frames),
         "segments": len(seg),
-        "segments_alarm_overlap": len(seg_alarm),
+        "segments_gt_overlap": len(seg_gt),
+        "segments_false_alarm": len(seg_false_alarm),
+        "review_status": str(review.get("status") or ""),
         "wrist_features": manifest.get("wrist_features"),
         "speed_px_s": {
-            "alarm": _stats(speed_alarm),
-            "collision_no_alarm": _stats(speed_coll),
+            "gt": _stats(speed_gt),
+            "false_alarm": _stats(speed_false_alarm),
+            "collision_no_gt": _stats(speed_coll),
             "idle": _stats(speed_idle),
         },
         "speed_norm": {
-            "alarm": _stats(norm_alarm),
+            "gt": _stats(norm_gt),
             "idle": _stats(norm_idle),
         },
         "displacement": {
-            "alarm_overlap_seg": _stats([float(s["displacement"]) for s in seg_alarm]),
+            "gt_overlap_seg": _stats([float(s["displacement"]) for s in seg_gt]),
+            "false_alarm_seg": _stats([float(s["displacement"]) for s in seg_false_alarm]),
             "other_seg": _stats([float(s["displacement"]) for s in seg_other]),
         },
         "duration_sec": {
-            "alarm_overlap_seg": _stats([float(s["duration_sec"]) for s in seg_alarm]),
+            "gt_overlap_seg": _stats([float(s["duration_sec"]) for s in seg_gt]),
+            "false_alarm_seg": _stats([float(s["duration_sec"]) for s in seg_false_alarm]),
             "other_seg": _stats([float(s["duration_sec"]) for s in seg_other]),
         },
         "frame_count_seg": {
-            "alarm_overlap_seg": _stats([float(s["frame_count"]) for s in seg_alarm]),
+            "gt_overlap_seg": _stats([float(s["frame_count"]) for s in seg_gt]),
+            "false_alarm_seg": _stats([float(s["frame_count"]) for s in seg_false_alarm]),
             "other_seg": _stats([float(s["frame_count"]) for s in seg_other]),
         },
         "path_length": {
-            "alarm_overlap_seg": _stats([float(s["path_length"]) for s in seg_alarm]),
+            "gt_overlap_seg": _stats([float(s["path_length"]) for s in seg_gt]),
+            "false_alarm_seg": _stats([float(s["path_length"]) for s in seg_false_alarm]),
             "other_seg": _stats([float(s["path_length"]) for s in seg_other]),
         },
         "speed_threshold_scan": _threshold_scan(
-            speed_alarm,
+            speed_gt,
             speed_idle,
             [50, 80, 100, 150, 200, 250, 300, 400, 500],
         ),
         "displacement_threshold_scan": _threshold_scan(
-            [float(s["displacement"]) for s in seg_alarm],
+            [float(s["displacement"]) for s in seg_gt],
             [float(s["displacement"]) for s in seg_other],
             [0, 5, 10, 15, 20, 25, 30, 40, 50],
         ),
+        "displacement_false_alarm_threshold_scan": _threshold_scan(
+            [float(s["displacement"]) for s in seg_gt],
+            [float(s["displacement"]) for s in seg_false_alarm],
+            [0, 5, 10, 15, 20, 25, 30, 40, 50],
+        ),
         "frame_count_threshold_scan": _threshold_scan(
-            [float(s["frame_count"]) for s in seg_alarm],
+            [float(s["frame_count"]) for s in seg_gt],
             [float(s["frame_count"]) for s in seg_other],
             [1, 2, 3, 4, 5, 6, 8, 10, 15],
         ),
+        "frame_count_false_alarm_threshold_scan": _threshold_scan(
+            [float(s["frame_count"]) for s in seg_gt],
+            [float(s["frame_count"]) for s in seg_false_alarm],
+            [1, 2, 3, 4, 5, 6, 8, 10, 15],
+        ),
         "_pool": {
-            "speed_alarm": speed_alarm,
+            "speed_gt": speed_gt,
+            "speed_false_alarm": speed_false_alarm,
             "speed_coll": speed_coll,
             "speed_idle": speed_idle,
-            "speed_norm_alarm": norm_alarm,
+            "speed_norm_gt": norm_gt,
             "speed_norm_idle": norm_idle,
-            "disp_alarm_seg": [float(s["displacement"]) for s in seg_alarm],
+            "disp_gt_seg": [float(s["displacement"]) for s in seg_gt],
+            "disp_false_alarm_seg": [float(s["displacement"]) for s in seg_false_alarm],
             "disp_other_seg": [float(s["displacement"]) for s in seg_other],
-            "dur_alarm_seg": [float(s["duration_sec"]) for s in seg_alarm],
+            "dur_gt_seg": [float(s["duration_sec"]) for s in seg_gt],
+            "dur_false_alarm_seg": [float(s["duration_sec"]) for s in seg_false_alarm],
             "dur_other_seg": [float(s["duration_sec"]) for s in seg_other],
-            "fc_alarm_seg": [float(s["frame_count"]) for s in seg_alarm],
+            "fc_gt_seg": [float(s["frame_count"]) for s in seg_gt],
+            "fc_false_alarm_seg": [float(s["frame_count"]) for s in seg_false_alarm],
             "fc_other_seg": [float(s["frame_count"]) for s in seg_other],
-            "path_alarm_seg": [float(s["path_length"]) for s in seg_alarm],
+            "path_gt_seg": [float(s["path_length"]) for s in seg_gt],
+            "path_false_alarm_seg": [float(s["path_length"]) for s in seg_false_alarm],
             "path_other_seg": [float(s["path_length"]) for s in seg_other],
-            "alarm_frames": len(alarm_frames),
+            "gt_frames": len(gt_frame_set),
+            "false_alarm_frames": len(false_alarm_frame_set),
+            "false_alarm_events": false_alarm_events,
             "coll_frames": len(coll_frames),
+            "gt_segments": len(gt_segments),
             "segments": len(seg),
-            "segments_alarm_overlap": len(seg_alarm),
+            "segments_gt_overlap": len(seg_gt),
+            "segments_false_alarm": len(seg_false_alarm),
         },
     }
 
 
 def _merge_pool(pool: PoolAccumulator, part: dict[str, Any]) -> None:
-    pool.speed_alarm.extend(part["speed_alarm"])
+    pool.speed_gt.extend(part["speed_gt"])
+    pool.speed_false_alarm.extend(part["speed_false_alarm"])
     pool.speed_coll.extend(part["speed_coll"])
     pool.speed_idle.extend(part["speed_idle"])
-    pool.speed_norm_alarm.extend(part["speed_norm_alarm"])
+    pool.speed_norm_gt.extend(part["speed_norm_gt"])
     pool.speed_norm_idle.extend(part["speed_norm_idle"])
-    pool.disp_alarm_seg.extend(part["disp_alarm_seg"])
+    pool.disp_gt_seg.extend(part["disp_gt_seg"])
+    pool.disp_false_alarm_seg.extend(part["disp_false_alarm_seg"])
     pool.disp_other_seg.extend(part["disp_other_seg"])
-    pool.dur_alarm_seg.extend(part["dur_alarm_seg"])
+    pool.dur_gt_seg.extend(part["dur_gt_seg"])
+    pool.dur_false_alarm_seg.extend(part["dur_false_alarm_seg"])
     pool.dur_other_seg.extend(part["dur_other_seg"])
-    pool.fc_alarm_seg.extend(part["fc_alarm_seg"])
+    pool.fc_gt_seg.extend(part["fc_gt_seg"])
+    pool.fc_false_alarm_seg.extend(part["fc_false_alarm_seg"])
     pool.fc_other_seg.extend(part["fc_other_seg"])
-    pool.path_alarm_seg.extend(part["path_alarm_seg"])
+    pool.path_gt_seg.extend(part["path_gt_seg"])
+    pool.path_false_alarm_seg.extend(part["path_false_alarm_seg"])
     pool.path_other_seg.extend(part["path_other_seg"])
     pool.records += 1
-    pool.alarm_frames += int(part.get("alarm_frames") or 0)
+    pool.gt_frames += int(part.get("gt_frames") or 0)
+    pool.false_alarm_frames += int(part.get("false_alarm_frames") or 0)
+    pool.false_alarm_events += int(part.get("false_alarm_events") or 0)
     pool.coll_frames += int(part.get("coll_frames") or 0)
+    pool.gt_segments += int(part.get("gt_segments") or 0)
     pool.segments += int(part.get("segments") or 0)
-    pool.segments_alarm_overlap += int(part.get("segments_alarm_overlap") or 0)
+    pool.segments_gt_overlap += int(part.get("segments_gt_overlap") or 0)
+    pool.segments_false_alarm += int(part.get("segments_false_alarm") or 0)
 
 
 def _pool_summary(pool: PoolAccumulator) -> dict[str, Any]:
     return {
         "records": pool.records,
-        "alarm_frames": pool.alarm_frames,
+        "gt_frames": pool.gt_frames,
+        "false_alarm_frames": pool.false_alarm_frames,
+        "false_alarm_events": pool.false_alarm_events,
         "coll_frames": pool.coll_frames,
+        "gt_segments": pool.gt_segments,
         "segments": pool.segments,
-        "segments_alarm_overlap": pool.segments_alarm_overlap,
+        "segments_gt_overlap": pool.segments_gt_overlap,
+        "segments_false_alarm": pool.segments_false_alarm,
         "speed_px_s": {
-            "alarm": _stats(pool.speed_alarm),
-            "collision_no_alarm": _stats(pool.speed_coll),
+            "gt": _stats(pool.speed_gt),
+            "false_alarm": _stats(pool.speed_false_alarm),
+            "collision_no_gt": _stats(pool.speed_coll),
             "idle": _stats(pool.speed_idle),
         },
         "speed_norm": {
-            "alarm": _stats(pool.speed_norm_alarm),
+            "gt": _stats(pool.speed_norm_gt),
             "idle": _stats(pool.speed_norm_idle),
         },
         "displacement": {
-            "alarm_overlap_seg": _stats(pool.disp_alarm_seg),
+            "gt_overlap_seg": _stats(pool.disp_gt_seg),
+            "false_alarm_seg": _stats(pool.disp_false_alarm_seg),
             "other_seg": _stats(pool.disp_other_seg),
         },
         "duration_sec": {
-            "alarm_overlap_seg": _stats(pool.dur_alarm_seg),
+            "gt_overlap_seg": _stats(pool.dur_gt_seg),
+            "false_alarm_seg": _stats(pool.dur_false_alarm_seg),
             "other_seg": _stats(pool.dur_other_seg),
         },
         "frame_count_seg": {
-            "alarm_overlap_seg": _stats(pool.fc_alarm_seg),
+            "gt_overlap_seg": _stats(pool.fc_gt_seg),
+            "false_alarm_seg": _stats(pool.fc_false_alarm_seg),
             "other_seg": _stats(pool.fc_other_seg),
         },
         "path_length": {
-            "alarm_overlap_seg": _stats(pool.path_alarm_seg),
+            "gt_overlap_seg": _stats(pool.path_gt_seg),
+            "false_alarm_seg": _stats(pool.path_false_alarm_seg),
             "other_seg": _stats(pool.path_other_seg),
         },
         "speed_threshold_scan": _threshold_scan(
-            pool.speed_alarm,
+            pool.speed_gt,
             pool.speed_idle,
             [50, 80, 100, 150, 200, 250, 300, 400, 500],
         ),
         "displacement_threshold_scan": _threshold_scan(
-            pool.disp_alarm_seg,
+            pool.disp_gt_seg,
             pool.disp_other_seg,
             [0, 5, 10, 15, 20, 25, 30, 40, 50],
         ),
+        "displacement_false_alarm_threshold_scan": _threshold_scan(
+            pool.disp_gt_seg,
+            pool.disp_false_alarm_seg,
+            [0, 5, 10, 15, 20, 25, 30, 40, 50],
+        ),
         "frame_count_threshold_scan": _threshold_scan(
-            pool.fc_alarm_seg,
+            pool.fc_gt_seg,
             pool.fc_other_seg,
             [1, 2, 3, 4, 5, 6, 8, 10, 15],
         ),
+        "frame_count_false_alarm_threshold_scan": _threshold_scan(
+            pool.fc_gt_seg,
+            pool.fc_false_alarm_seg,
+            [1, 2, 3, 4, 5, 6, 8, 10, 15],
+        ),
         "duration_threshold_scan": _threshold_scan(
-            pool.dur_alarm_seg,
+            pool.dur_gt_seg,
             pool.dur_other_seg,
             [0.07, 0.13, 0.2, 0.27, 0.33, 0.4, 0.53, 0.67, 1.0],
         ),
@@ -413,10 +556,22 @@ def _best_f1(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
     return max(rows, key=lambda r: r.get("f1") or 0)
 
 
-def _md_stats_table(title: str, alarm: dict[str, Any], other: dict[str, Any]) -> list[str]:
-    lines = [f"### {title}", "", "| 指标 | 告警重叠段 | 其他碰撞段 |", "|------|------------|------------|"]
+def _md_stats_table(
+    title: str,
+    gt: dict[str, Any],
+    false_alarm: dict[str, Any],
+    other: dict[str, Any],
+) -> list[str]:
+    lines = [
+        f"### {title}",
+        "",
+        "| 指标 | 标真重叠段 | 误报碰撞段 | 其他碰撞段 |",
+        "|------|------------|------------|------------|",
+    ]
     for key in ("n", "mean", "p50", "p90", "p95", "max"):
-        lines.append(f"| {key} | {alarm.get(key, '—')} | {other.get(key, '—')} |")
+        lines.append(
+            f"| {key} | {gt.get(key, '—')} | {false_alarm.get(key, '—')} | {other.get(key, '—')} |"
+        )
     lines.append("")
     return lines
 
@@ -467,25 +622,31 @@ def _render_markdown(
         f"> 复核状态：{review_line}  ",
         f"> 标真：{verified_line}  ",
         f"> 机位 slug：{', '.join(cameras)}  ",
-        "> 正样本代理：碰撞段与 timeline `alarm_collisions` 在帧范围 + 货位 token 上重叠  ",
-        "> 说明：筛选与回放「已保存记录」一致；准确率评估在 `alarm_min_consecutive_frames=5`、`alarm_cooldown_frames=6` 下进行；本报告使用各记录 manifest 已落盘 timeline。",
+        "> 正样本：手腕碰撞段与人工标真 ground truth 段在帧范围 + 范本货框上重叠  ",
+        "> 范本货框：`confirmed_box_tokens` 优先，否则 `box_tokens`（与准确率评估一致）  ",
+        "> 误报碰撞段：手腕碰撞段与误报告警（未被标真段覆盖的 `alarm_collisions`）在帧范围 + 货位 token 上重叠  ",
+        "> 说明：筛选与回放「已保存记录」一致；标真段由 `verified_true` 按连续相同范本货框合并。",
         "",
         "## 1. 数据范围",
         "",
         f"- 符合条件记录数：**{pool['records']}**",
-        f"- 汇总告警帧：**{pool['alarm_frames']}**",
+        f"- 汇总标真段：**{pool['gt_segments']}**",
+        f"- 汇总标真时间段帧：**{pool['gt_frames']}**",
+        f"- 汇总误报告警帧：**{pool['false_alarm_frames']}**（告警事件 **{pool['false_alarm_events']}** 次）",
         f"- 汇总碰撞占用帧：**{pool['coll_frames']}**",
-        f"- 碰撞段总数：**{pool['segments']}**（与告警重叠 **{pool['segments_alarm_overlap']}**）",
+        f"- 碰撞段总数：**{pool['segments']}**（标真重叠 **{pool['segments_gt_overlap']}**，误报重叠 **{pool['segments_false_alarm']}**）",
         "",
         "### 各机位记录数",
         "",
-        "| 机位 | 记录数 | 碰撞段 | 告警重叠段 |",
-        "|------|--------|--------|------------|",
+        "| 机位 | 记录数 | 标真段 | 碰撞段 | 标真重叠段 | 误报碰撞段 |",
+        "|------|--------|--------|--------|------------|------------|",
     ]
     for cam in cameras:
         c = by_camera.get(cam, {})
         lines.append(
-            f"| {cam} | {c.get('records', 0)} | {c.get('segments', 0)} | {c.get('segments_alarm_overlap', 0)} |"
+            f"| {cam} | {c.get('records', 0)} | {c.get('gt_segments', 0)} | "
+            f"{c.get('segments', 0)} | {c.get('segments_gt_overlap', 0)} | "
+            f"{c.get('segments_false_alarm', 0)} |"
         )
     lines.extend(["", "### 提取日志", ""])
     for row in extract_log:
@@ -503,27 +664,32 @@ def _render_markdown(
 
     speed_best = _best_f1(pool.get("speed_threshold_scan") or [])
     disp_best = _best_f1(pool.get("displacement_threshold_scan") or [])
+    disp_fp_best = _best_f1(pool.get("displacement_false_alarm_threshold_scan") or [])
     fc_best = _best_f1(pool.get("frame_count_threshold_scan") or [])
+    fc_fp_best = _best_f1(pool.get("frame_count_false_alarm_threshold_scan") or [])
     dur_best = _best_f1(pool.get("duration_threshold_scan") or [])
 
-    alarm_sp = pool["speed_px_s"]["alarm"]
+    gt_sp = pool["speed_px_s"]["gt"]
+    fa_sp = pool["speed_px_s"]["false_alarm"]
     idle_sp = pool["speed_px_s"]["idle"]
-    disp_a = pool["displacement"]["alarm_overlap_seg"]
+    disp_a = pool["displacement"]["gt_overlap_seg"]
+    disp_fp = pool["displacement"]["false_alarm_seg"]
     disp_o = pool["displacement"]["other_seg"]
-    fc_a = pool["frame_count_seg"]["alarm_overlap_seg"]
+    fc_a = pool["frame_count_seg"]["gt_overlap_seg"]
+    fc_fp = pool["frame_count_seg"]["false_alarm_seg"]
     fc_o = pool["frame_count_seg"]["other_seg"]
 
     lines.extend(
         [
             "| 特征 | 能否作主要识别依据 | 汇总观察 |",
             "|------|-------------------|----------|",
-            f"| 瞬时速度 speed (px/s) | **弱** | 告警帧 P50={alarm_sp.get('p50', '—')} vs 非碰撞 P50={idle_sp.get('p50', '—')}；"
+            f"| 瞬时速度 speed (px/s) | **弱** | 标真时间段 P50={gt_sp.get('p50', '—')} vs 误报帧 P50={fa_sp.get('p50', '—')} vs 无碰撞 P50={idle_sp.get('p50', '—')}；"
             f"最佳 F1≈{speed_best['f1'] if speed_best else '—'}（阈值 {speed_best['threshold'] if speed_best else '—'}） |",
             f"| 归一化速度 speed_norm | **弱** | 与 speed 类似，受姿态抖动与全身运动干扰 |",
-            f"| 段位移 displacement (px) | **中等** | 告警重叠段 P50={disp_a.get('p50', '—')} vs 其他段 P50={disp_o.get('p50', '—')}；"
-            f"最佳 F1≈{disp_best['f1'] if disp_best else '—'}（≥{disp_best['threshold'] if disp_best else '—'} px） |",
-            f"| 段帧数 frame_count | **强** | 告警重叠段 P50={fc_a.get('p50', '—')} vs 其他段 P50={fc_o.get('p50', '—')}；"
-            f"最佳 F1≈{fc_best['f1'] if fc_best else '—'}（≥{fc_best['threshold'] if fc_best else '—'} 帧） |",
+            f"| 段位移 displacement (px) | **中等** | 标真 P50={disp_a.get('p50', '—')} / 误报 P50={disp_fp.get('p50', '—')} / 其他 P50={disp_o.get('p50', '—')}；"
+            f"标真 vs 其他 F1≈{disp_best['f1'] if disp_best else '—'}，标真 vs 误报 F1≈{disp_fp_best['f1'] if disp_fp_best else '—'} |",
+            f"| 段帧数 frame_count | **强** | 标真 P50={fc_a.get('p50', '—')} / 误报 P50={fc_fp.get('p50', '—')} / 其他 P50={fc_o.get('p50', '—')}；"
+            f"标真 vs 其他 F1≈{fc_best['f1'] if fc_best else '—'}，标真 vs 误报 F1≈{fc_fp_best['f1'] if fc_fp_best else '—'} |",
             f"| 段时长 duration_sec | **强** | 与帧数等价（fps≈15）；最佳 F1≈{dur_best['f1'] if dur_best else '—'} |",
             f"| 段路径 path_length | **中等（辅助）** | 与 displacement 正相关，描述框内扫腕 |",
             "",
@@ -542,8 +708,9 @@ def _render_markdown(
         ]
     )
     for label, key in (
-        ("timeline 告警帧", "alarm"),
-        ("碰撞未告警帧", "collision_no_alarm"),
+        ("标真时间段内帧", "gt"),
+        ("误报告警帧", "false_alarm"),
+        ("碰撞未在标真段", "collision_no_gt"),
         ("无碰撞帧", "idle"),
     ):
         s = pool["speed_px_s"][key]
@@ -552,49 +719,73 @@ def _render_markdown(
             f"{s.get('p90', '—')} | {s.get('p95', '—')} |"
         )
     lines.append("")
-    lines.extend(_md_stats_table("3.2 段位移 displacement (px)", disp_a, disp_o))
+    lines.extend(
+        _md_stats_table(
+            "3.2 段位移 displacement (px)",
+            disp_a,
+            disp_fp,
+            disp_o,
+        )
+    )
     lines.extend(
         _md_stats_table(
             "3.3 段持续帧数 frame_count",
             fc_a,
+            fc_fp,
             fc_o,
         )
     )
     lines.extend(
         _md_stats_table(
             "3.4 段时长 duration_sec",
-            pool["duration_sec"]["alarm_overlap_seg"],
+            pool["duration_sec"]["gt_overlap_seg"],
+            pool["duration_sec"]["false_alarm_seg"],
             pool["duration_sec"]["other_seg"],
         )
     )
     lines.extend(
         _md_stats_table(
             "3.5 段路径 path_length (px)",
-            pool["path_length"]["alarm_overlap_seg"],
+            pool["path_length"]["gt_overlap_seg"],
+            pool["path_length"]["false_alarm_seg"],
             pool["path_length"]["other_seg"],
         )
     )
 
     lines.append("## 4. 阈值扫描（汇总池）")
     lines.append("")
-    lines.extend(_md_threshold_table("4.1 速度：告警帧 vs 无碰撞帧", pool.get("speed_threshold_scan") or [], " px/s"))
+    lines.extend(_md_threshold_table("4.1 速度：标真时间段 vs 无碰撞帧", pool.get("speed_threshold_scan") or [], " px/s"))
     lines.extend(
         _md_threshold_table(
-            "4.2 段位移：告警重叠段 vs 其他段",
+            "4.2 段位移：标真重叠段 vs 其他段",
             pool.get("displacement_threshold_scan") or [],
             " px",
         )
     )
     lines.extend(
         _md_threshold_table(
-            "4.3 段帧数：告警重叠段 vs 其他段",
+            "4.3 段位移：标真重叠段 vs 误报碰撞段",
+            pool.get("displacement_false_alarm_threshold_scan") or [],
+            " px",
+        )
+    )
+    lines.extend(
+        _md_threshold_table(
+            "4.4 段帧数：标真重叠段 vs 其他段",
             pool.get("frame_count_threshold_scan") or [],
             " 帧",
         )
     )
     lines.extend(
         _md_threshold_table(
-            "4.4 段时长：告警重叠段 vs 其他段",
+            "4.5 段帧数：标真重叠段 vs 误报碰撞段",
+            pool.get("frame_count_false_alarm_threshold_scan") or [],
+            " 帧",
+        )
+    )
+    lines.extend(
+        _md_threshold_table(
+            "4.6 段时长：标真重叠段 vs 其他段",
             pool.get("duration_threshold_scan") or [],
             " s",
         )
@@ -607,36 +798,54 @@ def _render_markdown(
             continue
         lines.append(f"### {cam}（{c['records']} 条）")
         lines.append("")
-        sa = c["speed_px_s"]["alarm"]
+        sa = c["speed_px_s"]["gt"]
+        sfa = c["speed_px_s"]["false_alarm"]
         si = c["speed_px_s"]["idle"]
-        da = c["displacement"]["alarm_overlap_seg"]
+        da = c["displacement"]["gt_overlap_seg"]
+        dfa = c["displacement"]["false_alarm_seg"]
         do = c["displacement"]["other_seg"]
         lines.append(
-            f"- 速度：告警 P50={sa.get('p50', '—')}，空闲 P50={si.get('p50', '—')}"
+            f"- 速度：标真 P50={sa.get('p50', '—')}，误报帧 P50={sfa.get('p50', '—')}，空闲 P50={si.get('p50', '—')}"
         )
         lines.append(
-            f"- 位移：告警重叠段 P50={da.get('p50', '—')}，其他段 P50={do.get('p50', '—')}"
+            f"- 位移：标真 P50={da.get('p50', '—')}，误报段 P50={dfa.get('p50', '—')}，其他 P50={do.get('p50', '—')}"
+        )
+        lines.append(
+            f"- 误报碰撞段：**{c.get('segments_false_alarm', 0)}** 条"
         )
         fb = _best_f1(c.get("frame_count_threshold_scan") or [])
+        fbfp = _best_f1(c.get("frame_count_false_alarm_threshold_scan") or [])
         if fb:
             lines.append(
-                f"- 段帧数最佳 F1={fb['f1']:.2f}（≥{fb['threshold']} 帧，prec={fb['precision']:.2f}，rec={fb['recall']:.2f}）"
+                f"- 段帧数标真 vs 其他 F1={fb['f1']:.2f}（≥{fb['threshold']} 帧）"
+            )
+        if fbfp:
+            lines.append(
+                f"- 段帧数标真 vs 误报 F1={fbfp['f1']:.2f}（≥{fbfp['threshold']} 帧）"
             )
         lines.append("")
 
     lines.extend(["## 6. 单条记录明细", ""])
-    lines.append("| 记录 | 机位 | 帧数 | 告警帧 | 碰撞段 | 告警重叠段 | 位移 P50(告警/其他) |")
-    lines.append("|------|------|------|--------|--------|------------|---------------------|")
+    lines.append(
+        "| 记录 | 机位 | 帧数 | 标真段 | 误报帧 | 碰撞段 | 标真重叠 | 误报重叠 | 位移 P50(标真/误报/其他) |"
+    )
+    lines.append(
+        "|------|------|------|--------|--------|--------|----------|----------|--------------------------|"
+    )
     for r in per_record:
         if r.get("error"):
-            lines.append(f"| `{r.get('record_id', '')}` | — | — | — | — | — | 错误：{r['error']} |")
+            lines.append(
+                f"| `{r.get('record_id', '')}` | — | — | — | — | — | — | — | 错误：{r['error']} |"
+            )
             continue
-        da = r["displacement"]["alarm_overlap_seg"]
+        da = r["displacement"]["gt_overlap_seg"]
+        dfa = r["displacement"]["false_alarm_seg"]
         do = r["displacement"]["other_seg"]
         lines.append(
-            f"| `{r['clip']}` | {r['camera_slug']} | {r['frame_count']} | {r['alarm_frames']} | "
-            f"{r['segments']} | {r['segments_alarm_overlap']} | "
-            f"{da.get('p50', '—')} / {do.get('p50', '—')} |"
+            f"| `{r['clip']}` | {r['camera_slug']} | {r['frame_count']} | {r['gt_segments']} | "
+            f"{r['false_alarm_frames']} | {r['segments']} | {r['segments_gt_overlap']} | "
+            f"{r['segments_false_alarm']} | "
+            f"{da.get('p50', '—')} / {dfa.get('p50', '—')} / {do.get('p50', '—')} |"
         )
     lines.extend(
         [
@@ -644,8 +853,13 @@ def _render_markdown(
             "## 7. 方法说明",
             "",
             "- 手腕特征由 `scripts/data/extract_wrist_features.py` 写入；标注按机位 reflection **多货架合并**。",
+            "- 人工标真段：`event_review.verified_true` 按 `frame_idx` 排序，连续相同范本货框合并为 `[frame_start, frame_end]`。",
+            "- 范本货框：优先 `confirmed_box_tokens`，否则 `box_tokens`（与 `api/accuracy_service.py` 一致）。",
+            "- 误报告警：`alarm_collisions` 中未被任何标真段（时间 + 范本货框）覆盖的帧（与准确率误报定义一致）。",
             "- 碰撞段：手腕进入某货框到离开的连续区间（与是否触发告警无关）。",
-            "- 「告警重叠段」：段内某帧的 `alarm_collisions` 与段 `box_token` 等价。",
+            "- 「标真重叠段」：碰撞段与标真段重叠且 `box_token` 与范本货框匹配。",
+            "- 「误报碰撞段」：非标真重叠，但与误报告警在帧范围 + 货位 token 上重叠。",
+            "- 「其他碰撞段」：既非标真重叠、也非误报重叠的几何碰撞（多为亚阈值短触）。",
             "- `person_track_id` 为后处理分配，速度统计包含所有有效 track。",
             "- 再跑本报告：`python scripts/data/analyze_wrist_feature_discrimination.py`",
             "",

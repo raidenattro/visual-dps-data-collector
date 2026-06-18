@@ -249,9 +249,8 @@ function collectAccuracySeekMarkerFrames() {
   const missFrames = [];
   overlay.segments.forEach((seg) => {
     if (seg.detected) return;
-    for (let fi = seg.frame_start; fi <= seg.frame_end; fi += 1) {
-      missFrames.push(fi);
-    }
+    // 与准确率一致：每段漏报只打一个定位点（段起点）
+    missFrames.push(seg.frame_start);
   });
 
   const falseAlarmFrames = [];
@@ -315,7 +314,7 @@ function renderAccuracySeekMarkers() {
   };
 
   missFrames.forEach((fi) => {
-    appendDot(fi, "miss", `漏报 · 帧 ${fi}`);
+    appendDot(fi, "miss", `漏报段 · 帧 ${fi}`);
   });
   falseAlarmFrames.forEach((fi) => {
     appendDot(fi, "false-alarm", `误报 · 帧 ${fi}`);
@@ -364,8 +363,8 @@ function eventGroundTruthTokens(ev) {
     : canonicalizeBoxTokenList(ev.box_tokens);
 }
 
-/** 已标真且落在未检出范本段内 → 漏报相关事件 */
-function isPlaybackEventMiss(ev) {
+/** 已标真且落在未检出范本段内（段内事件，不等同于多计漏报） */
+function isPlaybackEventInMissSegment(ev) {
   if (!ev || typeof isEventVerified !== "function" || !isEventVerified(ev)) return false;
   const overlay = getPlaybackAccuracyOverlay();
   if (!overlay?.segments?.length) return false;
@@ -404,8 +403,20 @@ function isPlaybackEventFalseAlarm(ev) {
   });
 }
 
+/** 与准确率 evaluate_segments 一致：未检出标真段数（每段最多记 1 次漏报） */
+function countPlaybackMissSegments() {
+  const overlay = getPlaybackAccuracyOverlay();
+  if (!overlay?.segments?.length) return 0;
+  return overlay.segments.filter((seg) => !seg.detected).length;
+}
+
 function countPlaybackMissEvents() {
-  return (playbackEvents || []).filter((ev) => isPlaybackEventMiss(ev)).length;
+  return countPlaybackMissSegments();
+}
+
+/** @deprecated 使用 isPlaybackEventInMissSegment */
+function isPlaybackEventMiss(ev) {
+  return isPlaybackEventInMissSegment(ev);
 }
 
 function countPlaybackFalseAlarmEvents() {

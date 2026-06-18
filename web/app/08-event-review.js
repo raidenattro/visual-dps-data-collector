@@ -330,7 +330,7 @@ function refreshEventCountLabel() {
     const missN = countPlaybackMissEvents();
     const falseN = countPlaybackFalseAlarmEvents();
     if (missN > 0 || falseN > 0) {
-      accuracyHint = ` · 漏报 ${missN} · 误报 ${falseN}`;
+      accuracyHint = ` · 漏报段 ${missN} · 误报 ${falseN}`;
     }
   }
   eventCountLabel.textContent = `告警 ${alarmN} · 碰撞 ${collN} · 标真 ${verifiedN}${accuracyHint}${rtHint}${filterHint}`;
@@ -815,9 +815,11 @@ function filteredPlaybackEvents() {
     return playbackEvents.filter((e) => e.event_type === mode);
   }
   if (mode === "miss") {
-    return typeof isPlaybackEventMiss === "function"
-      ? playbackEvents.filter((e) => isPlaybackEventMiss(e))
-      : [];
+    return typeof isPlaybackEventInMissSegment === "function"
+      ? playbackEvents.filter((e) => isPlaybackEventInMissSegment(e))
+      : typeof isPlaybackEventMiss === "function"
+        ? playbackEvents.filter((e) => isPlaybackEventMiss(e))
+        : [];
   }
   if (mode === "false_alarm") {
     return typeof isPlaybackEventFalseAlarm === "function"
@@ -1048,7 +1050,7 @@ function updateReviewDock() {
     const mode = eventFilterSelect?.value || "all";
     const emptyHint =
       mode === "miss"
-        ? "无漏报事件（需有标真范本且段内无匹配告警）"
+        ? "无漏报段（需有标真范本且段内无匹配告警）"
         : mode === "false_alarm"
           ? "无误报事件（告警均落在标真范本段内）"
           : "当前筛选下无待复核事件";
@@ -1088,8 +1090,11 @@ function updateReviewDock() {
     let accuracyNote = "";
     if (typeof isPlaybackEventFalseAlarm === "function" && isPlaybackEventFalseAlarm(ev)) {
       accuracyNote = " · 误报";
-    } else if (typeof isPlaybackEventMiss === "function" && isPlaybackEventMiss(ev)) {
-      accuracyNote = " · 漏报";
+    } else if (
+      (typeof isPlaybackEventInMissSegment === "function" && isPlaybackEventInMissSegment(ev)) ||
+      (typeof isPlaybackEventMiss === "function" && isPlaybackEventMiss(ev))
+    ) {
+      accuracyNote = " · 漏报段内";
     }
     metaEl.textContent = `${formatTime(ev.timestamp_sec)} · 帧 ${ev.frame_idx}${accuracyNote}`;
   }
@@ -1220,8 +1225,11 @@ function renderEventReviewTable(list = null) {
       let accuracyTag = "";
       if (typeof isPlaybackEventFalseAlarm === "function" && isPlaybackEventFalseAlarm(ev)) {
         accuracyTag = '<span class="event-accuracy-tag false-alarm" title="误报">误</span>';
-      } else if (typeof isPlaybackEventMiss === "function" && isPlaybackEventMiss(ev)) {
-        accuracyTag = '<span class="event-accuracy-tag miss" title="漏报">漏</span>';
+      } else if (
+        (typeof isPlaybackEventInMissSegment === "function" && isPlaybackEventInMissSegment(ev)) ||
+        (typeof isPlaybackEventMiss === "function" && isPlaybackEventMiss(ev))
+      ) {
+        accuracyTag = '<span class="event-accuracy-tag miss" title="落在漏报标真段内">漏</span>';
       }
       return `<tr class="event-review-row${active}${verifiedCls}" data-event-key="${key}">
         <td class="col-verify"><input type="checkbox" class="event-verify-check" data-event-key="${key}"${checked}${disabled} aria-label="标为真实碰撞" /></td>
