@@ -204,11 +204,6 @@ def extract_wrist_features_for_record(
     fps = _video_fps(manifest)
 
     ann_path = annotation_path
-    if ann_path is None and locator.path.is_dir():
-        pkg_ann = locator.path / "annotation.json"
-        if pkg_ann.is_file():
-            ann_path = pkg_ann
-
     if ann_path is None:
         meta = None
         sidecar = meta_path_for_record(locator.record_id, locator)
@@ -260,3 +255,75 @@ def extract_wrist_features_for_record(
         "box_count": len(boxes),
         "annotation": str(ann_path) if ann_path else None,
     }
+
+
+def load_wrist_features_payload(
+    locator: RecordLocator,
+    *,
+    frame_idx: int | None = None,
+    include_all_velocity: bool = False,
+) -> dict[str, Any]:
+    """读取已落盘的手腕特征，供回放 API 使用。
+
+    默认只返回碰撞段（体积小）；速度按 frame_idx 按需查询，避免整表 JSON 拖慢回放。
+    """
+    vel_path, seg_path = wrist_feature_paths_for_locator(locator)
+    if not vel_path.is_file():
+        return {
+            "available": False,
+            "record_id": locator.record_id,
+            "hint": "请先运行 scripts/data/extract_wrist_features.py 提取特征",
+        }
+
+    _, pq = _require_pyarrow()
+    seg_rows = pq.read_table(seg_path).to_pylist() if seg_path.is_file() else []
+
+    vel_meta = pq.read_metadata(vel_path)
+    velocity_count = int(vel_meta.num_rows) if vel_meta else 0
+
+    velocity_by_frame: dict[str, list[dict[str, Any]]] = {}
+    frame_velocity: list[dict[str, Any]] = []
+
+    if include_all_velocity:
+        vel_rows = pq.read_table(vel_path).to_pylist()
+        velocity_count = len(vel_rows)
+        for row in vel_rows:
+            if not isinstance(row, dict):
+                continue
+            fi = int(row.get("frame_idx") or 0)
+            velocity_by_frame.setdefault(str(fi), []).append(row)
+    elif frame_idx is not None and frame_idx > 0:
+        fi = int(frame_idx)
+        table = pq.read_table(vel_path, filters=[("frame_idx", "=", fi)])
+        frame_velocity = table.to_pylist()
+
+    manifest = {}
+    try:
+        manifest = load_manifest(locator)
+    except (FileNotFoundError, json.JSONDecodeError, ValueError):
+        pass
+    meta = manifest.get("wrist_features") if isinstance(manifest.get("wrist_features"), dict) else {}
+
+    if frame_idx is not None and frame_idx > 0 and not include_all_velocity:
+        return {
+            "available": True,
+            "record_id": locator.record_id,
+            "frame_idx": int(frame_idx),
+            "frame_velocity": frame_velocity,
+        }
+
+    payload: dict[str, Any] = {
+        "available": True,
+        "record_id": locator.record_id,
+        "segments": seg_rows,
+        "velocity_count": velocity_count,
+        "segment_count": len(seg_rows),
+        "extracted_at": meta.get("extracted_at"),
+        "schema": meta.get("schema") or FEATURE_SCHEMA,
+    }
+    if include_all_velocity:
+        payload["velocity_by_frame"] = velocity_by_frame
+    if frame_idx is not None and frame_idx > 0:
+        payload["frame_idx"] = int(frame_idx)
+        payload["frame_velocity"] = frame_velocity
+    return payload

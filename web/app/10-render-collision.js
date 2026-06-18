@@ -962,6 +962,9 @@ async function renderFrameEntry(hit, renderGen) {
   } else {
     timeLabel.title = annotationBoxes.length ? "无碰撞" : "";
   }
+  if (typeof updatePlaybackWristFeaturesUi === "function") {
+    updatePlaybackWristFeaturesUi(hit.frameIdx);
+  }
 }
 
 async function renderAtTime(timeSec) {

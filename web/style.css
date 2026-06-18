@@ -1235,6 +1235,82 @@ main:has(#panel-playback.active) {
   margin-top: 0.75rem;
 }
 
+.playback-wrist-features {
+  margin-top: 0.65rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.45);
+  font-size: 0.82rem;
+}
+
+.playback-wrist-features--empty {
+  opacity: 0.85;
+}
+
+.playback-wrist-features-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.35rem 0.75rem;
+  margin-bottom: 0.45rem;
+}
+
+.playback-wrist-features-title {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.playback-wrist-features-block {
+  margin-top: 0.45rem;
+}
+
+.playback-wrist-features-subtitle {
+  margin: 0 0 0.25rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.wrist-features-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.wrist-features-table th,
+.wrist-features-table td {
+  padding: 0.2rem 0.35rem;
+  text-align: left;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  white-space: nowrap;
+}
+
+.wrist-features-table th {
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.wrist-features-table code {
+  font-size: 0.72rem;
+}
+
+.playback-wrist-segments-wrap {
+  overflow-x: auto;
+}
+
+.wrist-seg-alarm {
+  display: inline-block;
+  padding: 0 0.25rem;
+  font-size: 0.68rem;
+  border-radius: 3px;
+  background: rgba(239, 68, 68, 0.25);
+  color: #fecaca;
+}
+
 .playback-transport .controls {
   margin-top: 0;
 }

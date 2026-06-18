@@ -663,6 +663,47 @@ def _annotation_file_candidates(ann_dir: Path, ann_name: str) -> list[Path]:
     return out
 
 
+def _meta_camera_label(meta: dict[str, Any] | None) -> str:
+    """meta 机位名；无 camera_label 时回退 camera_slug。"""
+    if not meta:
+        return ""
+    cam = str(meta.get("camera_label") or "").strip()
+    if cam:
+        return cam
+    return str(meta.get("camera_slug") or "").strip()
+
+
+def _reflection_fallback_ann_dir(paths: AppPaths, ann_dir: Path) -> Path | None:
+    try:
+        if ann_dir.resolve() == paths.annotation_dir.resolve():
+            return None
+    except (OSError, ValueError):
+        if str(ann_dir) == str(paths.annotation_dir):
+            return None
+    return paths.annotation_dir
+
+
+def _resolve_reflection_merged_annotation(
+    meta: dict[str, Any] | None,
+    *,
+    paths: AppPaths,
+    ann_dir: Path,
+) -> Path | None:
+    """多编号机位：合并 reflection 下全部标注 JSON。"""
+    if not meta:
+        return None
+    meta_with_cam = dict(meta)
+    if not str(meta_with_cam.get("camera_label") or "").strip():
+        slug = str(meta_with_cam.get("camera_slug") or "").strip()
+        if slug:
+            meta_with_cam["camera_label"] = slug
+    return resolve_reflection_annotation_path(
+        meta_with_cam,
+        ann_dir=ann_dir,
+        fallback_ann_dir=_reflection_fallback_ann_dir(paths, ann_dir),
+    )
+
+
 def _try_reflection_annotation_files_in_dir(
     meta: dict[str, Any] | None,
     *,
@@ -686,7 +727,7 @@ def resolve_reflection_annotation_path(
     """机位 reflection → 单文件或合并后的标注 JSON（用于碰撞重算 / 回放）。"""
     if not meta:
         return None
-    cam = str(meta.get("camera_label") or "").strip()
+    cam = _meta_camera_label(meta)
     if not cam or not REFLECTION_OK or not normalize_corner_label:
         return None
     try:
@@ -715,32 +756,22 @@ def _resolve_annotation_in_dir(
     meta: dict[str, Any] | None,
     allow_reflection: bool,
 ) -> Path | None:
-    """在指定 annotations 目录下按 meta / reflection / video_stem 解析标注文件。"""
+    """在指定 annotations 目录下解析标注；多编号机位优先合并 reflection 全部编号。"""
+    if allow_reflection:
+        reflection_hit = _resolve_reflection_merged_annotation(
+            meta,
+            paths=paths,
+            ann_dir=ann_dir,
+        )
+        if reflection_hit and reflection_hit.is_file():
+            return reflection_hit
+
     if meta:
         ann_name = str(meta.get("annotation_file") or "").strip()
         if ann_name:
             for candidate in _annotation_file_candidates(ann_dir, ann_name):
                 if candidate.is_file():
                     return candidate
-
-    # meta.annotation_file 常为采集包内 annotation.json，与 reflection 编号（如 94.json）不一致
-    reflection_hit = _try_reflection_annotation_files_in_dir(
-        meta,
-        ann_dir=ann_dir,
-        fallback_ann_dir=paths.annotation_dir if ann_dir != paths.annotation_dir else None,
-    )
-    if reflection_hit:
-        return reflection_hit
-
-    if allow_reflection and meta:
-        cam = str(meta.get("camera_label") or "").strip()
-        if cam and REFLECTION_OK and normalize_corner_label:
-            merged = resolve_reflection_annotation_path(
-                meta,
-                ann_dir=paths.annotation_dir,
-            )
-            if merged and merged.is_file():
-                return merged
 
     video_stem = resolve_video_stem_from_record(
         record_id,
@@ -831,9 +862,16 @@ def resolve_annotation_path_for_record(
         except json.JSONDecodeError:
             meta = None
 
-    reflection_merged = resolve_reflection_annotation_path(
+    parsed_tier, _, _ = parse_record_path_segments(record_id)
+    tier_dir = (
+        annotation_dir_for_source(paths, parsed_tier)
+        if parsed_tier
+        else paths.annotation_dir
+    )
+    reflection_merged = _resolve_reflection_merged_annotation(
         meta if isinstance(meta, dict) else None,
-        ann_dir=paths.annotation_dir,
+        paths=paths,
+        ann_dir=tier_dir,
     )
     if reflection_merged and reflection_merged.is_file():
         return reflection_merged

@@ -1004,8 +1004,11 @@ async function applyPlaybackRecordAnnotation(recordId) {
     const meta = data._meta && typeof data._meta === "object" ? data._meta : {};
     loadAnnotationBoxesFromData(data);
     let label = playbackAnnotationSourceLabel();
-    if (meta.resolved_from === "master" && src !== "master") {
+    const hasTierFile = meta.has_tier_file === true;
+    if (meta.resolved_from === "master" && src !== "master" && !hasTierFile) {
       label += "（模型目录无文件，已用母本内容）";
+    } else if (hasTierFile && src !== "master") {
+      label += "（模型层）";
     }
     return { ok: true, label, meta };
   } catch {
@@ -1145,6 +1148,9 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
   await prefetchFrameChunk(1, FRAME_CHUNK_SIZE);
   const annResult = await applyPlaybackRecordAnnotation(recordId);
   await loadPlaybackEvents(recordId);
+  if (typeof loadPlaybackWristFeatures === "function") {
+    void loadPlaybackWristFeatures(recordId);
+  }
   const annHint = annResult.ok
     ? ` · 标注：${annResult.label}`
     : annResult.fromPose
