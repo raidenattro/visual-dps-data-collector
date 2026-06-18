@@ -52,6 +52,7 @@ python scripts/data/merge_staging_batches.py --consolidate-after
 | `data/restore_source_videos.py` | 将 `localdata/video` 配套视频复制回批处理源目录 |
 | `data/backfill_no_collision_review.py` | 批量为无碰撞记录写入 `event_review`（无碰撞） |
 | `data/migrate_event_review_to_review_dir.py` | 将包内 `event_review` 迁到 `localdata/review/`（见 [docs/migrate-event-review.md](../docs/migrate-event-review.md)） |
+| `data/extract_wrist_features.py` | **手腕速度 + 碰撞段位移**特征提取（无需重跑模型） |
 
 ```bash
 # 本机 slug 归并（先 --dry-run）
@@ -60,6 +61,52 @@ python scripts/data/consolidate_camera_slugs.py --tier rtmpose-t
 
 # 跨机合并
 python scripts/data/merge_pose_tier_data.py --source /path/to/export --tier rtmpose-t --dry-run
+
+# 手腕特征（见下方说明）
+python scripts/data/extract_wrist_features.py --tier rtmpose-m --dry-run
+```
+
+### 手腕特征提取（`extract_wrist_features.py`）
+
+基于已采集的 `skeleton.parquet` + `timeline.parquet` + 货框标注，**不重跑 RTMPose**，输出：
+
+| 文件 | 含义 |
+|------|------|
+| `wrist_velocity.parquet` | 每帧 × 每人 × 左/右手腕：`vx, vy, speed, speed_norm`（推理坐标 px/s） |
+| `wrist_box_segments.parquet` | 每次**碰撞段**（手腕进入某 box → 离开）：端点坐标、`dx/dy/displacement`、`path_length`；`event_type=collision`，与告警无关；段内若触发告警则 `had_alarm=true` |
+
+v2 记录写在包目录内并更新 `manifest.json` 的 `files.wrist_*`；v1 JSON 记录写 sidecar：`{stem}.wrist_velocity.parquet`。
+
+**依赖**：记录需有骨架帧；碰撞段优先使用包内 `annotation.json`（与采集碰撞一致），否则回退机位 reflection 标注。`person_track_id` 由脚本后处理分配。
+
+```bash
+# 全库
+python scripts/data/extract_wrist_features.py
+
+# 指定模型层 / 机位
+python scripts/data/extract_wrist_features.py --tier rtmpose-m
+python scripts/data/extract_wrist_features.py --tier rtmpose-m --camera 2-7-2
+
+# 单条记录
+python scripts/data/extract_wrist_features.py --record rtmpose-m/2-7-2/clip_0001_start_...
+
+# 已提取则跳过；批处理汇总 + 合并碰撞段
+python scripts/data/extract_wrist_features.py --tier rtmpose-m --skip-existing \
+  --export-dir localdata/features/export
+
+# 碰撞段边界抖动合并（默认允许 1 帧间隙）
+python scripts/data/extract_wrist_features.py --tier rtmpose-m --max-gap-frames 2
+```
+
+读取示例（Python）：
+
+```python
+import pyarrow.parquet as pq
+from pathlib import Path
+
+base = Path("localdata/json/rtmpose-m/2-7-2/某记录目录")
+vel = pq.read_table(base / "wrist_velocity.parquet").to_pandas()
+seg = pq.read_table(base / "wrist_box_segments.parquet").to_pandas()
 ```
 
 ## archive/ — 历史工具（勿日常运行）
