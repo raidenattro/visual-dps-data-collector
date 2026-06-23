@@ -7,6 +7,8 @@
   frame_count >= 4, duration_sec >= 0.20, displacement/frame_count <= 3.0
 组合3（组合1 + 总位移上限）:
   frame_count >= 4, duration_sec >= 0.20, displacement/frame_count <= 2.5, displacement <= 10
+组合4（仅 disp/fc）:
+  displacement/frame_count <= 2.5（不设 frame_count、duration 下限）
 
 用法（项目根目录）:
   python scripts/data/evaluate_combo1_segment_filter.py
@@ -14,6 +16,8 @@
     --out docs/combo2-segment-filter-rtmpose-m.md
   python scripts/data/evaluate_combo1_segment_filter.py --combo-id 3 \\
     --out docs/combo3-segment-filter-rtmpose-m.md
+  python scripts/data/evaluate_combo1_segment_filter.py --combo-id 4 \\
+    --out docs/combo4-segment-filter-rtmpose-m.md
 """
 
 from __future__ import annotations
@@ -105,6 +109,8 @@ COMBO1_MIN_DURATION = 0.20
 COMBO1_MAX_DISP_PER_FRAME = 2.5
 COMBO2_MAX_DISP_PER_FRAME = 3.0
 COMBO3_MAX_DISPLACEMENT = 10.0
+COMBO4_MIN_FRAMES = 1
+COMBO4_MIN_DURATION = 0.0
 
 
 @dataclass(frozen=True)
@@ -129,6 +135,14 @@ def combo_rule_from_args(args: argparse.Namespace) -> ComboRule:
     if combo_id == 3:
         max_dpf = COMBO1_MAX_DISP_PER_FRAME
         max_disp = max_disp if max_disp is not None else COMBO3_MAX_DISPLACEMENT
+    if combo_id == 4:
+        return ComboRule(
+            combo_id=4,
+            min_frames=COMBO4_MIN_FRAMES,
+            min_duration=COMBO4_MIN_DURATION,
+            max_disp_per_frame=COMBO1_MAX_DISP_PER_FRAME,
+            max_displacement=None,
+        )
     return ComboRule(
         combo_id=combo_id,
         min_frames=int(args.min_frames),
@@ -480,13 +494,21 @@ def _render_markdown(
         "",
         "| 条件 | 阈值 |",
         "|------|------|",
-        f"| `frame_count` | ≥ {combo_rule.min_frames} |",
-        f"| `duration_sec` | ≥ {combo_rule.min_duration} |",
-        f"| `displacement / frame_count` | ≤ {combo_rule.max_disp_per_frame} |",
     ]
-    if combo_rule.max_displacement is not None:
-        lines.append(f"| `displacement`（总位移） | ≤ {combo_rule.max_displacement} |")
-    n_conds = 3 + (1 if combo_rule.max_displacement is not None else 0)
+    if combo_rule.combo_id == 4:
+        lines.append(f"| `displacement / frame_count` | ≤ {combo_rule.max_disp_per_frame} |")
+        n_conds = 1
+    else:
+        lines.extend(
+            [
+                f"| `frame_count` | ≥ {combo_rule.min_frames} |",
+                f"| `duration_sec` | ≥ {combo_rule.min_duration} |",
+                f"| `displacement / frame_count` | ≤ {combo_rule.max_disp_per_frame} |",
+            ]
+        )
+        if combo_rule.max_displacement is not None:
+            lines.append(f"| `displacement`（总位移） | ≤ {combo_rule.max_displacement} |")
+        n_conds = 3 + (1 if combo_rule.max_displacement is not None else 0)
     lines.extend(
         [
             "",
@@ -524,7 +546,7 @@ def _render_markdown(
         )
     else:
         lines.append(f"- 误报变化：{fa_d}。")
-    if c1 and combo_rule.combo_id in (2, 3):
+    if c1 and combo_rule.combo_id in (2, 3, 4):
         fa_c1 = int(combo.get("false_alarms") or 0) - int(c1.get("false_alarms") or 0)
         miss_c1 = int(combo.get("missed") or 0) - int(c1.get("missed") or 0)
         lines.append(
@@ -633,7 +655,7 @@ def main() -> int:
     parser.add_argument("--alarm-min", type=int, default=5)
     parser.add_argument("--alarm-min-ref", type=int, default=22)
     parser.add_argument("--cooldown", type=int, default=6)
-    parser.add_argument("--combo-id", type=int, default=1, choices=(1, 2, 3))
+    parser.add_argument("--combo-id", type=int, default=1, choices=(1, 2, 3, 4))
     parser.add_argument("--min-frames", type=int, default=COMBO1_MIN_FRAMES)
     parser.add_argument("--min-duration", type=float, default=COMBO1_MIN_DURATION)
     parser.add_argument("--max-disp-per-frame", type=float, default=COMBO1_MAX_DISP_PER_FRAME)
@@ -684,7 +706,7 @@ def main() -> int:
     combo_rows: list[dict[str, Any]] = []
     min22_rows: list[dict[str, Any]] = []
     combo1_ref_rows: list[dict[str, Any]] | None = None
-    if combo_rule.combo_id in (2, 3):
+    if combo_rule.combo_id in (2, 3, 4):
         combo1_ref_rows = []
 
     for rid in record_ids:
