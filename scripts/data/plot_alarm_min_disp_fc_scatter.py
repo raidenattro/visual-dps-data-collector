@@ -9,7 +9,7 @@
   python scripts/data/plot_alarm_min_disp_fc_scatter.py
   python scripts/data/plot_alarm_min_disp_fc_scatter.py --out docs/alarm-min5-disp-fc-scatter-rtmpose-m
 
-SVG / HTML 输出至 docs/view/；Markdown / JSON 输出至 docs/。
+SVG 输出至 docs/view/；Markdown 输出至 docs/；JSON 输出至 docs/json/。
 """
 
 from __future__ import annotations
@@ -24,9 +24,10 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
-DOCS_VIEW_DIR = ROOT / "docs" / "view"
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+from scripts.data.report_paths import DOCS_JSON_DIR, DOCS_VIEW_DIR, resolve_docs_json
 
 # 触发 evaluate_combo1 内 cv2 shim
 import scripts.data.evaluate_combo1_segment_filter  # noqa: F401
@@ -349,61 +350,6 @@ def _render_svg(
     return "\n".join(lines)
 
 
-def _render_html(svg: str, points: list[ScatterPoint], title: str) -> str:
-    rows = []
-    for p in points:
-        d = p.to_dict()
-        rows.append(
-            "<tr>"
-            f"<td>{d['category']}</td>"
-            f"<td>{d['clip']}</td>"
-            f"<td>{d['camera_slug']}</td>"
-            f"<td>{d['displacement']}</td>"
-            f"<td>{d['disp_per_frame']}</td>"
-            f"<td>{d['frame_count']}</td>"
-            f"<td>{d['duration_sec']}</td>"
-            f"<td>{d['frame_enter']}-{d['frame_exit']}</td>"
-            f"<td>{d['box_token']}</td>"
-            "</tr>"
-        )
-    table = "\n".join(rows)
-    return f"""<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8"/>
-  <title>{title}</title>
-  <style>
-    body {{ font-family: Segoe UI, sans-serif; margin: 24px; background: #f5f5f5; }}
-    h1 {{ font-size: 1.25rem; }}
-    .chart {{ background: #fff; padding: 12px; border-radius: 8px; box-shadow: 0 1px 4px #0001; }}
-    table {{ border-collapse: collapse; width: 100%; font-size: 12px; margin-top: 20px; background: #fff; }}
-    th, td {{ border: 1px solid #ddd; padding: 6px 8px; text-align: left; }}
-    th {{ background: #eee; position: sticky; top: 0; }}
-    tr:nth-child(even) {{ background: #fafafa; }}
-    .tp {{ color: #2ca02c; }} .fn {{ color: #ff7f0e; }} .fp {{ color: #d62728; }}
-  </style>
-</head>
-<body>
-  <h1>{title}</h1>
-  <p>悬停圆点查看 displacement / disp/fc；下表为全部 {len(points)} 个碰撞段明细。</p>
-  <div class="chart">{svg}</div>
-  <table>
-    <thead>
-      <tr>
-        <th>类别</th><th>clip</th><th>机位</th>
-        <th>displacement</th><th>disp/fc</th><th>frame_count</th><th>duration_sec</th>
-        <th>帧范围</th><th>box_token</th>
-      </tr>
-    </thead>
-    <tbody>
-{table}
-    </tbody>
-  </table>
-</body>
-</html>
-"""
-
-
 def _render_markdown(
     points: list[ScatterPoint],
     *,
@@ -416,7 +362,6 @@ def _render_markdown(
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     counts = {cat: sum(1 for p in points if p.category == cat) for cat in CATEGORY_COLORS}
     svg_name = f"view/{Path(base_stem).name}.svg"
-    html_name = f"view/{Path(base_stem).name}.html"
 
     def stats_for(cat: str, key: str) -> str:
         vals = [getattr(p, key) for p in points if p.category == cat]
@@ -433,7 +378,7 @@ def _render_markdown(
         f"> 样本：**{len(record_ids)}** 条（{', '.join(tags)} · 已复核 · 有标真）  ",
         f"> 机位：{', '.join(cameras)}  ",
         f"> 门控：`alarm_min={alarm_min}` 内存重算告警；**未**施加 disp/fc 段过滤  ",
-        f"> 每个点 = 一条手腕碰撞段，悬停 SVG 或打开 HTML 表查看明细  ",
+        f"> 每个点 = 一条手腕碰撞段，悬停 SVG 查看明细；全量点数据见 `json/{Path(base_stem).name}.json`  ",
         "",
         "## 分类说明",
         "",
@@ -446,7 +391,7 @@ def _render_markdown(
             + {
                 CATEGORY_TP: "与**已检出**标真段重叠的碰撞段",
                 CATEGORY_FN: "与**漏报**标真段重叠的碰撞段",
-                CATEGORY_FP: "与 min=5 **误报告警**重叠、且不优先归标真段",
+                CATEGORY_FP: f"与 alarm_min={alarm_min} **误报告警**重叠、且不优先归标真段",
             }[cat]
             + f" | {counts[cat]} | {stats_for(cat, 'displacement')} | {stats_for(cat, 'disp_per_frame')} |"
         )
@@ -457,8 +402,6 @@ def _render_markdown(
             "## 散点图",
             "",
             f"![displacement × disp/fc]({svg_name})",
-            "",
-            f"交互版（含全表）：[{html_name}]({html_name})",
             "",
             f"参考虚线：`disp/fc = {REF_DPF}`（combo4 单条件阈值）。",
             "",
@@ -483,13 +426,14 @@ def main() -> int:
     parser.add_argument(
         "--out",
         default=str(ROOT / "docs" / "alarm-min5-disp-fc-scatter-rtmpose-m"),
-        help="Markdown / JSON 输出路径前缀（不含扩展名）；SVG / HTML 写入 docs/view/",
+        help="Markdown 输出路径前缀（不含扩展名）；SVG 写入 docs/view/；JSON 写入 docs/json/",
     )
     parser.add_argument(
         "--view-dir",
         default=str(DOCS_VIEW_DIR),
-        help="SVG / HTML 输出目录（默认 docs/view）",
+        help="SVG 输出目录（默认 docs/view）",
     )
+    parser.add_argument("--json-out", default="", help="JSON 输出路径（默认 docs/json/{报告名}.json）")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -535,10 +479,6 @@ def main() -> int:
     svg_path = view_dir / f"{asset_name}.svg"
     svg_path.write_text(svg, encoding="utf-8")
 
-    title = f"alarm_min={args.alarm_min} displacement × disp/fc（RTMPose-M）"
-    html_path = view_dir / f"{asset_name}.html"
-    html_path.write_text(_render_html(svg, all_points, title), encoding="utf-8")
-
     md_path = base.with_suffix(".md")
     md_path.write_text(
         _render_markdown(
@@ -552,7 +492,8 @@ def main() -> int:
         encoding="utf-8",
     )
 
-    json_path = base.with_suffix(".json")
+    json_path = resolve_docs_json(md_path, args.json_out)
+    DOCS_JSON_DIR.mkdir(parents=True, exist_ok=True)
     payload = {
         "alarm_min": args.alarm_min,
         "ref_disp_per_frame": REF_DPF,
@@ -563,7 +504,6 @@ def main() -> int:
     json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print(f"\nSVG:  {svg_path}")
-    print(f"HTML: {html_path}")
     print(f"MD:   {md_path}")
     print(f"JSON: {json_path}")
     for cat in (CATEGORY_TP, CATEGORY_FN, CATEGORY_FP):

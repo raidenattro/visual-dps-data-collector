@@ -110,10 +110,9 @@ python scripts/data/analyze_wrist_feature_discrimination.py
 # 仅分析已有 parquet
 python scripts/data/analyze_wrist_feature_discrimination.py --skip-extract
 
-# 自定义输出
+# 自定义输出（JSON 默认 docs/json/{报告名}.json）
 python scripts/data/analyze_wrist_feature_discrimination.py \
-  --out docs/wrist-features-discrimination-rtmpose-m.md \
-  --json-out docs/wrist-features-discrimination-rtmpose-m.json
+  --out docs/wrist-features-discrimination-rtmpose-m.md
 ```
 
 报告示例：[docs/wrist-features-discrimination-rtmpose-m.md](../docs/wrist-features-discrimination-rtmpose-m.md)

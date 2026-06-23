@@ -91,6 +91,7 @@ from api.accuracy_service import (
     resolve_annotation_for_accuracy_record,
 )
 from api.record_service import locate_record_by_id
+from scripts.data.report_paths import DOCS_JSON_DIR, resolve_docs_json
 from scripts.data.analyze_wrist_feature_discrimination import (
     DEFAULT_CAMERAS,
     DEFAULT_REVIEW_STATUS,
@@ -670,7 +671,7 @@ def main() -> int:
         default="",
         help="默认 combo1/2/3 → docs/comboN-segment-filter-rtmpose-m.md",
     )
-    parser.add_argument("--json-out", default="")
+    parser.add_argument("--json-out", default="", help="JSON 输出路径（默认 docs/json/{报告名}.json）")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -742,7 +743,7 @@ def main() -> int:
                 f"dropped {c.get('alarms_dropped_by_combo', 0)}"
             )
 
-    json_out = args.json_out or str(Path(args.out).with_suffix(".json"))
+    json_path = resolve_docs_json(args.out, args.json_out)
     md = _render_markdown(
         record_ids=record_ids,
         baseline_rows=baseline_rows,
@@ -776,7 +777,8 @@ def main() -> int:
             "aggregate": _aggregate_metrics(combo1_ref_rows),
             "records": combo1_ref_rows,
         }
-    jp = Path(json_out)
+    jp = json_path
+    DOCS_JSON_DIR.mkdir(parents=True, exist_ok=True)
     jp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"JSON: {jp}")
     return 0

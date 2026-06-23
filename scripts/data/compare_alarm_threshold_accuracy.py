@@ -81,6 +81,7 @@ from api.accuracy_service import (
     resolve_annotation_for_accuracy_record,
 )
 from api.record_service import locate_record_by_id
+from scripts.data.report_paths import DOCS_JSON_DIR, resolve_docs_json
 from scripts.data.analyze_wrist_feature_discrimination import (
     DEFAULT_CAMERAS,
     DEFAULT_REVIEW_STATUS,
@@ -461,7 +462,7 @@ def main() -> int:
         "--out",
         default=str(ROOT / "docs" / "alarm-min-22-accuracy-comparison-rtmpose-m.md"),
     )
-    parser.add_argument("--json-out", default="")
+    parser.add_argument("--json-out", default="", help="JSON 输出路径（默认 docs/json/{报告名}.json）")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -529,19 +530,19 @@ def main() -> int:
     out_path.write_text(md, encoding="utf-8")
     print(f"\n报告: {out_path}")
 
-    if args.json_out:
-        payload = {
-            "record_ids": record_ids,
-            "baseline_min": args.baseline_min,
-            "experiment_min": args.experiment_min,
-            "cooldown": args.cooldown,
-            "baseline": {"aggregate": _aggregate(baseline_rows), "records": baseline_rows},
-            "experiment": {"aggregate": _aggregate(experiment_rows), "records": experiment_rows},
-            "stored": {"aggregate": _aggregate(stored_rows), "records": stored_rows},
-        }
-        jp = Path(args.json_out)
-        jp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"JSON: {jp}")
+    json_path = resolve_docs_json(args.out, args.json_out)
+    DOCS_JSON_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "record_ids": record_ids,
+        "baseline_min": args.baseline_min,
+        "experiment_min": args.experiment_min,
+        "cooldown": args.cooldown,
+        "baseline": {"aggregate": _aggregate(baseline_rows), "records": baseline_rows},
+        "experiment": {"aggregate": _aggregate(experiment_rows), "records": experiment_rows},
+        "stored": {"aggregate": _aggregate(stored_rows), "records": stored_rows},
+    }
+    json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"JSON: {json_path}")
 
     return 0
 

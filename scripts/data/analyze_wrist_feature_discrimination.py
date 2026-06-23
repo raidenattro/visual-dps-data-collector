@@ -37,6 +37,7 @@ from record_tag_store import normalize_tag_name, record_ids_with_all_tags
 from api.accuracy_service import GroundTruthSegment, build_ground_truth_segments
 from api.record_service import locate_record_by_id
 from api.wrist_features_service import extract_wrist_features_for_record
+from scripts.data.report_paths import DOCS_JSON_DIR, resolve_docs_json
 
 DEFAULT_CAMERAS = (
     "1-1-1",
@@ -896,7 +897,7 @@ def main() -> int:
         default=str(ROOT / "docs" / "wrist-features-discrimination-rtmpose-m.md"),
         help="Markdown 报告输出路径",
     )
-    parser.add_argument("--json-out", default="", help="可选 JSON 明细输出")
+    parser.add_argument("--json-out", default="", help="JSON 输出路径（默认 docs/json/{报告名}.json）")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -998,22 +999,21 @@ def main() -> int:
     out_path.write_text(md, encoding="utf-8")
     print(f"\n报告已写入: {out_path}")
 
-    if args.json_out:
-        json_path = Path(args.json_out)
-        json_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "tier": args.tier,
-            "tags": tags,
-            "cameras": cameras,
-            "review_status": review_status,
-            "has_verified": has_verified,
-            "pool": pool_summary,
-            "by_camera": by_camera_summary,
-            "records": per_record,
-            "extract_log": extract_log,
-        }
-        json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"JSON 已写入: {json_path}")
+    json_path = resolve_docs_json(out_path, args.json_out)
+    DOCS_JSON_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "tier": args.tier,
+        "tags": tags,
+        "cameras": cameras,
+        "review_status": review_status,
+        "has_verified": has_verified,
+        "pool": pool_summary,
+        "by_camera": by_camera_summary,
+        "records": per_record,
+        "extract_log": extract_log,
+    }
+    json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"JSON 已写入: {json_path}")
 
     return 0
 

@@ -40,6 +40,7 @@ from scripts.data.analyze_wrist_feature_discrimination import (
     _parse_tags,
 )
 from scripts.data.evaluate_combo1_segment_filter import ComboRule
+from scripts.data.report_paths import DOCS_JSON_DIR, resolve_docs_json
 from scripts.train.segment_filter_core import (
     RecordBundle,
     aggregate_metrics,
@@ -607,7 +608,8 @@ def main() -> int:
     out_path.write_text(md, encoding="utf-8")
     print(f"\n报告: {out_path}")
 
-    json_out = args.json_out or str(out_path.with_suffix(".json"))
+    json_path = resolve_docs_json(out_path, args.json_out)
+    DOCS_JSON_DIR.mkdir(parents=True, exist_ok=True)
     payload = {
         "min_recall_constraint": args.min_recall,
         "record_ids": record_ids,
@@ -620,8 +622,8 @@ def main() -> int:
         "global_best_full_eval": global_best_agg,
         "top_insample": top_insample,
     }
-    Path(json_out).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"JSON: {json_out}")
+    json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"JSON: {json_path}")
     return 0
 
 

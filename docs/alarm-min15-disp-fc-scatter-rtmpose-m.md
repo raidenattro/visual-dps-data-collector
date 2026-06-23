@@ -4,7 +4,7 @@
 > 样本：**28** 条（单人, 无遮挡 · 已复核 · 有标真）  
 > 机位：1-1-1, 1-2-1, 2-2-2, 2-3-1, 2-4-1, 2-5-1, 2-6-1, 2-7-2  
 > 门控：`alarm_min=15` 内存重算告警；**未**施加 disp/fc 段过滤  
-> 每个点 = 一条手腕碰撞段，悬停 SVG 或打开 HTML 表查看明细  
+> 每个点 = 一条手腕碰撞段，悬停 SVG 查看明细；全量点数据见 `json/alarm-min15-disp-fc-scatter-rtmpose-m.json`  
 
 ## 分类说明
 
@@ -17,8 +17,6 @@
 ## 散点图
 
 ![displacement × disp/fc](view/alarm-min15-disp-fc-scatter-rtmpose-m.svg)
-
-交互版（含全表）：[view/alarm-min15-disp-fc-scatter-rtmpose-m.html](view/alarm-min15-disp-fc-scatter-rtmpose-m.html)
 
 参考虚线：`disp/fc = 2.5`（combo4 单条件阈值）。
 
