@@ -1,0 +1,3202 @@
+{
+  "record_ids": [
+    "rtmpose-m/1-1-1/clip_0013_start_00-11-22_rtmpose_m",
+    "rtmpose-m/1-1-1/clip_0025_start_00-43-15_rtmpose_m",
+    "rtmpose-m/1-2-1/clip_0002_start_00-30-28_rtmpose_m",
+    "rtmpose-m/1-2-1/clip_0028_start_00-33-12_rtmpose_m",
+    "rtmpose-m/2-2-2/clip_0003_start_00-02-43_rtmpose_m",
+    "rtmpose-m/2-2-2/clip_0006_start_00-41-26_rtmpose_m",
+    "rtmpose-m/2-2-2/clip_0009_start_00-17-17_rtmpose_m",
+    "rtmpose-m/2-2-2/clip_0013_start_00-29-53_rtmpose_m",
+    "rtmpose-m/2-2-2/clip_0014_start_00-31-27_rtmpose_m",
+    "rtmpose-m/2-2-2/clip_0018_start_00-39-31_rtmpose_m",
+    "rtmpose-m/2-2-2/clip_0019_start_00-40-01_rtmpose_m",
+    "rtmpose-m/2-2-2/clip_0020_start_00-48-44_rtmpose_m",
+    "rtmpose-m/2-2-2/clip_0025_start_00-50-13_rtmpose_m",
+    "rtmpose-m/2-3-1/clip_0002_start_00-00-53_rtmpose_m",
+    "rtmpose-m/2-3-1/clip_0003_start_00-39-45_rtmpose_m",
+    "rtmpose-m/2-3-1/clip_0010_start_00-18-36_rtmpose_m",
+    "rtmpose-m/2-3-1/clip_0011_start_00-20-06_rtmpose_m",
+    "rtmpose-m/2-3-1/clip_0023_start_00-49-39_rtmpose_m",
+    "rtmpose-m/2-4-1/clip_0002_start_00-24-56_rtmpose_m",
+    "rtmpose-m/2-5-1/clip_0008_start_00-30-49_rtmpose_m",
+    "rtmpose-m/2-5-1/clip_0009_start_00-37-59_rtmpose_m",
+    "rtmpose-m/2-5-1/clip_0019_start_00-47-26_rtmpose_m",
+    "rtmpose-m/2-5-1/clip_0020_start_00-50-44_rtmpose_m",
+    "rtmpose-m/2-6-1/clip_0005_start_00-07-59_rtmpose_m",
+    "rtmpose-m/2-6-1/clip_0006_start_00-14-11_rtmpose_m",
+    "rtmpose-m/2-6-1/clip_0007_start_00-22-47_rtmpose_m",
+    "rtmpose-m/2-6-1/clip_0011_start_00-40-16_rtmpose_m",
+    "rtmpose-m/2-7-2/clip_0013_start_00-42-48_rtmpose_m"
+  ],
+  "baseline_min": 5,
+  "experiment_min": 22,
+  "cooldown": 6,
+  "baseline": {
+    "aggregate": {
+      "records": 28,
+      "gt_segments": 168,
+      "detected": 149,
+      "missed": 19,
+      "false_alarms": 227,
+      "alarm_count": 790,
+      "recall": 0.8869,
+      "miss_rate": 0.1131,
+      "precision_proxy": 0.3963
+    },
+    "records": [
+      {
+        "record_id": "rtmpose-m/1-1-1/clip_0013_start_00-11-22_rtmpose_m",
+        "clip": "clip_0013_start_00-11-22_rtmpose_m",
+        "camera_slug": "1-1-1",
+        "status": "ok",
+        "config": "min=5",
+        "alarm_min": 5,
+        "gt_segments": 61,
+        "detected": 49,
+        "missed": 12,
+        "false_alarms": 28,
+        "recall": 0.8032786885245902,
+        "miss_rate": 0.19672131147540983,
+        "alarm_count": 198,
+        "precision_proxy": 0.6364,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_1006"
+            ],
+            "frame_start": 970,
+            "frame_end": 970,
+            "entry_count": 1,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_1012"
+            ],
+            "frame_start": 1648,
+            "frame_end": 1648,
+            "entry_count": 1,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_2010"
+            ],
+            "frame_start": 1670,
+            "frame_end": 1670,
+            "entry_count": 1,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_2014"
+            ],
+            "frame_start": 1675,
+            "frame_end": 1675,
+            "entry_count": 1,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_1007"
+            ],
+            "frame_start": 1675,
+            "frame_end": 1676,
+            "entry_count": 2,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 786,
+            "box_token": "Box_1005"
+          },
+          {
+            "frame_idx": 814,
+            "box_token": "Box_1009"
+          },
+          {
+            "frame_idx": 847,
+            "box_token": "Box_1009"
+          },
+          {
+            "frame_idx": 892,
+            "box_token": "Box_1013"
+          },
+          {
+            "frame_idx": 929,
+            "box_token": "Box_1010"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/1-1-1/clip_0025_start_00-43-15_rtmpose_m",
+        "clip": "clip_0025_start_00-43-15_rtmpose_m",
+        "camera_slug": "1-1-1",
+        "status": "ok",
+        "config": "min=5",
+        "alarm_min": 5,
+        "gt_segments": 2,
+        "detected": 2,
+        "missed": 0,
+        "false_alarms": 2,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 11,
+        "precision_proxy": 0.5,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 56,
+            "box_token": "Box_2013"
+          },
+          {
+            "frame_idx": 59,
+            "box_token": "Box_2007"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/1-2-1/clip_0002_start_00-30-28_rtmpose_m",
+        "clip": "clip_0002_start_00-30-28_rtmpose_m",
+        "camera_slug": "1-2-1",
+        "status": "ok",
+        "config": "min=5",
+        "alarm_min": 5,
+        "gt_segments": 1,
+        "detected": 1,
+        "missed": 0,
+        "false_alarms": 1,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 15,
+        "precision_proxy": 0.5,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 4200,
+            "box_token": "Box_1025"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/1-2-1/clip_0028_start_00-33-12_rtmpose_m",
+        "clip": "clip_0028_start_00-33-12_rtmpose_m",
+        "camera_slug": "1-2-1",
+        "status": "ok",
+        "config": "min=5",
+        "alarm_min": 5,
+        "gt_segments": 2,
+        "detected": 2,
+        "missed": 0,
+        "false_alarms": 4,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 14,
+        "precision_proxy": 0.3333,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 192,
+            "box_token": "Box_2027"
+          },
+          {
+            "frame_idx": 543,
+            "box_token": "Box_2023"
+          },
+          {
+            "frame_idx": 550,
+            "box_token": "Box_2024"
+          },
+          {
+            "frame_idx": 556,
+            "box_token": "Box_2024"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0003_start_00-02-43_rtmpose_m",
+        "clip": "clip_0003_start_00-02-43_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "status": "ok",
+        "config": "min=5",
+        "alarm_min": 5,
+        "gt_segments": 1,
+        "detected": 1,
+        "missed": 0,
+        "false_alarms": 5,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 11,
+        "precision_proxy": 0.1667,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 143,
+            "box_token": "Box_4016"
+          },
+          {
+            "frame_idx": 150,
+            "box_token": "Box_4017"
+          },
+          {
+            "frame_idx": 156,
+            "box_token": "Box_4017"
+          },
+          {
+            "frame_idx": 162,
+            "box_token": "Box_4017"
+          },
+          {
+            "frame_idx": 172,
+            "box_token": "Box_4014"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0006_start_00-41-26_rtmpose_m",
+        "clip": "clip_0006_start_00-41-26_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "status": "ok",
+        "config": "min=5",
+        "alarm_min": 5,
+        "gt_segments": 8,
+        "detected": 8,
+        "missed": 0,
+        "false_alarms": 6,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 35,
+        "precision_proxy": 0.5714,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 456,
+            "box_token": "Box_3018"
+          },
+          {
+            "frame_idx": 562,
+            "box_token": "Box_3032"
+          },
+          {
+            "frame_idx": 620,
+            "box_token": "Box_3030"
+          },
+          {
+            "frame_idx": 626,
+            "box_token": "Box_3030"
+          },
+          {
+            "frame_idx": 632,
+            "box_token": "Box_3030"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0009_start_00-17-17_rtmpose_m",
+        "clip": "clip_0009_start_00-17-17_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "status": "ok",
+        "config": "min=5",
+        "alarm_min": 5,
+        "gt_segments": 7,
+        "detected": 7,
+        "missed": 0,
+        "false_alarms": 2,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 30,
+        "precision_proxy": 0.7778,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 13,
+            "box_token": "Box_4014"
+          },
+          {
+            "frame_idx": 104,
+            "box_token": "Box_4018"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0013_start_00-29-53_rtmpose_m",
+        "clip": "clip_0013_start_00-29-53_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "status": "ok",
+        "config": "min=5",
+        "alarm_min": 5,
+        "gt_segments": 3,
+        "detected": 3,
+        "missed": 0,
+        "false_alarms": 7,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 20,
+        "precision_proxy": 0.3,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 2092,
+            "box_token": "Box_4013"
+          },
+          {
+            "frame_idx": 2100,
+            "box_token": "Box_4010"
+          },
+          {
+            "frame_idx": 2137,
+            "box_token": "Box_4018"
+          },
+          {
+            "frame_idx": 2170,
+            "box_token": "Box_4017"
+          },
+          {
+            "frame_idx": 2176,
+            "box_token": "Box_4016"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0014_start_00-31-27_rtmpose_m",
+        "clip": "clip_0014_start_00-31-27_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "status": "ok",
+        "config": "min=5",
+        "alarm_min": 5,
+        "gt_segments": 2,
+        "detected": 1,
+        "missed": 1,
+        "false_alarms": 0,
+        "recall": 0.5,
+        "miss_rate": 0.5,
+        "alarm_count": 7,
+        "precision_proxy": 1.0,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_4018"
+            ],
+            "frame_start": 48,
+            "frame_end": 163,
+            "entry_count": 20,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": []
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0018_start_00-39-31_rtmpose_m",
+        "clip": "clip_0018_start_00-39-31_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "status": "ok",
+        "config": "min=5",
+        "alarm_min": 5,
+        "gt_segments": 1,
+        "detected": 1,
+        "missed": 0,
+        "false_alarms": 6,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 7,
+        "precision_proxy": 0.1429,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 386,
+            "box_token": "Box_4018"
+          },
+          {
+            "frame_idx": 392,
+            "box_token": "Box_4018"
+          },
+          {
+            "frame_idx": 398,
+            "box_token": "Box_4018"
+          },
+          {
+            "frame_idx": 404,
+            "box_token": "Box_4017"
+          },
+          {
+            "frame_idx": 483,
+            "box_token": "Box_4017"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0019_start_00-40-01_rtmpose_m",
+        "clip": "clip_0019_start_00-40-01_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "status": "ok",
+        "config": "min=5",
+        "alarm_min": 5,
+        "gt_segments": 1,
+        "detected": 1,
+        "missed": 0,
+        "false_alarms": 15,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 20,
+        "precision_proxy": 0.0625,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 5,
+            "box_token": "Box_4017"
+          },
+          {
+            "frame_idx": 11,
+            "box_token": "Box_4017"
+          },
+          {
+            "frame_idx": 17,
+            "box_token": "Box_4017"
+          },
+          {
+            "frame_idx": 25,
+            "box_token": "Box_4018"
+          },
+          {
+            "frame_idx": 31,
+            "box_token": "Box_4018"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0020_start_00-48-44_rtmpose_m",
+        "clip": "clip_0020_start_00-48-44_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "status": "ok",
+        "config": "min=5",
+        "alarm_min": 5,
+        "gt_segments": 1,
+        "detected": 1,
+        "missed": 0,
+        "false_alarms": 2,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 3,
+        "precision_proxy": 0.3333,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 65,
+            "box_token": "Box_3023"
+          },
+          {
+            "frame_idx": 74,
+            "box_token": "Box_3018"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0025_start_00-50-13_rtmpose_m",
+        "clip": "clip_0025_start_00-50-13_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "status": "ok",
+        "config": "min=5",
+        "alarm_min": 5,
+        "gt_segments": 1,
+        "detected": 1,
+        "missed": 0,
+        "false_alarms": 2,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 3,
+        "precision_proxy": 0.3333,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 15,
+            "box_token": "Box_3031"
+          },
+          {
+            "frame_idx": 21,
+            "box_token": "Box_3031"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-3-1/clip_0002_start_00-00-53_rtmpose_m",
+        "clip": "clip_0002_start_00-00-53_rtmpose_m",
+        "camera_slug": "2-3-1",
+        "status": "ok",
+        "config": "min=5",
+        "alarm_min": 5,
+        "gt_segments": 1,
+        "detected": 1,
+        "missed": 0,
+        "false_alarms": 2,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 10,
+        "precision_proxy": 0.3333,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 192,
+            "box_token": "Box_3041"
+          },
+          {
+            "frame_idx": 209,
+            "box_token": "Box_3037"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-3-1/clip_0003_start_00-39-45_rtmpose_m",
+        "clip": "clip_0003_start_00-39-45_rtmpose_m",
+        "camera_slug": "2-3-1",
+        "status": "ok",
+        "config": "min=5",
+        "alarm_min": 5,
+        "gt_segments": 1,
+        "detected": 0,
+        "missed": 1,
+        "false_alarms": 9,
+        "recall": 0.0,
+        "miss_rate": 1.0,
+        "alarm_count": 9,
+        "precision_proxy": 0.0,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_3040"
+            ],
+            "frame_start": 1708,
+            "frame_end": 1741,
+            "entry_count": 34,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 664,
+            "box_token": "Box_3046"
+          },
+          {
+            "frame_idx": 1705,
+            "box_token": "Box_3043"
+          },
+          {
+            "frame_idx": 1710,
+            "box_token": "Box_3044"
+          },
+          {
+            "frame_idx": 1716,
+            "box_token": "Box_3044"
+          },
+          {
+            "frame_idx": 1722,
+            "box_token": "Box_3044"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-3-1/clip_0010_start_00-18-36_rtmpose_m",
+        "clip": "clip_0010_start_00-18-36_rtmpose_m",
+        "camera_slug": "2-3-1",
+        "status": "ok",
+        "config": "min=5",
+        "alarm_min": 5,
+        "gt_segments": 5,
+        "detected": 4,
+        "missed": 1,
+        "false_alarms": 3,
+        "recall": 0.8,
+        "miss_rate": 0.2,
+        "alarm_count": 14,
+        "precision_proxy": 0.5714,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_4025"
+            ],
+            "frame_start": 633,
+            "frame_end": 646,
+            "entry_count": 4,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 599,
+            "box_token": "Box_4022"
+          },
+          {
+            "frame_idx": 624,
+            "box_token": "Box_4025"
+          },
+          {
+            "frame_idx": 659,
+            "box_token": "Box_4023"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-3-1/clip_0011_start_00-20-06_rtmpose_m",
+        "clip": "clip_0011_start_00-20-06_rtmpose_m",
+        "camera_slug": "2-3-1",
+        "status": "ok",
+        "config": "min=5",
+        "alarm_min": 5,
+        "gt_segments": 1,
+        "detected": 1,
+        "missed": 0,
+        "false_alarms": 3,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 8,
+        "precision_proxy": 0.25,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 5,
+            "box_token": "Box_4026"
+          },
+          {
+            "frame_idx": 1463,
+            "box_token": "Box_4027"
+          },
+          {
+            "frame_idx": 4047,
+            "box_token": "Box_3046"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-3-1/clip_0023_start_00-49-39_rtmpose_m",
+        "clip": "clip_0023_start_00-49-39_rtmpose_m",
+        "camera_slug": "2-3-1",
+        "status": "ok",
+        "config": "min=5",
+        "alarm_min": 5,
+        "gt_segments": 7,
+        "detected": 6,
+        "missed": 1,
+        "false_alarms": 15,
+        "recall": 0.8571428571428571,
+        "miss_rate": 0.14285714285714285,
+        "alarm_count": 48,
+        "precision_proxy": 0.2857,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_4027"
+            ],
+            "frame_start": 589,
+            "frame_end": 598,
+            "entry_count": 5,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 243,
+            "box_token": "Box_4025"
+          },
+          {
+            "frame_idx": 249,
+            "box_token": "Box_4025"
+          },
+          {
+            "frame_idx": 287,
+            "box_token": "Box_4025"
+          },
+          {
+            "frame_idx": 295,
+            "box_token": "Box_4022"
+          },
+          {
+            "frame_idx": 302,
+            "box_token": "Box_4023"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-4-1/clip_0002_start_00-24-56_rtmpose_m",
+        "clip": "clip_0002_start_00-24-56_rtmpose_m",
+        "camera_slug": "2-4-1",
+        "status": "ok",
+        "config": "min=5",
+        "alarm_min": 5,
+        "gt_segments": 19,
+        "detected": 19,
+        "missed": 0,
+        "false_alarms": 31,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 87,
+        "precision_proxy": 0.38,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 10562,
+            "box_token": "Box_3054"
+          },
+          {
+            "frame_idx": 10602,
+            "box_token": "Box_3058"
+          },
+          {
+            "frame_idx": 10609,
+            "box_token": "Box_3058"
+          },
+          {
+            "frame_idx": 10615,
+            "box_token": "Box_3058"
+          },
+          {
+            "frame_idx": 10639,
+            "box_token": "Box_3058"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-5-1/clip_0008_start_00-30-49_rtmpose_m",
+        "clip": "clip_0008_start_00-30-49_rtmpose_m",
+        "camera_slug": "2-5-1",
+        "status": "ok",
+        "config": "min=5",
+        "alarm_min": 5,
+        "gt_segments": 12,
+        "detected": 12,
+        "missed": 0,
+        "false_alarms": 17,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 66,
+        "precision_proxy": 0.4138,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 3384,
+            "box_token": "Box_3069"
+          },
+          {
+            "frame_idx": 3390,
+            "box_token": "Box_3069"
+          },
+          {
+            "frame_idx": 5324,
+            "box_token": "Box_3066"
+          },
+          {
+            "frame_idx": 5342,
+            "box_token": "Box_3066"
+          },
+          {
+            "frame_idx": 5353,
+            "box_token": "Box_3070"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-5-1/clip_0009_start_00-37-59_rtmpose_m",
+        "clip": "clip_0009_start_00-37-59_rtmpose_m",
+        "camera_slug": "2-5-1",
+        "status": "ok",
+        "config": "min=5",
+        "alarm_min": 5,
+        "gt_segments": 5,
+        "detected": 4,
+        "missed": 1,
+        "false_alarms": 32,
+        "recall": 0.8,
+        "miss_rate": 0.2,
+        "alarm_count": 41,
+        "precision_proxy": 0.1111,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_3079"
+            ],
+            "frame_start": 111,
+            "frame_end": 111,
+            "entry_count": 1,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 62,
+            "box_token": "Box_3075"
+          },
+          {
+            "frame_idx": 91,
+            "box_token": "Box_3079"
+          },
+          {
+            "frame_idx": 122,
+            "box_token": "Box_3080"
+          },
+          {
+            "frame_idx": 154,
+            "box_token": "Box_3076"
+          },
+          {
+            "frame_idx": 172,
+            "box_token": "Box_3076"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-5-1/clip_0019_start_00-47-26_rtmpose_m",
+        "clip": "clip_0019_start_00-47-26_rtmpose_m",
+        "camera_slug": "2-5-1",
+        "status": "ok",
+        "config": "min=5",
+        "alarm_min": 5,
+        "gt_segments": 1,
+        "detected": 1,
+        "missed": 0,
+        "false_alarms": 7,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 14,
+        "precision_proxy": 0.125,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 2039,
+            "box_token": "Box_4044"
+          },
+          {
+            "frame_idx": 2052,
+            "box_token": "Box_4042"
+          },
+          {
+            "frame_idx": 2058,
+            "box_token": "Box_4042"
+          },
+          {
+            "frame_idx": 2082,
+            "box_token": "Box_4044"
+          },
+          {
+            "frame_idx": 2091,
+            "box_token": "Box_4044"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-5-1/clip_0020_start_00-50-44_rtmpose_m",
+        "clip": "clip_0020_start_00-50-44_rtmpose_m",
+        "camera_slug": "2-5-1",
+        "status": "ok",
+        "config": "min=5",
+        "alarm_min": 5,
+        "gt_segments": 3,
+        "detected": 3,
+        "missed": 0,
+        "false_alarms": 9,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 24,
+        "precision_proxy": 0.25,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 691,
+            "box_token": "Box_3069"
+          },
+          {
+            "frame_idx": 701,
+            "box_token": "Box_3069"
+          },
+          {
+            "frame_idx": 707,
+            "box_token": "Box_3069"
+          },
+          {
+            "frame_idx": 805,
+            "box_token": "Box_3073"
+          },
+          {
+            "frame_idx": 828,
+            "box_token": "Box_3071"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-6-1/clip_0005_start_00-07-59_rtmpose_m",
+        "clip": "clip_0005_start_00-07-59_rtmpose_m",
+        "camera_slug": "2-6-1",
+        "status": "ok",
+        "config": "min=5",
+        "alarm_min": 5,
+        "gt_segments": 10,
+        "detected": 9,
+        "missed": 1,
+        "false_alarms": 3,
+        "recall": 0.9,
+        "miss_rate": 0.1,
+        "alarm_count": 37,
+        "precision_proxy": 0.75,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_3093"
+            ],
+            "frame_start": 3281,
+            "frame_end": 3299,
+            "entry_count": 15,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 3176,
+            "box_token": "Box_3087"
+          },
+          {
+            "frame_idx": 3300,
+            "box_token": "Box_3093"
+          },
+          {
+            "frame_idx": 3391,
+            "box_token": "Box_3092"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-6-1/clip_0006_start_00-14-11_rtmpose_m",
+        "clip": "clip_0006_start_00-14-11_rtmpose_m",
+        "camera_slug": "2-6-1",
+        "status": "ok",
+        "config": "min=5",
+        "alarm_min": 5,
+        "gt_segments": 7,
+        "detected": 7,
+        "missed": 0,
+        "false_alarms": 7,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 34,
+        "precision_proxy": 0.5,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 538,
+            "box_token": "Box_3087"
+          },
+          {
+            "frame_idx": 543,
+            "box_token": "Box_3083"
+          },
+          {
+            "frame_idx": 574,
+            "box_token": "Box_3086"
+          },
+          {
+            "frame_idx": 635,
+            "box_token": "Box_3093"
+          },
+          {
+            "frame_idx": 707,
+            "box_token": "Box_3095"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-6-1/clip_0007_start_00-22-47_rtmpose_m",
+        "clip": "clip_0007_start_00-22-47_rtmpose_m",
+        "camera_slug": "2-6-1",
+        "status": "ok",
+        "config": "min=5",
+        "alarm_min": 5,
+        "gt_segments": 1,
+        "detected": 1,
+        "missed": 0,
+        "false_alarms": 0,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 3,
+        "precision_proxy": 1.0,
+        "missed_segments": [],
+        "false_alarm_samples": []
+      },
+      {
+        "record_id": "rtmpose-m/2-6-1/clip_0011_start_00-40-16_rtmpose_m",
+        "clip": "clip_0011_start_00-40-16_rtmpose_m",
+        "camera_slug": "2-6-1",
+        "status": "ok",
+        "config": "min=5",
+        "alarm_min": 5,
+        "gt_segments": 2,
+        "detected": 2,
+        "missed": 0,
+        "false_alarms": 3,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 14,
+        "precision_proxy": 0.4,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 1780,
+            "box_token": "Box_3086"
+          },
+          {
+            "frame_idx": 1806,
+            "box_token": "Box_3088"
+          },
+          {
+            "frame_idx": 1846,
+            "box_token": "Box_3095"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-7-2/clip_0013_start_00-42-48_rtmpose_m",
+        "clip": "clip_0013_start_00-42-48_rtmpose_m",
+        "camera_slug": "2-7-2",
+        "status": "ok",
+        "config": "min=5",
+        "alarm_min": 5,
+        "gt_segments": 2,
+        "detected": 1,
+        "missed": 1,
+        "false_alarms": 6,
+        "recall": 0.5,
+        "miss_rate": 0.5,
+        "alarm_count": 7,
+        "precision_proxy": 0.1429,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_3105"
+            ],
+            "frame_start": 159,
+            "frame_end": 169,
+            "entry_count": 2,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 117,
+            "box_token": "Box_3097"
+          },
+          {
+            "frame_idx": 125,
+            "box_token": "Box_3097"
+          },
+          {
+            "frame_idx": 147,
+            "box_token": "Box_3107"
+          },
+          {
+            "frame_idx": 155,
+            "box_token": "Box_3105"
+          },
+          {
+            "frame_idx": 180,
+            "box_token": "Box_3108"
+          }
+        ]
+      }
+    ]
+  },
+  "experiment": {
+    "aggregate": {
+      "records": 28,
+      "gt_segments": 168,
+      "detected": 95,
+      "missed": 73,
+      "false_alarms": 35,
+      "alarm_count": 223,
+      "recall": 0.5655,
+      "miss_rate": 0.4345,
+      "precision_proxy": 0.7308
+    },
+    "records": [
+      {
+        "record_id": "rtmpose-m/1-1-1/clip_0013_start_00-11-22_rtmpose_m",
+        "clip": "clip_0013_start_00-11-22_rtmpose_m",
+        "camera_slug": "1-1-1",
+        "status": "ok",
+        "config": "min=22",
+        "alarm_min": 22,
+        "gt_segments": 61,
+        "detected": 32,
+        "missed": 29,
+        "false_alarms": 5,
+        "recall": 0.5245901639344263,
+        "miss_rate": 0.47540983606557374,
+        "alarm_count": 49,
+        "precision_proxy": 0.8649,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_1002"
+            ],
+            "frame_start": 789,
+            "frame_end": 807,
+            "entry_count": 19,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_1010"
+            ],
+            "frame_start": 815,
+            "frame_end": 855,
+            "entry_count": 29,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_1014"
+            ],
+            "frame_start": 909,
+            "frame_end": 934,
+            "entry_count": 26,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_1007"
+            ],
+            "frame_start": 949,
+            "frame_end": 969,
+            "entry_count": 21,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_1006"
+            ],
+            "frame_start": 970,
+            "frame_end": 970,
+            "entry_count": 1,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 1084,
+            "box_token": "Box_1011"
+          },
+          {
+            "frame_idx": 1141,
+            "box_token": "Box_1015"
+          },
+          {
+            "frame_idx": 1884,
+            "box_token": "Box_1002"
+          },
+          {
+            "frame_idx": 4171,
+            "box_token": "Box_2007"
+          },
+          {
+            "frame_idx": 4194,
+            "box_token": "Box_2003"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/1-1-1/clip_0025_start_00-43-15_rtmpose_m",
+        "clip": "clip_0025_start_00-43-15_rtmpose_m",
+        "camera_slug": "1-1-1",
+        "status": "ok",
+        "config": "min=22",
+        "alarm_min": 22,
+        "gt_segments": 2,
+        "detected": 1,
+        "missed": 1,
+        "false_alarms": 0,
+        "recall": 0.5,
+        "miss_rate": 0.5,
+        "alarm_count": 3,
+        "precision_proxy": 1.0,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_2005"
+            ],
+            "frame_start": 73,
+            "frame_end": 88,
+            "entry_count": 16,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": []
+      },
+      {
+        "record_id": "rtmpose-m/1-2-1/clip_0002_start_00-30-28_rtmpose_m",
+        "clip": "clip_0002_start_00-30-28_rtmpose_m",
+        "camera_slug": "1-2-1",
+        "status": "ok",
+        "config": "min=22",
+        "alarm_min": 22,
+        "gt_segments": 1,
+        "detected": 1,
+        "missed": 0,
+        "false_alarms": 0,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 12,
+        "precision_proxy": 1.0,
+        "missed_segments": [],
+        "false_alarm_samples": []
+      },
+      {
+        "record_id": "rtmpose-m/1-2-1/clip_0028_start_00-33-12_rtmpose_m",
+        "clip": "clip_0028_start_00-33-12_rtmpose_m",
+        "camera_slug": "1-2-1",
+        "status": "ok",
+        "config": "min=22",
+        "alarm_min": 22,
+        "gt_segments": 2,
+        "detected": 2,
+        "missed": 0,
+        "false_alarms": 0,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 4,
+        "precision_proxy": 1.0,
+        "missed_segments": [],
+        "false_alarm_samples": []
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0003_start_00-02-43_rtmpose_m",
+        "clip": "clip_0003_start_00-02-43_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "status": "ok",
+        "config": "min=22",
+        "alarm_min": 22,
+        "gt_segments": 1,
+        "detected": 1,
+        "missed": 0,
+        "false_alarms": 1,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 3,
+        "precision_proxy": 0.5,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 167,
+            "box_token": "Box_4017"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0006_start_00-41-26_rtmpose_m",
+        "clip": "clip_0006_start_00-41-26_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "status": "ok",
+        "config": "min=22",
+        "alarm_min": 22,
+        "gt_segments": 8,
+        "detected": 4,
+        "missed": 4,
+        "false_alarms": 0,
+        "recall": 0.5,
+        "miss_rate": 0.5,
+        "alarm_count": 9,
+        "precision_proxy": 1.0,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_3021"
+            ],
+            "frame_start": 524,
+            "frame_end": 543,
+            "entry_count": 20,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_3022"
+            ],
+            "frame_start": 553,
+            "frame_end": 556,
+            "entry_count": 4,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_3029"
+            ],
+            "frame_start": 638,
+            "frame_end": 662,
+            "entry_count": 25,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_3028"
+            ],
+            "frame_start": 779,
+            "frame_end": 792,
+            "entry_count": 12,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": []
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0009_start_00-17-17_rtmpose_m",
+        "clip": "clip_0009_start_00-17-17_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "status": "ok",
+        "config": "min=22",
+        "alarm_min": 22,
+        "gt_segments": 7,
+        "detected": 6,
+        "missed": 1,
+        "false_alarms": 0,
+        "recall": 0.8571428571428571,
+        "miss_rate": 0.14285714285714285,
+        "alarm_count": 8,
+        "precision_proxy": 1.0,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_4018"
+            ],
+            "frame_start": 1,
+            "frame_end": 19,
+            "entry_count": 19,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": []
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0013_start_00-29-53_rtmpose_m",
+        "clip": "clip_0013_start_00-29-53_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "status": "ok",
+        "config": "min=22",
+        "alarm_min": 22,
+        "gt_segments": 3,
+        "detected": 2,
+        "missed": 1,
+        "false_alarms": 0,
+        "recall": 0.6666666666666666,
+        "miss_rate": 0.3333333333333333,
+        "alarm_count": 6,
+        "precision_proxy": 1.0,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_4014"
+            ],
+            "frame_start": 2244,
+            "frame_end": 2254,
+            "entry_count": 11,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": []
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0014_start_00-31-27_rtmpose_m",
+        "clip": "clip_0014_start_00-31-27_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "status": "ok",
+        "config": "min=22",
+        "alarm_min": 22,
+        "gt_segments": 2,
+        "detected": 1,
+        "missed": 1,
+        "false_alarms": 0,
+        "recall": 0.5,
+        "miss_rate": 0.5,
+        "alarm_count": 5,
+        "precision_proxy": 1.0,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_4018"
+            ],
+            "frame_start": 48,
+            "frame_end": 163,
+            "entry_count": 20,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": []
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0018_start_00-39-31_rtmpose_m",
+        "clip": "clip_0018_start_00-39-31_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "status": "ok",
+        "config": "min=22",
+        "alarm_min": 22,
+        "gt_segments": 1,
+        "detected": 0,
+        "missed": 1,
+        "false_alarms": 0,
+        "recall": 0.0,
+        "miss_rate": 1.0,
+        "alarm_count": 0,
+        "precision_proxy": null,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_4017"
+            ],
+            "frame_start": 405,
+            "frame_end": 481,
+            "entry_count": 59,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": []
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0019_start_00-40-01_rtmpose_m",
+        "clip": "clip_0019_start_00-40-01_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "status": "ok",
+        "config": "min=22",
+        "alarm_min": 22,
+        "gt_segments": 1,
+        "detected": 1,
+        "missed": 0,
+        "false_alarms": 2,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 3,
+        "precision_proxy": 0.3333,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 189,
+            "box_token": "Box_4017"
+          },
+          {
+            "frame_idx": 195,
+            "box_token": "Box_4017"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0020_start_00-48-44_rtmpose_m",
+        "clip": "clip_0020_start_00-48-44_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "status": "ok",
+        "config": "min=22",
+        "alarm_min": 22,
+        "gt_segments": 1,
+        "detected": 0,
+        "missed": 1,
+        "false_alarms": 0,
+        "recall": 0.0,
+        "miss_rate": 1.0,
+        "alarm_count": 0,
+        "precision_proxy": null,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_3018"
+            ],
+            "frame_start": 79,
+            "frame_end": 82,
+            "entry_count": 4,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": []
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0025_start_00-50-13_rtmpose_m",
+        "clip": "clip_0025_start_00-50-13_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "status": "ok",
+        "config": "min=22",
+        "alarm_min": 22,
+        "gt_segments": 1,
+        "detected": 0,
+        "missed": 1,
+        "false_alarms": 0,
+        "recall": 0.0,
+        "miss_rate": 1.0,
+        "alarm_count": 0,
+        "precision_proxy": null,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_3030"
+            ],
+            "frame_start": 1,
+            "frame_end": 9,
+            "entry_count": 9,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": []
+      },
+      {
+        "record_id": "rtmpose-m/2-3-1/clip_0002_start_00-00-53_rtmpose_m",
+        "clip": "clip_0002_start_00-00-53_rtmpose_m",
+        "camera_slug": "2-3-1",
+        "status": "ok",
+        "config": "min=22",
+        "alarm_min": 22,
+        "gt_segments": 1,
+        "detected": 1,
+        "missed": 0,
+        "false_alarms": 0,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 6,
+        "precision_proxy": 1.0,
+        "missed_segments": [],
+        "false_alarm_samples": []
+      },
+      {
+        "record_id": "rtmpose-m/2-3-1/clip_0003_start_00-39-45_rtmpose_m",
+        "clip": "clip_0003_start_00-39-45_rtmpose_m",
+        "camera_slug": "2-3-1",
+        "status": "ok",
+        "config": "min=22",
+        "alarm_min": 22,
+        "gt_segments": 1,
+        "detected": 0,
+        "missed": 1,
+        "false_alarms": 3,
+        "recall": 0.0,
+        "miss_rate": 1.0,
+        "alarm_count": 3,
+        "precision_proxy": 0.0,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_3040"
+            ],
+            "frame_start": 1708,
+            "frame_end": 1741,
+            "entry_count": 34,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 1727,
+            "box_token": "Box_3044"
+          },
+          {
+            "frame_idx": 1733,
+            "box_token": "Box_3044"
+          },
+          {
+            "frame_idx": 1739,
+            "box_token": "Box_3044"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-3-1/clip_0010_start_00-18-36_rtmpose_m",
+        "clip": "clip_0010_start_00-18-36_rtmpose_m",
+        "camera_slug": "2-3-1",
+        "status": "ok",
+        "config": "min=22",
+        "alarm_min": 22,
+        "gt_segments": 5,
+        "detected": 2,
+        "missed": 3,
+        "false_alarms": 0,
+        "recall": 0.4,
+        "miss_rate": 0.6,
+        "alarm_count": 2,
+        "precision_proxy": 1.0,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_4022"
+            ],
+            "frame_start": 601,
+            "frame_end": 607,
+            "entry_count": 5,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_4025"
+            ],
+            "frame_start": 633,
+            "frame_end": 646,
+            "entry_count": 4,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_4020"
+            ],
+            "frame_start": 685,
+            "frame_end": 703,
+            "entry_count": 19,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": []
+      },
+      {
+        "record_id": "rtmpose-m/2-3-1/clip_0011_start_00-20-06_rtmpose_m",
+        "clip": "clip_0011_start_00-20-06_rtmpose_m",
+        "camera_slug": "2-3-1",
+        "status": "ok",
+        "config": "min=22",
+        "alarm_min": 22,
+        "gt_segments": 1,
+        "detected": 1,
+        "missed": 0,
+        "false_alarms": 0,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 2,
+        "precision_proxy": 1.0,
+        "missed_segments": [],
+        "false_alarm_samples": []
+      },
+      {
+        "record_id": "rtmpose-m/2-3-1/clip_0023_start_00-49-39_rtmpose_m",
+        "clip": "clip_0023_start_00-49-39_rtmpose_m",
+        "camera_slug": "2-3-1",
+        "status": "ok",
+        "config": "min=22",
+        "alarm_min": 22,
+        "gt_segments": 7,
+        "detected": 3,
+        "missed": 4,
+        "false_alarms": 3,
+        "recall": 0.42857142857142855,
+        "miss_rate": 0.5714285714285714,
+        "alarm_count": 15,
+        "precision_proxy": 0.5,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_4025"
+            ],
+            "frame_start": 132,
+            "frame_end": 238,
+            "entry_count": 40,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_4023"
+            ],
+            "frame_start": 255,
+            "frame_end": 301,
+            "entry_count": 47,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_4026"
+            ],
+            "frame_start": 376,
+            "frame_end": 444,
+            "entry_count": 44,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_4027"
+            ],
+            "frame_start": 589,
+            "frame_end": 598,
+            "entry_count": 5,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 242,
+            "box_token": "Box_4025"
+          },
+          {
+            "frame_idx": 248,
+            "box_token": "Box_4025"
+          },
+          {
+            "frame_idx": 353,
+            "box_token": "Box_4020"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-4-1/clip_0002_start_00-24-56_rtmpose_m",
+        "clip": "clip_0002_start_00-24-56_rtmpose_m",
+        "camera_slug": "2-4-1",
+        "status": "ok",
+        "config": "min=22",
+        "alarm_min": 22,
+        "gt_segments": 19,
+        "detected": 12,
+        "missed": 7,
+        "false_alarms": 7,
+        "recall": 0.631578947368421,
+        "miss_rate": 0.3684210526315789,
+        "alarm_count": 25,
+        "precision_proxy": 0.6316,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_3053"
+            ],
+            "frame_start": 10526,
+            "frame_end": 10539,
+            "entry_count": 6,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_3054"
+            ],
+            "frame_start": 10555,
+            "frame_end": 10561,
+            "entry_count": 5,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_3050"
+            ],
+            "frame_start": 10573,
+            "frame_end": 10584,
+            "entry_count": 12,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_3050"
+            ],
+            "frame_start": 10784,
+            "frame_end": 10798,
+            "entry_count": 15,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_3052"
+            ],
+            "frame_start": 10843,
+            "frame_end": 10861,
+            "entry_count": 15,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 10638,
+            "box_token": "Box_3058"
+          },
+          {
+            "frame_idx": 10644,
+            "box_token": "Box_3058"
+          },
+          {
+            "frame_idx": 10800,
+            "box_token": "Box_3050"
+          },
+          {
+            "frame_idx": 10806,
+            "box_token": "Box_3050"
+          },
+          {
+            "frame_idx": 10862,
+            "box_token": "Box_3052"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-5-1/clip_0008_start_00-30-49_rtmpose_m",
+        "clip": "clip_0008_start_00-30-49_rtmpose_m",
+        "camera_slug": "2-5-1",
+        "status": "ok",
+        "config": "min=22",
+        "alarm_min": 22,
+        "gt_segments": 12,
+        "detected": 7,
+        "missed": 5,
+        "false_alarms": 4,
+        "recall": 0.5833333333333334,
+        "miss_rate": 0.4166666666666667,
+        "alarm_count": 20,
+        "precision_proxy": 0.6364,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_3066"
+            ],
+            "frame_start": 5326,
+            "frame_end": 5339,
+            "entry_count": 10,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_3074"
+            ],
+            "frame_start": 5385,
+            "frame_end": 5431,
+            "entry_count": 27,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_3079"
+            ],
+            "frame_start": 5471,
+            "frame_end": 5479,
+            "entry_count": 7,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_3076"
+            ],
+            "frame_start": 5543,
+            "frame_end": 5558,
+            "entry_count": 11,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_3067"
+            ],
+            "frame_start": 6359,
+            "frame_end": 6368,
+            "entry_count": 10,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 5341,
+            "box_token": "Box_3066"
+          },
+          {
+            "frame_idx": 5486,
+            "box_token": "Box_3079"
+          },
+          {
+            "frame_idx": 5492,
+            "box_token": "Box_3079"
+          },
+          {
+            "frame_idx": 5560,
+            "box_token": "Box_3076"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-5-1/clip_0009_start_00-37-59_rtmpose_m",
+        "clip": "clip_0009_start_00-37-59_rtmpose_m",
+        "camera_slug": "2-5-1",
+        "status": "ok",
+        "config": "min=22",
+        "alarm_min": 22,
+        "gt_segments": 5,
+        "detected": 2,
+        "missed": 3,
+        "false_alarms": 8,
+        "recall": 0.4,
+        "miss_rate": 0.6,
+        "alarm_count": 10,
+        "precision_proxy": 0.2,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_3074"
+            ],
+            "frame_start": 16,
+            "frame_end": 43,
+            "entry_count": 18,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_3079"
+            ],
+            "frame_start": 111,
+            "frame_end": 111,
+            "entry_count": 1,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_3076"
+            ],
+            "frame_start": 157,
+            "frame_end": 169,
+            "entry_count": 13,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 171,
+            "box_token": "Box_3076"
+          },
+          {
+            "frame_idx": 5651,
+            "box_token": "Box_4044"
+          },
+          {
+            "frame_idx": 5657,
+            "box_token": "Box_4044"
+          },
+          {
+            "frame_idx": 5663,
+            "box_token": "Box_4044"
+          },
+          {
+            "frame_idx": 5669,
+            "box_token": "Box_4044"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-5-1/clip_0019_start_00-47-26_rtmpose_m",
+        "clip": "clip_0019_start_00-47-26_rtmpose_m",
+        "camera_slug": "2-5-1",
+        "status": "ok",
+        "config": "min=22",
+        "alarm_min": 22,
+        "gt_segments": 1,
+        "detected": 1,
+        "missed": 0,
+        "false_alarms": 0,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 3,
+        "precision_proxy": 1.0,
+        "missed_segments": [],
+        "false_alarm_samples": []
+      },
+      {
+        "record_id": "rtmpose-m/2-5-1/clip_0020_start_00-50-44_rtmpose_m",
+        "clip": "clip_0020_start_00-50-44_rtmpose_m",
+        "camera_slug": "2-5-1",
+        "status": "ok",
+        "config": "min=22",
+        "alarm_min": 22,
+        "gt_segments": 3,
+        "detected": 3,
+        "missed": 0,
+        "false_alarms": 1,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 10,
+        "precision_proxy": 0.75,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 804,
+            "box_token": "Box_3073"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-6-1/clip_0005_start_00-07-59_rtmpose_m",
+        "clip": "clip_0005_start_00-07-59_rtmpose_m",
+        "camera_slug": "2-6-1",
+        "status": "ok",
+        "config": "min=22",
+        "alarm_min": 22,
+        "gt_segments": 10,
+        "detected": 5,
+        "missed": 5,
+        "false_alarms": 1,
+        "recall": 0.5,
+        "miss_rate": 0.5,
+        "alarm_count": 10,
+        "precision_proxy": 0.8333,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_3084"
+            ],
+            "frame_start": 3180,
+            "frame_end": 3198,
+            "entry_count": 14,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_3093"
+            ],
+            "frame_start": 3281,
+            "frame_end": 3299,
+            "entry_count": 15,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_3095"
+            ],
+            "frame_start": 3308,
+            "frame_end": 3335,
+            "entry_count": 17,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_3091"
+            ],
+            "frame_start": 3344,
+            "frame_end": 3358,
+            "entry_count": 10,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_3096"
+            ],
+            "frame_start": 3398,
+            "frame_end": 3417,
+            "entry_count": 14,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 3129,
+            "box_token": "Box_3082"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-6-1/clip_0006_start_00-14-11_rtmpose_m",
+        "clip": "clip_0006_start_00-14-11_rtmpose_m",
+        "camera_slug": "2-6-1",
+        "status": "ok",
+        "config": "min=22",
+        "alarm_min": 22,
+        "gt_segments": 7,
+        "detected": 5,
+        "missed": 2,
+        "false_alarms": 0,
+        "recall": 0.7142857142857143,
+        "miss_rate": 0.2857142857142857,
+        "alarm_count": 8,
+        "precision_proxy": 1.0,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_3082"
+            ],
+            "frame_start": 577,
+            "frame_end": 594,
+            "entry_count": 18,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_3096"
+            ],
+            "frame_start": 739,
+            "frame_end": 755,
+            "entry_count": 17,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": []
+      },
+      {
+        "record_id": "rtmpose-m/2-6-1/clip_0007_start_00-22-47_rtmpose_m",
+        "clip": "clip_0007_start_00-22-47_rtmpose_m",
+        "camera_slug": "2-6-1",
+        "status": "ok",
+        "config": "min=22",
+        "alarm_min": 22,
+        "gt_segments": 1,
+        "detected": 0,
+        "missed": 1,
+        "false_alarms": 0,
+        "recall": 0.0,
+        "miss_rate": 1.0,
+        "alarm_count": 0,
+        "precision_proxy": null,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_3096"
+            ],
+            "frame_start": 1,
+            "frame_end": 20,
+            "entry_count": 19,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": []
+      },
+      {
+        "record_id": "rtmpose-m/2-6-1/clip_0011_start_00-40-16_rtmpose_m",
+        "clip": "clip_0011_start_00-40-16_rtmpose_m",
+        "camera_slug": "2-6-1",
+        "status": "ok",
+        "config": "min=22",
+        "alarm_min": 22,
+        "gt_segments": 2,
+        "detected": 2,
+        "missed": 0,
+        "false_alarms": 0,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 7,
+        "precision_proxy": 1.0,
+        "missed_segments": [],
+        "false_alarm_samples": []
+      },
+      {
+        "record_id": "rtmpose-m/2-7-2/clip_0013_start_00-42-48_rtmpose_m",
+        "clip": "clip_0013_start_00-42-48_rtmpose_m",
+        "camera_slug": "2-7-2",
+        "status": "ok",
+        "config": "min=22",
+        "alarm_min": 22,
+        "gt_segments": 2,
+        "detected": 0,
+        "missed": 2,
+        "false_alarms": 0,
+        "recall": 0.0,
+        "miss_rate": 1.0,
+        "alarm_count": 0,
+        "precision_proxy": null,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_3100"
+            ],
+            "frame_start": 109,
+            "frame_end": 131,
+            "entry_count": 15,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_3105"
+            ],
+            "frame_start": 159,
+            "frame_end": 169,
+            "entry_count": 2,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": []
+      }
+    ]
+  },
+  "stored": {
+    "aggregate": {
+      "records": 28,
+      "gt_segments": 168,
+      "detected": 131,
+      "missed": 37,
+      "false_alarms": 161,
+      "alarm_count": 550,
+      "recall": 0.7798,
+      "miss_rate": 0.2202,
+      "precision_proxy": 0.4486
+    },
+    "records": [
+      {
+        "record_id": "rtmpose-m/1-1-1/clip_0013_start_00-11-22_rtmpose_m",
+        "clip": "clip_0013_start_00-11-22_rtmpose_m",
+        "camera_slug": "1-1-1",
+        "status": "ok",
+        "config": "stored",
+        "alarm_min": 20,
+        "gt_segments": 61,
+        "detected": 37,
+        "missed": 24,
+        "false_alarms": 3,
+        "recall": 0.6065573770491803,
+        "miss_rate": 0.39344262295081966,
+        "alarm_count": 59,
+        "precision_proxy": 0.925,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_1002"
+            ],
+            "frame_start": 789,
+            "frame_end": 807,
+            "entry_count": 19,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_1010"
+            ],
+            "frame_start": 815,
+            "frame_end": 855,
+            "entry_count": 29,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_1014"
+            ],
+            "frame_start": 909,
+            "frame_end": 934,
+            "entry_count": 26,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_1006"
+            ],
+            "frame_start": 970,
+            "frame_end": 970,
+            "entry_count": 1,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_1008"
+            ],
+            "frame_start": 1036,
+            "frame_end": 1053,
+            "entry_count": 18,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 1082,
+            "box_token": "Box_1011"
+          },
+          {
+            "frame_idx": 1139,
+            "box_token": "Box_1015"
+          },
+          {
+            "frame_idx": 4169,
+            "box_token": "Box_2007"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/1-1-1/clip_0025_start_00-43-15_rtmpose_m",
+        "clip": "clip_0025_start_00-43-15_rtmpose_m",
+        "camera_slug": "1-1-1",
+        "status": "ok",
+        "config": "stored",
+        "alarm_min": 20,
+        "gt_segments": 2,
+        "detected": 2,
+        "missed": 0,
+        "false_alarms": 0,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 4,
+        "precision_proxy": 1.0,
+        "missed_segments": [],
+        "false_alarm_samples": []
+      },
+      {
+        "record_id": "rtmpose-m/1-2-1/clip_0002_start_00-30-28_rtmpose_m",
+        "clip": "clip_0002_start_00-30-28_rtmpose_m",
+        "camera_slug": "1-2-1",
+        "status": "ok",
+        "config": "stored",
+        "alarm_min": 5,
+        "gt_segments": 1,
+        "detected": 1,
+        "missed": 0,
+        "false_alarms": 1,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 15,
+        "precision_proxy": 0.5,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 4200,
+            "box_token": "Box_1025"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/1-2-1/clip_0028_start_00-33-12_rtmpose_m",
+        "clip": "clip_0028_start_00-33-12_rtmpose_m",
+        "camera_slug": "1-2-1",
+        "status": "ok",
+        "config": "stored",
+        "alarm_min": 5,
+        "gt_segments": 2,
+        "detected": 2,
+        "missed": 0,
+        "false_alarms": 4,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 14,
+        "precision_proxy": 0.3333,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 192,
+            "box_token": "Box_2027"
+          },
+          {
+            "frame_idx": 543,
+            "box_token": "Box_2023"
+          },
+          {
+            "frame_idx": 550,
+            "box_token": "Box_2024"
+          },
+          {
+            "frame_idx": 556,
+            "box_token": "Box_2024"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0003_start_00-02-43_rtmpose_m",
+        "clip": "clip_0003_start_00-02-43_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "status": "ok",
+        "config": "stored",
+        "alarm_min": 20,
+        "gt_segments": 1,
+        "detected": 1,
+        "missed": 0,
+        "false_alarms": 1,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 3,
+        "precision_proxy": 0.5,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 165,
+            "box_token": "Box_4017"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0006_start_00-41-26_rtmpose_m",
+        "clip": "clip_0006_start_00-41-26_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "status": "ok",
+        "config": "stored",
+        "alarm_min": 20,
+        "gt_segments": 8,
+        "detected": 6,
+        "missed": 2,
+        "false_alarms": 0,
+        "recall": 0.75,
+        "miss_rate": 0.25,
+        "alarm_count": 12,
+        "precision_proxy": 1.0,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_3022"
+            ],
+            "frame_start": 553,
+            "frame_end": 556,
+            "entry_count": 4,
+            "detected": false
+          },
+          {
+            "gt_tokens": [
+              "Box_3028"
+            ],
+            "frame_start": 779,
+            "frame_end": 792,
+            "entry_count": 12,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": []
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0009_start_00-17-17_rtmpose_m",
+        "clip": "clip_0009_start_00-17-17_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "status": "ok",
+        "config": "stored",
+        "alarm_min": 20,
+        "gt_segments": 7,
+        "detected": 6,
+        "missed": 1,
+        "false_alarms": 1,
+        "recall": 0.8571428571428571,
+        "miss_rate": 0.14285714285714285,
+        "alarm_count": 10,
+        "precision_proxy": 0.8571,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_4018"
+            ],
+            "frame_start": 1,
+            "frame_end": 19,
+            "entry_count": 19,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 189,
+            "box_token": "Box_4017"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0013_start_00-29-53_rtmpose_m",
+        "clip": "clip_0013_start_00-29-53_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "status": "ok",
+        "config": "stored",
+        "alarm_min": 20,
+        "gt_segments": 3,
+        "detected": 3,
+        "missed": 0,
+        "false_alarms": 1,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 8,
+        "precision_proxy": 0.75,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 2145,
+            "box_token": "Box_4010"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0014_start_00-31-27_rtmpose_m",
+        "clip": "clip_0014_start_00-31-27_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "status": "ok",
+        "config": "stored",
+        "alarm_min": 20,
+        "gt_segments": 2,
+        "detected": 1,
+        "missed": 1,
+        "false_alarms": 0,
+        "recall": 0.5,
+        "miss_rate": 0.5,
+        "alarm_count": 5,
+        "precision_proxy": 1.0,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_4018"
+            ],
+            "frame_start": 48,
+            "frame_end": 163,
+            "entry_count": 20,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": []
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0018_start_00-39-31_rtmpose_m",
+        "clip": "clip_0018_start_00-39-31_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "status": "ok",
+        "config": "stored",
+        "alarm_min": 20,
+        "gt_segments": 1,
+        "detected": 0,
+        "missed": 1,
+        "false_alarms": 0,
+        "recall": 0.0,
+        "miss_rate": 1.0,
+        "alarm_count": 0,
+        "precision_proxy": null,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_4017"
+            ],
+            "frame_start": 405,
+            "frame_end": 481,
+            "entry_count": 59,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": []
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0019_start_00-40-01_rtmpose_m",
+        "clip": "clip_0019_start_00-40-01_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "status": "ok",
+        "config": "stored",
+        "alarm_min": 20,
+        "gt_segments": 1,
+        "detected": 1,
+        "missed": 0,
+        "false_alarms": 3,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 4,
+        "precision_proxy": 0.25,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 20,
+            "box_token": "Box_4017"
+          },
+          {
+            "frame_idx": 187,
+            "box_token": "Box_4017"
+          },
+          {
+            "frame_idx": 193,
+            "box_token": "Box_4017"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0020_start_00-48-44_rtmpose_m",
+        "clip": "clip_0020_start_00-48-44_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "status": "ok",
+        "config": "stored",
+        "alarm_min": 20,
+        "gt_segments": 1,
+        "detected": 0,
+        "missed": 1,
+        "false_alarms": 0,
+        "recall": 0.0,
+        "miss_rate": 1.0,
+        "alarm_count": 0,
+        "precision_proxy": null,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_3018"
+            ],
+            "frame_start": 79,
+            "frame_end": 82,
+            "entry_count": 4,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": []
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0025_start_00-50-13_rtmpose_m",
+        "clip": "clip_0025_start_00-50-13_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "status": "ok",
+        "config": "stored",
+        "alarm_min": 20,
+        "gt_segments": 1,
+        "detected": 0,
+        "missed": 1,
+        "false_alarms": 0,
+        "recall": 0.0,
+        "miss_rate": 1.0,
+        "alarm_count": 0,
+        "precision_proxy": null,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_3030"
+            ],
+            "frame_start": 1,
+            "frame_end": 9,
+            "entry_count": 9,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": []
+      },
+      {
+        "record_id": "rtmpose-m/2-3-1/clip_0002_start_00-00-53_rtmpose_m",
+        "clip": "clip_0002_start_00-00-53_rtmpose_m",
+        "camera_slug": "2-3-1",
+        "status": "ok",
+        "config": "stored",
+        "alarm_min": 5,
+        "gt_segments": 1,
+        "detected": 1,
+        "missed": 0,
+        "false_alarms": 2,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 10,
+        "precision_proxy": 0.3333,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 192,
+            "box_token": "Box_3041"
+          },
+          {
+            "frame_idx": 209,
+            "box_token": "Box_3037"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-3-1/clip_0003_start_00-39-45_rtmpose_m",
+        "clip": "clip_0003_start_00-39-45_rtmpose_m",
+        "camera_slug": "2-3-1",
+        "status": "ok",
+        "config": "stored",
+        "alarm_min": 5,
+        "gt_segments": 1,
+        "detected": 0,
+        "missed": 1,
+        "false_alarms": 9,
+        "recall": 0.0,
+        "miss_rate": 1.0,
+        "alarm_count": 9,
+        "precision_proxy": 0.0,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_3040"
+            ],
+            "frame_start": 1708,
+            "frame_end": 1741,
+            "entry_count": 34,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 664,
+            "box_token": "Box_3046"
+          },
+          {
+            "frame_idx": 1705,
+            "box_token": "Box_3043"
+          },
+          {
+            "frame_idx": 1710,
+            "box_token": "Box_3044"
+          },
+          {
+            "frame_idx": 1716,
+            "box_token": "Box_3044"
+          },
+          {
+            "frame_idx": 1722,
+            "box_token": "Box_3044"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-3-1/clip_0010_start_00-18-36_rtmpose_m",
+        "clip": "clip_0010_start_00-18-36_rtmpose_m",
+        "camera_slug": "2-3-1",
+        "status": "ok",
+        "config": "stored",
+        "alarm_min": 5,
+        "gt_segments": 5,
+        "detected": 4,
+        "missed": 1,
+        "false_alarms": 3,
+        "recall": 0.8,
+        "miss_rate": 0.2,
+        "alarm_count": 14,
+        "precision_proxy": 0.5714,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_4025"
+            ],
+            "frame_start": 633,
+            "frame_end": 646,
+            "entry_count": 4,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 599,
+            "box_token": "Box_4022"
+          },
+          {
+            "frame_idx": 624,
+            "box_token": "Box_4025"
+          },
+          {
+            "frame_idx": 659,
+            "box_token": "Box_4023"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-3-1/clip_0011_start_00-20-06_rtmpose_m",
+        "clip": "clip_0011_start_00-20-06_rtmpose_m",
+        "camera_slug": "2-3-1",
+        "status": "ok",
+        "config": "stored",
+        "alarm_min": 5,
+        "gt_segments": 1,
+        "detected": 1,
+        "missed": 0,
+        "false_alarms": 3,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 8,
+        "precision_proxy": 0.25,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 5,
+            "box_token": "Box_4026"
+          },
+          {
+            "frame_idx": 1463,
+            "box_token": "Box_4027"
+          },
+          {
+            "frame_idx": 4047,
+            "box_token": "Box_3046"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-3-1/clip_0023_start_00-49-39_rtmpose_m",
+        "clip": "clip_0023_start_00-49-39_rtmpose_m",
+        "camera_slug": "2-3-1",
+        "status": "ok",
+        "config": "stored",
+        "alarm_min": 5,
+        "gt_segments": 7,
+        "detected": 6,
+        "missed": 1,
+        "false_alarms": 15,
+        "recall": 0.8571428571428571,
+        "miss_rate": 0.14285714285714285,
+        "alarm_count": 48,
+        "precision_proxy": 0.2857,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_4027"
+            ],
+            "frame_start": 589,
+            "frame_end": 598,
+            "entry_count": 5,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 243,
+            "box_token": "Box_4025"
+          },
+          {
+            "frame_idx": 249,
+            "box_token": "Box_4025"
+          },
+          {
+            "frame_idx": 287,
+            "box_token": "Box_4025"
+          },
+          {
+            "frame_idx": 295,
+            "box_token": "Box_4022"
+          },
+          {
+            "frame_idx": 302,
+            "box_token": "Box_4023"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-4-1/clip_0002_start_00-24-56_rtmpose_m",
+        "clip": "clip_0002_start_00-24-56_rtmpose_m",
+        "camera_slug": "2-4-1",
+        "status": "ok",
+        "config": "stored",
+        "alarm_min": 5,
+        "gt_segments": 19,
+        "detected": 19,
+        "missed": 0,
+        "false_alarms": 31,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 87,
+        "precision_proxy": 0.38,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 10562,
+            "box_token": "Box_3054"
+          },
+          {
+            "frame_idx": 10602,
+            "box_token": "Box_3058"
+          },
+          {
+            "frame_idx": 10609,
+            "box_token": "Box_3058"
+          },
+          {
+            "frame_idx": 10615,
+            "box_token": "Box_3058"
+          },
+          {
+            "frame_idx": 10639,
+            "box_token": "Box_3058"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-5-1/clip_0008_start_00-30-49_rtmpose_m",
+        "clip": "clip_0008_start_00-30-49_rtmpose_m",
+        "camera_slug": "2-5-1",
+        "status": "ok",
+        "config": "stored",
+        "alarm_min": 5,
+        "gt_segments": 12,
+        "detected": 12,
+        "missed": 0,
+        "false_alarms": 17,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 66,
+        "precision_proxy": 0.4138,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 3384,
+            "box_token": "Box_3069"
+          },
+          {
+            "frame_idx": 3390,
+            "box_token": "Box_3069"
+          },
+          {
+            "frame_idx": 5324,
+            "box_token": "Box_3066"
+          },
+          {
+            "frame_idx": 5342,
+            "box_token": "Box_3066"
+          },
+          {
+            "frame_idx": 5353,
+            "box_token": "Box_3070"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-5-1/clip_0009_start_00-37-59_rtmpose_m",
+        "clip": "clip_0009_start_00-37-59_rtmpose_m",
+        "camera_slug": "2-5-1",
+        "status": "ok",
+        "config": "stored",
+        "alarm_min": 5,
+        "gt_segments": 5,
+        "detected": 4,
+        "missed": 1,
+        "false_alarms": 32,
+        "recall": 0.8,
+        "miss_rate": 0.2,
+        "alarm_count": 41,
+        "precision_proxy": 0.1111,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_3079"
+            ],
+            "frame_start": 111,
+            "frame_end": 111,
+            "entry_count": 1,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 62,
+            "box_token": "Box_3075"
+          },
+          {
+            "frame_idx": 91,
+            "box_token": "Box_3079"
+          },
+          {
+            "frame_idx": 122,
+            "box_token": "Box_3080"
+          },
+          {
+            "frame_idx": 154,
+            "box_token": "Box_3076"
+          },
+          {
+            "frame_idx": 172,
+            "box_token": "Box_3076"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-5-1/clip_0019_start_00-47-26_rtmpose_m",
+        "clip": "clip_0019_start_00-47-26_rtmpose_m",
+        "camera_slug": "2-5-1",
+        "status": "ok",
+        "config": "stored",
+        "alarm_min": 5,
+        "gt_segments": 1,
+        "detected": 1,
+        "missed": 0,
+        "false_alarms": 7,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 14,
+        "precision_proxy": 0.125,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 2039,
+            "box_token": "Box_4044"
+          },
+          {
+            "frame_idx": 2052,
+            "box_token": "Box_4042"
+          },
+          {
+            "frame_idx": 2058,
+            "box_token": "Box_4042"
+          },
+          {
+            "frame_idx": 2082,
+            "box_token": "Box_4044"
+          },
+          {
+            "frame_idx": 2091,
+            "box_token": "Box_4044"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-5-1/clip_0020_start_00-50-44_rtmpose_m",
+        "clip": "clip_0020_start_00-50-44_rtmpose_m",
+        "camera_slug": "2-5-1",
+        "status": "ok",
+        "config": "stored",
+        "alarm_min": 5,
+        "gt_segments": 3,
+        "detected": 3,
+        "missed": 0,
+        "false_alarms": 9,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 24,
+        "precision_proxy": 0.25,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 691,
+            "box_token": "Box_3069"
+          },
+          {
+            "frame_idx": 701,
+            "box_token": "Box_3069"
+          },
+          {
+            "frame_idx": 707,
+            "box_token": "Box_3069"
+          },
+          {
+            "frame_idx": 805,
+            "box_token": "Box_3073"
+          },
+          {
+            "frame_idx": 828,
+            "box_token": "Box_3071"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-6-1/clip_0005_start_00-07-59_rtmpose_m",
+        "clip": "clip_0005_start_00-07-59_rtmpose_m",
+        "camera_slug": "2-6-1",
+        "status": "ok",
+        "config": "stored",
+        "alarm_min": 5,
+        "gt_segments": 10,
+        "detected": 9,
+        "missed": 1,
+        "false_alarms": 3,
+        "recall": 0.9,
+        "miss_rate": 0.1,
+        "alarm_count": 37,
+        "precision_proxy": 0.75,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_3093"
+            ],
+            "frame_start": 3281,
+            "frame_end": 3299,
+            "entry_count": 15,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 3176,
+            "box_token": "Box_3087"
+          },
+          {
+            "frame_idx": 3300,
+            "box_token": "Box_3093"
+          },
+          {
+            "frame_idx": 3391,
+            "box_token": "Box_3092"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-6-1/clip_0006_start_00-14-11_rtmpose_m",
+        "clip": "clip_0006_start_00-14-11_rtmpose_m",
+        "camera_slug": "2-6-1",
+        "status": "ok",
+        "config": "stored",
+        "alarm_min": 5,
+        "gt_segments": 7,
+        "detected": 7,
+        "missed": 0,
+        "false_alarms": 7,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 34,
+        "precision_proxy": 0.5,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 538,
+            "box_token": "Box_3087"
+          },
+          {
+            "frame_idx": 543,
+            "box_token": "Box_3083"
+          },
+          {
+            "frame_idx": 574,
+            "box_token": "Box_3086"
+          },
+          {
+            "frame_idx": 635,
+            "box_token": "Box_3093"
+          },
+          {
+            "frame_idx": 707,
+            "box_token": "Box_3095"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-6-1/clip_0007_start_00-22-47_rtmpose_m",
+        "clip": "clip_0007_start_00-22-47_rtmpose_m",
+        "camera_slug": "2-6-1",
+        "status": "ok",
+        "config": "stored",
+        "alarm_min": 5,
+        "gt_segments": 1,
+        "detected": 1,
+        "missed": 0,
+        "false_alarms": 0,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 3,
+        "precision_proxy": 1.0,
+        "missed_segments": [],
+        "false_alarm_samples": []
+      },
+      {
+        "record_id": "rtmpose-m/2-6-1/clip_0011_start_00-40-16_rtmpose_m",
+        "clip": "clip_0011_start_00-40-16_rtmpose_m",
+        "camera_slug": "2-6-1",
+        "status": "ok",
+        "config": "stored",
+        "alarm_min": 5,
+        "gt_segments": 2,
+        "detected": 2,
+        "missed": 0,
+        "false_alarms": 3,
+        "recall": 1.0,
+        "miss_rate": 0.0,
+        "alarm_count": 14,
+        "precision_proxy": 0.4,
+        "missed_segments": [],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 1780,
+            "box_token": "Box_3086"
+          },
+          {
+            "frame_idx": 1806,
+            "box_token": "Box_3088"
+          },
+          {
+            "frame_idx": 1846,
+            "box_token": "Box_3095"
+          }
+        ]
+      },
+      {
+        "record_id": "rtmpose-m/2-7-2/clip_0013_start_00-42-48_rtmpose_m",
+        "clip": "clip_0013_start_00-42-48_rtmpose_m",
+        "camera_slug": "2-7-2",
+        "status": "ok",
+        "config": "stored",
+        "alarm_min": 5,
+        "gt_segments": 2,
+        "detected": 1,
+        "missed": 1,
+        "false_alarms": 6,
+        "recall": 0.5,
+        "miss_rate": 0.5,
+        "alarm_count": 7,
+        "precision_proxy": 0.1429,
+        "missed_segments": [
+          {
+            "gt_tokens": [
+              "Box_3105"
+            ],
+            "frame_start": 159,
+            "frame_end": 169,
+            "entry_count": 2,
+            "detected": false
+          }
+        ],
+        "false_alarm_samples": [
+          {
+            "frame_idx": 117,
+            "box_token": "Box_3097"
+          },
+          {
+            "frame_idx": 125,
+            "box_token": "Box_3097"
+          },
+          {
+            "frame_idx": 147,
+            "box_token": "Box_3107"
+          },
+          {
+            "frame_idx": 155,
+            "box_token": "Box_3105"
+          },
+          {
+            "frame_idx": 180,
+            "box_token": "Box_3108"
+          }
+        ]
+      }
+    ]
+  }
+}
