@@ -89,3 +89,4 @@ config.local.json
 config.*.local.json
 
 localdata/data.db
+*.svg
