@@ -1,5 +1,5 @@
 {
-  "alarm_min": 10,
+  "alarm_min": 8,
   "ref_disp_per_frame": 2.5,
   "record_ids": [
     "rtmpose-m/1-1-1/clip_0013_start_00-11-22_rtmpose_m",
@@ -504,6 +504,19 @@
       "record_id": "rtmpose-m/1-1-1/clip_0013_start_00-11-22_rtmpose_m",
       "clip": "clip_0013_start_00-11-22_rtmpose_m",
       "camera_slug": "1-1-1",
+      "category": "误报",
+      "displacement": 32.86,
+      "disp_per_frame": 3.6511,
+      "frame_count": 9,
+      "duration_sec": 0.6,
+      "box_token": "Box_2005",
+      "frame_enter": 3971,
+      "frame_exit": 3980
+    },
+    {
+      "record_id": "rtmpose-m/1-1-1/clip_0013_start_00-11-22_rtmpose_m",
+      "clip": "clip_0013_start_00-11-22_rtmpose_m",
+      "camera_slug": "1-1-1",
       "category": "漏报",
       "displacement": 6.22,
       "disp_per_frame": 1.244,
@@ -517,7 +530,7 @@
       "record_id": "rtmpose-m/1-1-1/clip_0013_start_00-11-22_rtmpose_m",
       "clip": "clip_0013_start_00-11-22_rtmpose_m",
       "camera_slug": "1-1-1",
-      "category": "漏报",
+      "category": "正确检测",
       "displacement": 1.93,
       "disp_per_frame": 0.193,
       "frame_count": 10,
@@ -564,6 +577,19 @@
       "box_token": "Box_2009",
       "frame_enter": 4027,
       "frame_exit": 4030
+    },
+    {
+      "record_id": "rtmpose-m/1-1-1/clip_0013_start_00-11-22_rtmpose_m",
+      "clip": "clip_0013_start_00-11-22_rtmpose_m",
+      "camera_slug": "1-1-1",
+      "category": "误报",
+      "displacement": 14.38,
+      "disp_per_frame": 1.5978,
+      "frame_count": 9,
+      "duration_sec": 0.5333,
+      "box_token": "Box_2013",
+      "frame_enter": 4036,
+      "frame_exit": 4044
     },
     {
       "record_id": "rtmpose-m/1-1-1/clip_0013_start_00-11-22_rtmpose_m",
@@ -907,6 +933,19 @@
       "record_id": "rtmpose-m/2-2-2/clip_0006_start_00-41-26_rtmpose_m",
       "clip": "clip_0006_start_00-41-26_rtmpose_m",
       "camera_slug": "2-2-2",
+      "category": "误报",
+      "displacement": 18.41,
+      "disp_per_frame": 2.3013,
+      "frame_count": 8,
+      "duration_sec": 0.4667,
+      "box_token": "Box_3018",
+      "frame_enter": 452,
+      "frame_exit": 459
+    },
+    {
+      "record_id": "rtmpose-m/2-2-2/clip_0006_start_00-41-26_rtmpose_m",
+      "clip": "clip_0006_start_00-41-26_rtmpose_m",
+      "camera_slug": "2-2-2",
       "category": "正确检测",
       "displacement": 7.47,
       "disp_per_frame": 0.1465,
@@ -941,6 +980,19 @@
       "box_token": "Box_3022",
       "frame_enter": 550,
       "frame_exit": 554
+    },
+    {
+      "record_id": "rtmpose-m/2-2-2/clip_0006_start_00-41-26_rtmpose_m",
+      "clip": "clip_0006_start_00-41-26_rtmpose_m",
+      "camera_slug": "2-2-2",
+      "category": "误报",
+      "displacement": 25.29,
+      "disp_per_frame": 2.81,
+      "frame_count": 9,
+      "duration_sec": 0.5333,
+      "box_token": "Box_3032",
+      "frame_enter": 558,
+      "frame_exit": 566
     },
     {
       "record_id": "rtmpose-m/2-2-2/clip_0006_start_00-41-26_rtmpose_m",
@@ -1149,6 +1201,19 @@
       "box_token": "Box_4016",
       "frame_enter": 269,
       "frame_exit": 291
+    },
+    {
+      "record_id": "rtmpose-m/2-2-2/clip_0013_start_00-29-53_rtmpose_m",
+      "clip": "clip_0013_start_00-29-53_rtmpose_m",
+      "camera_slug": "2-2-2",
+      "category": "误报",
+      "displacement": 70.58,
+      "disp_per_frame": 8.8225,
+      "frame_count": 8,
+      "duration_sec": 0.28,
+      "box_token": "Box_4013",
+      "frame_enter": 2088,
+      "frame_exit": 2095
     },
     {
       "record_id": "rtmpose-m/2-2-2/clip_0013_start_00-29-53_rtmpose_m",
@@ -1597,6 +1662,19 @@
       "clip": "clip_0019_start_00-40-01_rtmpose_m",
       "camera_slug": "2-2-2",
       "category": "误报",
+      "displacement": 37.75,
+      "disp_per_frame": 4.7188,
+      "frame_count": 8,
+      "duration_sec": 0.28,
+      "box_token": "Box_4017",
+      "frame_enter": 261,
+      "frame_exit": 268
+    },
+    {
+      "record_id": "rtmpose-m/2-2-2/clip_0019_start_00-40-01_rtmpose_m",
+      "clip": "clip_0019_start_00-40-01_rtmpose_m",
+      "camera_slug": "2-2-2",
+      "category": "误报",
       "displacement": 84.18,
       "disp_per_frame": 7.6527,
       "frame_count": 11,
@@ -1609,7 +1687,20 @@
       "record_id": "rtmpose-m/2-2-2/clip_0020_start_00-48-44_rtmpose_m",
       "clip": "clip_0020_start_00-48-44_rtmpose_m",
       "camera_slug": "2-2-2",
-      "category": "正确检测",
+      "category": "误报",
+      "displacement": 32.05,
+      "disp_per_frame": 4.0062,
+      "frame_count": 8,
+      "duration_sec": 0.28,
+      "box_token": "Box_3023",
+      "frame_enter": 61,
+      "frame_exit": 68
+    },
+    {
+      "record_id": "rtmpose-m/2-2-2/clip_0020_start_00-48-44_rtmpose_m",
+      "clip": "clip_0020_start_00-48-44_rtmpose_m",
+      "camera_slug": "2-2-2",
+      "category": "漏报",
       "displacement": 39.2,
       "disp_per_frame": 3.0154,
       "frame_count": 13,
@@ -1622,7 +1713,7 @@
       "record_id": "rtmpose-m/2-2-2/clip_0025_start_00-50-13_rtmpose_m",
       "clip": "clip_0025_start_00-50-13_rtmpose_m",
       "camera_slug": "2-2-2",
-      "category": "漏报",
+      "category": "正确检测",
       "displacement": 10.46,
       "disp_per_frame": 1.046,
       "frame_count": 10,
@@ -1778,6 +1869,19 @@
       "record_id": "rtmpose-m/2-3-1/clip_0011_start_00-20-06_rtmpose_m",
       "clip": "clip_0011_start_00-20-06_rtmpose_m",
       "camera_slug": "2-3-1",
+      "category": "误报",
+      "displacement": 3.93,
+      "disp_per_frame": 0.4913,
+      "frame_count": 8,
+      "duration_sec": 0.4667,
+      "box_token": "Box_4026",
+      "frame_enter": 1,
+      "frame_exit": 8
+    },
+    {
+      "record_id": "rtmpose-m/2-3-1/clip_0011_start_00-20-06_rtmpose_m",
+      "clip": "clip_0011_start_00-20-06_rtmpose_m",
+      "camera_slug": "2-3-1",
       "category": "正确检测",
       "displacement": 1.93,
       "disp_per_frame": 0.0643,
@@ -1882,6 +1986,19 @@
       "record_id": "rtmpose-m/2-3-1/clip_0023_start_00-49-39_rtmpose_m",
       "clip": "clip_0023_start_00-49-39_rtmpose_m",
       "camera_slug": "2-3-1",
+      "category": "误报",
+      "displacement": 8.77,
+      "disp_per_frame": 1.0962,
+      "frame_count": 8,
+      "duration_sec": 0.28,
+      "box_token": "Box_4025",
+      "frame_enter": 283,
+      "frame_exit": 290
+    },
+    {
+      "record_id": "rtmpose-m/2-3-1/clip_0023_start_00-49-39_rtmpose_m",
+      "clip": "clip_0023_start_00-49-39_rtmpose_m",
+      "camera_slug": "2-3-1",
       "category": "正确检测",
       "displacement": 24.35,
       "disp_per_frame": 4.0583,
@@ -1890,6 +2007,19 @@
       "box_token": "Box_4023",
       "frame_enter": 298,
       "frame_exit": 303
+    },
+    {
+      "record_id": "rtmpose-m/2-3-1/clip_0023_start_00-49-39_rtmpose_m",
+      "clip": "clip_0023_start_00-49-39_rtmpose_m",
+      "camera_slug": "2-3-1",
+      "category": "误报",
+      "displacement": 55.8,
+      "disp_per_frame": 6.975,
+      "frame_count": 8,
+      "duration_sec": 0.28,
+      "box_token": "Box_4022",
+      "frame_enter": 304,
+      "frame_exit": 311
     },
     {
       "record_id": "rtmpose-m/2-3-1/clip_0023_start_00-49-39_rtmpose_m",
@@ -1921,7 +2051,7 @@
       "record_id": "rtmpose-m/2-3-1/clip_0023_start_00-49-39_rtmpose_m",
       "clip": "clip_0023_start_00-49-39_rtmpose_m",
       "camera_slug": "2-3-1",
-      "category": "漏报",
+      "category": "正确检测",
       "displacement": 1.57,
       "disp_per_frame": 0.1744,
       "frame_count": 9,
@@ -1934,7 +2064,7 @@
       "record_id": "rtmpose-m/2-3-1/clip_0023_start_00-49-39_rtmpose_m",
       "clip": "clip_0023_start_00-49-39_rtmpose_m",
       "camera_slug": "2-3-1",
-      "category": "漏报",
+      "category": "正确检测",
       "displacement": 7.98,
       "disp_per_frame": 1.14,
       "frame_count": 7,
@@ -1947,7 +2077,7 @@
       "record_id": "rtmpose-m/2-3-1/clip_0023_start_00-49-39_rtmpose_m",
       "clip": "clip_0023_start_00-49-39_rtmpose_m",
       "camera_slug": "2-3-1",
-      "category": "漏报",
+      "category": "正确检测",
       "displacement": 0.0,
       "disp_per_frame": 0.0,
       "frame_count": 1,
@@ -1960,7 +2090,7 @@
       "record_id": "rtmpose-m/2-3-1/clip_0023_start_00-49-39_rtmpose_m",
       "clip": "clip_0023_start_00-49-39_rtmpose_m",
       "camera_slug": "2-3-1",
-      "category": "漏报",
+      "category": "正确检测",
       "displacement": 0.0,
       "disp_per_frame": 0.0,
       "frame_count": 1,
@@ -1973,7 +2103,7 @@
       "record_id": "rtmpose-m/2-3-1/clip_0023_start_00-49-39_rtmpose_m",
       "clip": "clip_0023_start_00-49-39_rtmpose_m",
       "camera_slug": "2-3-1",
-      "category": "漏报",
+      "category": "正确检测",
       "displacement": 5.74,
       "disp_per_frame": 0.9567,
       "frame_count": 6,
@@ -1981,6 +2111,19 @@
       "box_token": "Box_4026",
       "frame_enter": 440,
       "frame_exit": 445
+    },
+    {
+      "record_id": "rtmpose-m/2-3-1/clip_0023_start_00-49-39_rtmpose_m",
+      "clip": "clip_0023_start_00-49-39_rtmpose_m",
+      "camera_slug": "2-3-1",
+      "category": "误报",
+      "displacement": 38.7,
+      "disp_per_frame": 4.3,
+      "frame_count": 9,
+      "duration_sec": 0.32,
+      "box_token": "Box_4023",
+      "frame_enter": 504,
+      "frame_exit": 512
     },
     {
       "record_id": "rtmpose-m/2-3-1/clip_0023_start_00-49-39_rtmpose_m",
@@ -2321,6 +2464,19 @@
       "frame_exit": 22884
     },
     {
+      "record_id": "rtmpose-m/2-4-1/clip_0002_start_00-24-56_rtmpose_m",
+      "clip": "clip_0002_start_00-24-56_rtmpose_m",
+      "camera_slug": "2-4-1",
+      "category": "误报",
+      "displacement": 113.46,
+      "disp_per_frame": 11.346,
+      "frame_count": 10,
+      "duration_sec": 0.6667,
+      "box_token": "Box_4036",
+      "frame_enter": 22889,
+      "frame_exit": 22899
+    },
+    {
       "record_id": "rtmpose-m/2-5-1/clip_0008_start_00-30-49_rtmpose_m",
       "clip": "clip_0008_start_00-30-49_rtmpose_m",
       "camera_slug": "2-5-1",
@@ -2397,6 +2553,19 @@
       "box_token": "Box_3074",
       "frame_enter": 5397,
       "frame_exit": 5409
+    },
+    {
+      "record_id": "rtmpose-m/2-5-1/clip_0008_start_00-30-49_rtmpose_m",
+      "clip": "clip_0008_start_00-30-49_rtmpose_m",
+      "camera_slug": "2-5-1",
+      "category": "误报",
+      "displacement": 2.17,
+      "disp_per_frame": 0.2411,
+      "frame_count": 9,
+      "duration_sec": 0.5333,
+      "box_token": "Box_3075",
+      "frame_enter": 5410,
+      "frame_exit": 5418
     },
     {
       "record_id": "rtmpose-m/2-5-1/clip_0008_start_00-30-49_rtmpose_m",
@@ -2676,6 +2845,19 @@
       "clip": "clip_0009_start_00-37-59_rtmpose_m",
       "camera_slug": "2-5-1",
       "category": "误报",
+      "displacement": 30.93,
+      "disp_per_frame": 3.8662,
+      "frame_count": 8,
+      "duration_sec": 0.4667,
+      "box_token": "Box_4044",
+      "frame_enter": 5740,
+      "frame_exit": 5747
+    },
+    {
+      "record_id": "rtmpose-m/2-5-1/clip_0009_start_00-37-59_rtmpose_m",
+      "clip": "clip_0009_start_00-37-59_rtmpose_m",
+      "camera_slug": "2-5-1",
+      "category": "误报",
       "displacement": 65.73,
       "disp_per_frame": 4.382,
       "frame_count": 15,
@@ -2722,6 +2904,19 @@
       "box_token": "Box_4042",
       "frame_enter": 2084,
       "frame_exit": 2085
+    },
+    {
+      "record_id": "rtmpose-m/2-5-1/clip_0019_start_00-47-26_rtmpose_m",
+      "clip": "clip_0019_start_00-47-26_rtmpose_m",
+      "camera_slug": "2-5-1",
+      "category": "误报",
+      "displacement": 13.94,
+      "disp_per_frame": 1.7425,
+      "frame_count": 8,
+      "duration_sec": 0.28,
+      "box_token": "Box_4044",
+      "frame_enter": 2087,
+      "frame_exit": 2094
     },
     {
       "record_id": "rtmpose-m/2-5-1/clip_0019_start_00-47-26_rtmpose_m",
@@ -3101,6 +3296,19 @@
       "frame_exit": 756
     },
     {
+      "record_id": "rtmpose-m/2-6-1/clip_0006_start_00-14-11_rtmpose_m",
+      "clip": "clip_0006_start_00-14-11_rtmpose_m",
+      "camera_slug": "2-6-1",
+      "category": "误报",
+      "displacement": 9.52,
+      "disp_per_frame": 1.0578,
+      "frame_count": 9,
+      "duration_sec": 0.5333,
+      "box_token": "Box_3089",
+      "frame_enter": 953,
+      "frame_exit": 961
+    },
+    {
       "record_id": "rtmpose-m/2-6-1/clip_0007_start_00-22-47_rtmpose_m",
       "clip": "clip_0007_start_00-22-47_rtmpose_m",
       "camera_slug": "2-6-1",
@@ -3156,6 +3364,19 @@
       "record_id": "rtmpose-m/2-7-2/clip_0013_start_00-42-48_rtmpose_m",
       "clip": "clip_0013_start_00-42-48_rtmpose_m",
       "camera_slug": "2-7-2",
+      "category": "误报",
+      "displacement": 3.43,
+      "disp_per_frame": 0.3811,
+      "frame_count": 9,
+      "duration_sec": 0.5333,
+      "box_token": "Box_3097",
+      "frame_enter": 121,
+      "frame_exit": 129
+    },
+    {
+      "record_id": "rtmpose-m/2-7-2/clip_0013_start_00-42-48_rtmpose_m",
+      "clip": "clip_0013_start_00-42-48_rtmpose_m",
+      "camera_slug": "2-7-2",
       "category": "漏报",
       "displacement": 21.82,
       "disp_per_frame": 7.2733,
@@ -3206,30 +3427,30 @@
     }
   ],
   "counts": {
-    "正确检测": 160,
-    "漏报": 58,
-    "误报": 26
+    "正确检测": 166,
+    "漏报": 52,
+    "误报": 43
   },
   "baseline_system": {
+    "gt_segments": 168,
+    "detected": 138,
+    "missed": 30,
+    "false_alarms": 116,
+    "recall": 0.8214
+  },
+  "dpf_filtered_system": {
     "gt_segments": 168,
     "detected": 137,
     "missed": 31,
     "false_alarms": 87,
     "recall": 0.8155
   },
-  "dpf_filtered_system": {
-    "gt_segments": 168,
-    "detected": 135,
-    "missed": 33,
-    "false_alarms": 70,
-    "recall": 0.8036
-  },
   "dpf_filter_rule": {
     "max_disp_per_frame": 2.5,
     "min_frames": 1,
     "min_duration": 0.0
   },
-  "fp_segments_blocked_by_dpf": 12,
+  "fp_segments_blocked_by_dpf": 21,
   "per_record_system": [
     {
       "record_id": "rtmpose-m/1-1-1/clip_0013_start_00-11-22_rtmpose_m",
@@ -3239,9 +3460,9 @@
       "false_alarms": 7,
       "filtered_detected": 45,
       "filtered_missed": 16,
-      "filtered_false_alarms": 5,
-      "raw_alarm_count": 134,
-      "filtered_alarm_count": 130
+      "filtered_false_alarms": 4,
+      "raw_alarm_count": 153,
+      "filtered_alarm_count": 148
     },
     {
       "record_id": "rtmpose-m/1-1-1/clip_0025_start_00-43-15_rtmpose_m",
@@ -3252,18 +3473,18 @@
       "filtered_detected": 2,
       "filtered_missed": 0,
       "filtered_false_alarms": 0,
-      "raw_alarm_count": 7,
-      "filtered_alarm_count": 7
+      "raw_alarm_count": 8,
+      "filtered_alarm_count": 8
     },
     {
       "record_id": "rtmpose-m/1-2-1/clip_0002_start_00-30-28_rtmpose_m",
       "gt_segments": 1,
       "detected": 1,
       "missed": 0,
-      "false_alarms": 0,
+      "false_alarms": 1,
       "filtered_detected": 1,
       "filtered_missed": 0,
-      "filtered_false_alarms": 0,
+      "filtered_false_alarms": 1,
       "raw_alarm_count": 14,
       "filtered_alarm_count": 14
     },
@@ -3276,8 +3497,8 @@
       "filtered_detected": 2,
       "filtered_missed": 0,
       "filtered_false_alarms": 0,
-      "raw_alarm_count": 9,
-      "filtered_alarm_count": 8
+      "raw_alarm_count": 10,
+      "filtered_alarm_count": 9
     },
     {
       "record_id": "rtmpose-m/2-2-2/clip_0003_start_00-02-43_rtmpose_m",
@@ -3296,36 +3517,36 @@
       "gt_segments": 8,
       "detected": 7,
       "missed": 1,
-      "false_alarms": 2,
+      "false_alarms": 4,
       "filtered_detected": 7,
       "filtered_missed": 1,
-      "filtered_false_alarms": 2,
-      "raw_alarm_count": 24,
-      "filtered_alarm_count": 24
+      "filtered_false_alarms": 3,
+      "raw_alarm_count": 29,
+      "filtered_alarm_count": 28
     },
     {
       "record_id": "rtmpose-m/2-2-2/clip_0009_start_00-17-17_rtmpose_m",
       "gt_segments": 7,
       "detected": 6,
       "missed": 1,
-      "false_alarms": 0,
+      "false_alarms": 1,
       "filtered_detected": 6,
       "filtered_missed": 1,
-      "filtered_false_alarms": 0,
-      "raw_alarm_count": 22,
-      "filtered_alarm_count": 22
+      "filtered_false_alarms": 1,
+      "raw_alarm_count": 24,
+      "filtered_alarm_count": 24
     },
     {
       "record_id": "rtmpose-m/2-2-2/clip_0013_start_00-29-53_rtmpose_m",
       "gt_segments": 3,
       "detected": 3,
       "missed": 0,
-      "false_alarms": 2,
+      "false_alarms": 5,
       "filtered_detected": 3,
       "filtered_missed": 0,
-      "filtered_false_alarms": 1,
-      "raw_alarm_count": 13,
-      "filtered_alarm_count": 12
+      "filtered_false_alarms": 3,
+      "raw_alarm_count": 16,
+      "filtered_alarm_count": 14
     },
     {
       "record_id": "rtmpose-m/2-2-2/clip_0014_start_00-31-27_rtmpose_m",
@@ -3356,34 +3577,34 @@
       "gt_segments": 1,
       "detected": 1,
       "missed": 0,
-      "false_alarms": 8,
+      "false_alarms": 12,
       "filtered_detected": 1,
       "filtered_missed": 0,
-      "filtered_false_alarms": 7,
-      "raw_alarm_count": 12,
-      "filtered_alarm_count": 11
+      "filtered_false_alarms": 9,
+      "raw_alarm_count": 16,
+      "filtered_alarm_count": 13
     },
     {
       "record_id": "rtmpose-m/2-2-2/clip_0020_start_00-48-44_rtmpose_m",
-      "gt_segments": 1,
-      "detected": 1,
-      "missed": 0,
-      "false_alarms": 0,
-      "filtered_detected": 0,
-      "filtered_missed": 1,
-      "filtered_false_alarms": 0,
-      "raw_alarm_count": 1,
-      "filtered_alarm_count": 0
-    },
-    {
-      "record_id": "rtmpose-m/2-2-2/clip_0025_start_00-50-13_rtmpose_m",
       "gt_segments": 1,
       "detected": 0,
       "missed": 1,
       "false_alarms": 2,
       "filtered_detected": 0,
       "filtered_missed": 1,
-      "filtered_false_alarms": 2,
+      "filtered_false_alarms": 0,
+      "raw_alarm_count": 2,
+      "filtered_alarm_count": 0
+    },
+    {
+      "record_id": "rtmpose-m/2-2-2/clip_0025_start_00-50-13_rtmpose_m",
+      "gt_segments": 1,
+      "detected": 1,
+      "missed": 0,
+      "false_alarms": 1,
+      "filtered_detected": 1,
+      "filtered_missed": 0,
+      "filtered_false_alarms": 1,
       "raw_alarm_count": 2,
       "filtered_alarm_count": 2
     },
@@ -3392,10 +3613,10 @@
       "gt_segments": 1,
       "detected": 1,
       "missed": 0,
-      "false_alarms": 0,
+      "false_alarms": 1,
       "filtered_detected": 1,
       "filtered_missed": 0,
-      "filtered_false_alarms": 0,
+      "filtered_false_alarms": 1,
       "raw_alarm_count": 8,
       "filtered_alarm_count": 8
     },
@@ -3416,36 +3637,36 @@
       "gt_segments": 5,
       "detected": 4,
       "missed": 1,
-      "false_alarms": 0,
+      "false_alarms": 2,
       "filtered_detected": 4,
       "filtered_missed": 1,
-      "filtered_false_alarms": 0,
-      "raw_alarm_count": 9,
-      "filtered_alarm_count": 9
+      "filtered_false_alarms": 2,
+      "raw_alarm_count": 12,
+      "filtered_alarm_count": 12
     },
     {
       "record_id": "rtmpose-m/2-3-1/clip_0011_start_00-20-06_rtmpose_m",
       "gt_segments": 1,
       "detected": 1,
       "missed": 0,
-      "false_alarms": 0,
+      "false_alarms": 1,
       "filtered_detected": 1,
       "filtered_missed": 0,
-      "filtered_false_alarms": 0,
-      "raw_alarm_count": 4,
-      "filtered_alarm_count": 4
+      "filtered_false_alarms": 1,
+      "raw_alarm_count": 5,
+      "filtered_alarm_count": 5
     },
     {
       "record_id": "rtmpose-m/2-3-1/clip_0023_start_00-49-39_rtmpose_m",
       "gt_segments": 7,
-      "detected": 5,
-      "missed": 2,
-      "false_alarms": 5,
-      "filtered_detected": 5,
-      "filtered_missed": 2,
+      "detected": 6,
+      "missed": 1,
+      "false_alarms": 7,
+      "filtered_detected": 6,
+      "filtered_missed": 1,
       "filtered_false_alarms": 3,
-      "raw_alarm_count": 27,
-      "filtered_alarm_count": 25
+      "raw_alarm_count": 34,
+      "filtered_alarm_count": 30
     },
     {
       "record_id": "rtmpose-m/2-4-1/clip_0002_start_00-24-56_rtmpose_m",
@@ -3455,81 +3676,81 @@
       "false_alarms": 14,
       "filtered_detected": 17,
       "filtered_missed": 2,
-      "filtered_false_alarms": 13,
-      "raw_alarm_count": 61,
-      "filtered_alarm_count": 60
+      "filtered_false_alarms": 12,
+      "raw_alarm_count": 65,
+      "filtered_alarm_count": 63
     },
     {
       "record_id": "rtmpose-m/2-5-1/clip_0008_start_00-30-49_rtmpose_m",
       "gt_segments": 12,
       "detected": 12,
       "missed": 0,
-      "false_alarms": 7,
+      "false_alarms": 8,
       "filtered_detected": 12,
       "filtered_missed": 0,
-      "filtered_false_alarms": 7,
-      "raw_alarm_count": 50,
-      "filtered_alarm_count": 50
+      "filtered_false_alarms": 8,
+      "raw_alarm_count": 53,
+      "filtered_alarm_count": 53
     },
     {
       "record_id": "rtmpose-m/2-5-1/clip_0009_start_00-37-59_rtmpose_m",
       "gt_segments": 5,
       "detected": 4,
       "missed": 1,
-      "false_alarms": 17,
+      "false_alarms": 22,
       "filtered_detected": 4,
       "filtered_missed": 1,
-      "filtered_false_alarms": 16,
-      "raw_alarm_count": 26,
-      "filtered_alarm_count": 25
+      "filtered_false_alarms": 19,
+      "raw_alarm_count": 32,
+      "filtered_alarm_count": 29
     },
     {
       "record_id": "rtmpose-m/2-5-1/clip_0019_start_00-47-26_rtmpose_m",
       "gt_segments": 1,
       "detected": 1,
       "missed": 0,
-      "false_alarms": 2,
+      "false_alarms": 3,
       "filtered_detected": 1,
       "filtered_missed": 0,
-      "filtered_false_alarms": 1,
-      "raw_alarm_count": 8,
-      "filtered_alarm_count": 7
+      "filtered_false_alarms": 2,
+      "raw_alarm_count": 10,
+      "filtered_alarm_count": 9
     },
     {
       "record_id": "rtmpose-m/2-5-1/clip_0020_start_00-50-44_rtmpose_m",
       "gt_segments": 3,
       "detected": 3,
       "missed": 0,
-      "false_alarms": 4,
+      "false_alarms": 5,
       "filtered_detected": 3,
       "filtered_missed": 0,
-      "filtered_false_alarms": 4,
-      "raw_alarm_count": 18,
-      "filtered_alarm_count": 18
+      "filtered_false_alarms": 5,
+      "raw_alarm_count": 19,
+      "filtered_alarm_count": 19
     },
     {
       "record_id": "rtmpose-m/2-6-1/clip_0005_start_00-07-59_rtmpose_m",
       "gt_segments": 10,
       "detected": 8,
       "missed": 2,
-      "false_alarms": 1,
+      "false_alarms": 0,
       "filtered_detected": 8,
       "filtered_missed": 2,
-      "filtered_false_alarms": 1,
-      "raw_alarm_count": 26,
-      "filtered_alarm_count": 26
+      "filtered_false_alarms": 0,
+      "raw_alarm_count": 27,
+      "filtered_alarm_count": 27
     },
     {
       "record_id": "rtmpose-m/2-6-1/clip_0006_start_00-14-11_rtmpose_m",
       "gt_segments": 7,
       "detected": 7,
       "missed": 0,
-      "false_alarms": 1,
+      "false_alarms": 3,
       "filtered_detected": 7,
       "filtered_missed": 0,
-      "filtered_false_alarms": 1,
-      "raw_alarm_count": 23,
-      "filtered_alarm_count": 23
+      "filtered_false_alarms": 3,
+      "raw_alarm_count": 27,
+      "filtered_alarm_count": 27
     },
     {
       "record_id": "rtmpose-m/2-6-1/clip_0007_start_00-22-47_rtmpose_m",
@@ -3560,12 +3781,12 @@
       "gt_segments": 2,
       "detected": 0,
       "missed": 2,
-      "false_alarms": 1,
+      "false_alarms": 3,
       "filtered_detected": 0,
       "filtered_missed": 2,
-      "filtered_false_alarms": 0,
-      "raw_alarm_count": 1,
-      "filtered_alarm_count": 0
+      "filtered_false_alarms": 2,
+      "raw_alarm_count": 3,
+      "filtered_alarm_count": 2
     }
   ]
 }

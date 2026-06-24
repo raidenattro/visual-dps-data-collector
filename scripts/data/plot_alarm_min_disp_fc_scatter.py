@@ -45,10 +45,12 @@ from scripts.data.analyze_wrist_feature_discrimination import (
     _seg_overlaps_gt,
 )
 from scripts.data.evaluate_combo1_segment_filter import (
+    ComboRule,
     _build_segments,
     _false_alarm_by_frame_from_alarms,
     _infer_size_from_frames,
     _simulate_alarms,
+    filter_alarms_by_combo,
 )
 
 from api.accuracy_service import GroundTruthSegment, build_ground_truth_segments, evaluate_segments
@@ -70,6 +72,8 @@ CATEGORY_COLORS = {
 }
 
 REF_DPF = 2.5
+# combo4 单条件：仅 disp/fc ≤ 2.5
+DPF_FILTER_RULE = ComboRule(combo_id=4, min_frames=1, min_duration=0.0, max_disp_per_frame=REF_DPF)
 
 
 @dataclass
@@ -155,37 +159,53 @@ def _gt_detected_map(
     return out
 
 
+def _aggregate_system(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    if not rows:
+        return {}
+    g = sum(int(r["gt_segments"]) for r in rows)
+    d = sum(int(r["detected"]) for r in rows)
+    missed = sum(int(r["missed"]) for r in rows)
+    fa = sum(int(r["false_alarms"]) for r in rows)
+    return {
+        "gt_segments": g,
+        "detected": d,
+        "missed": missed,
+        "false_alarms": fa,
+        "recall": round(d / g, 4) if g else None,
+    }
+
+
 def _collect_points_for_record(
     record_id: str,
     *,
     alarm_min: int,
     alarm_cooldown: int,
     tier: str,
-) -> list[ScatterPoint]:
+) -> tuple[list[ScatterPoint], dict[str, Any] | None]:
     paths = resolve_app_paths()
     locator = locate_record_by_id(record_id)
     if not locator:
-        return []
+        return [], None
 
     review = load_event_review(locator)
     verified = review.get("verified_true") if isinstance(review.get("verified_true"), list) else []
     gt_segments = build_ground_truth_segments([e for e in verified if isinstance(e, dict)])
     if not gt_segments:
-        return []
+        return [], None
 
     manifest = load_manifest(locator)
     frames = load_all_frames(locator)
     if not frames:
-        return []
+        return [], None
 
     ann_path = resolve_annotation_for_accuracy_record(paths, locator, pose_tier=tier)
     if not ann_path or not ann_path.is_file():
-        return []
+        return [], None
 
     infer_w, infer_h = _infer_size_from_frames(frames, manifest)
     boxes = load_scaled_boxes(ann_path, infer_w, infer_h)
     if not boxes:
-        return []
+        return [], None
 
     fps = float(manifest.get("fps") or 15.0)
     if fps <= 0:
@@ -197,6 +217,21 @@ def _collect_points_for_record(
     )
     false_alarm_bf = _false_alarm_by_frame_from_alarms(raw_alarms, gt_segments)
     gt_detected = _gt_detected_map(gt_segments, raw_alarms)
+    base_metrics = evaluate_segments(gt_segments, raw_alarms)
+    filtered_alarms, _ = filter_alarms_by_combo(raw_alarms, segments, DPF_FILTER_RULE)
+    filt_metrics = evaluate_segments(gt_segments, filtered_alarms)
+    sys_row = {
+        "record_id": record_id,
+        "gt_segments": int(base_metrics["gt_segments"]),
+        "detected": int(base_metrics["detected"]),
+        "missed": int(base_metrics["missed"]),
+        "false_alarms": int(base_metrics["false_alarms"]),
+        "filtered_detected": int(filt_metrics["detected"]),
+        "filtered_missed": int(filt_metrics["missed"]),
+        "filtered_false_alarms": int(filt_metrics["false_alarms"]),
+        "raw_alarm_count": len(raw_alarms),
+        "filtered_alarm_count": len(filtered_alarms),
+    }
     _, slug, _ = parse_record_path_segments(record_id)
 
     points: list[ScatterPoint] = []
@@ -226,7 +261,7 @@ def _collect_points_for_record(
                 frame_exit=int(seg.get("frame_exit") or 0),
             )
         )
-    return points
+    return points, sys_row
 
 
 def _svg_escape(text: str) -> str:
@@ -242,6 +277,8 @@ def _render_svg(
     points: list[ScatterPoint],
     *,
     alarm_min: int = 5,
+    baseline_sys: dict[str, Any] | None = None,
+    filtered_sys: dict[str, Any] | None = None,
     width: int = 960,
     height: int = 640,
     margin: tuple[int, int, int, int] = (72, 48, 56, 64),
@@ -336,8 +373,37 @@ def _render_svg(
             f"<title>{_svg_escape(tip)}</title></circle>"
         )
 
-    # 图例
-    lx, ly = left + plot_w - 150, top + 12
+    # 右上角：dpf 过滤统计 + 图例
+    legend_top = top + 12
+    if baseline_sys and filtered_sys:
+        base_fp = int(baseline_sys.get("false_alarms") or 0)
+        filt_fp = int(filtered_sys.get("false_alarms") or 0)
+        fp_reduced = base_fp - filt_fp
+        base_recall = baseline_sys.get("recall")
+        filt_recall = filtered_sys.get("recall")
+        box_w, box_h = 212, 58
+        box_x = left + plot_w - box_w - 4
+        box_y = top + 6
+        lines.append(
+            f'<rect x="{box_x:.1f}" y="{box_y:.1f}" width="{box_w}" height="{box_h}" '
+            f'fill="#fff" fill-opacity="0.93" stroke="#bbb" rx="5"/>'
+        )
+        lines.append(
+            f'<text x="{box_x + 10:.1f}" y="{box_y + 18:.1f}" font-size="12" font-weight="600">'
+            f"dpf≤{REF_DPF} 过滤误报</text>"
+        )
+        lines.append(
+            f'<text x="{box_x + 10:.1f}" y="{box_y + 34:.1f}" font-size="11" fill="#333">'
+            f"FP {base_fp} → {filt_fp}  (−{fp_reduced})</text>"
+        )
+        if base_recall is not None and filt_recall is not None:
+            lines.append(
+                f'<text x="{box_x + 10:.1f}" y="{box_y + 50:.1f}" font-size="10" fill="#666">'
+                f"召回 {base_recall:.1%} → {filt_recall:.1%}</text>"
+            )
+        legend_top = box_y + box_h + 10
+
+    lx, ly = left + plot_w - 150, legend_top
     for i, (cat, color) in enumerate(CATEGORY_COLORS.items()):
         yy = ly + i * 20
         n = sum(1 for p in points if p.category == cat)
@@ -358,6 +424,8 @@ def _render_markdown(
     cameras: list[str],
     alarm_min: int,
     base_stem: str,
+    baseline_sys: dict[str, Any],
+    filtered_sys: dict[str, Any],
 ) -> str:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     counts = {cat: sum(1 for p in points if p.category == cat) for cat in CATEGORY_COLORS}
@@ -370,6 +438,18 @@ def _render_markdown(
         vals = sorted(vals)
         p50 = vals[len(vals) // 2]
         return f"P50={p50:.2f}"
+
+    fp_points = [p for p in points if p.category == CATEGORY_FP]
+    fp_seg_blocked = sum(1 for p in fp_points if p.disp_per_frame > REF_DPF)
+    fp_seg_pass = len(fp_points) - fp_seg_blocked
+
+    base_fp = int(baseline_sys.get("false_alarms") or 0)
+    filt_fp = int(filtered_sys.get("false_alarms") or 0)
+    fp_reduced = base_fp - filt_fp
+    base_fn = int(baseline_sys.get("missed") or 0)
+    filt_fn = int(filtered_sys.get("missed") or 0)
+    base_recall = baseline_sys.get("recall")
+    filt_recall = filtered_sys.get("recall")
 
     lines = [
         f"# RTMPose-M alarm_min={alarm_min} 碰撞段 displacement × disp/fc 分布",
@@ -395,6 +475,35 @@ def _render_markdown(
             }[cat]
             + f" | {counts[cat]} | {stats_for(cat, 'displacement')} | {stats_for(cat, 'disp_per_frame')} |"
         )
+
+    lines.extend(
+        [
+            "",
+            f"## dpf≤{REF_DPF} 段过滤（combo4 单条件）",
+            "",
+            "在散点图同一 `alarm_min` 基线上，对候选告警施加 **仅** `displacement/frame_count ≤ "
+            f"{REF_DPF}` 的段级确认（与 combo4 一致）。",
+            "",
+            "### 系统级（标真段 vs 告警）",
+            "",
+            "| 指标 | alarm_min 基线 | + dpf≤2.5 | 变化 |",
+            "|------|----------------|------------|------|",
+            f"| 误报 FP | {base_fp} | {filt_fp} | **-{fp_reduced}** |",
+            f"| 漏报 FN | {base_fn} | {filt_fn} | {'+' if filt_fn - base_fn >= 0 else ''}{filt_fn - base_fn} |",
+            f"| 召回 recall | {base_recall:.1%} | {filt_recall:.1%} | "
+            f"{(filt_recall or 0) - (base_recall or 0):+.1%} |"
+            if base_recall is not None and filt_recall is not None
+            else f"| 召回 recall | — | — | — |",
+            "",
+            "### 误报碰撞段（散点图红点）",
+            "",
+            f"- 误报重叠碰撞段 **{len(fp_points)}** 条；其中 `disp/fc > {REF_DPF}`：**{fp_seg_blocked}** 条"
+            f"（段级不通过，关联告警易被抑制）",
+            f"- `disp/fc ≤ {REF_DPF}` 仍通过：**{fp_seg_pass}** 条（段过滤后仍可能留下误报）",
+            f"- **系统级误报减少 {fp_reduced} 次**（{base_fp} → {filt_fp}）",
+            "",
+        ]
+    )
 
     lines.extend(
         [
@@ -456,11 +565,14 @@ def main() -> int:
         return 0
 
     all_points: list[ScatterPoint] = []
+    sys_rows: list[dict[str, Any]] = []
     for rid in record_ids:
-        pts = _collect_points_for_record(
+        pts, sys_row = _collect_points_for_record(
             rid, alarm_min=args.alarm_min, alarm_cooldown=args.cooldown, tier=args.tier
         )
         all_points.extend(pts)
+        if sys_row is not None:
+            sys_rows.append(sys_row)
         print(f"{rid}: {len(pts)} 点")
 
     if not all_points:
@@ -475,7 +587,23 @@ def main() -> int:
     view_dir = Path(args.view_dir)
     view_dir.mkdir(parents=True, exist_ok=True)
 
-    svg = _render_svg(all_points, alarm_min=args.alarm_min)
+    baseline_sys = _aggregate_system(sys_rows)
+    filtered_sys = {
+        "gt_segments": sum(int(r["gt_segments"]) for r in sys_rows),
+        "detected": sum(int(r["filtered_detected"]) for r in sys_rows),
+        "missed": sum(int(r["filtered_missed"]) for r in sys_rows),
+        "false_alarms": sum(int(r["filtered_false_alarms"]) for r in sys_rows),
+    }
+    g = filtered_sys["gt_segments"]
+    d = filtered_sys["detected"]
+    filtered_sys["recall"] = round(d / g, 4) if g else None
+
+    svg = _render_svg(
+        all_points,
+        alarm_min=args.alarm_min,
+        baseline_sys=baseline_sys,
+        filtered_sys=filtered_sys,
+    )
     svg_path = view_dir / f"{asset_name}.svg"
     svg_path.write_text(svg, encoding="utf-8")
 
@@ -488,6 +616,8 @@ def main() -> int:
             cameras=cameras,
             alarm_min=args.alarm_min,
             base_stem=stem,
+            baseline_sys=baseline_sys,
+            filtered_sys=filtered_sys,
         ),
         encoding="utf-8",
     )
@@ -500,6 +630,17 @@ def main() -> int:
         "record_ids": record_ids,
         "points": [p.to_dict() for p in all_points],
         "counts": {cat: sum(1 for p in all_points if p.category == cat) for cat in CATEGORY_COLORS},
+        "baseline_system": baseline_sys,
+        "dpf_filtered_system": filtered_sys,
+        "dpf_filter_rule": {
+            "max_disp_per_frame": REF_DPF,
+            "min_frames": DPF_FILTER_RULE.min_frames,
+            "min_duration": DPF_FILTER_RULE.min_duration,
+        },
+        "fp_segments_blocked_by_dpf": sum(
+            1 for p in all_points if p.category == CATEGORY_FP and p.disp_per_frame > REF_DPF
+        ),
+        "per_record_system": sys_rows,
     }
     json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -508,6 +649,11 @@ def main() -> int:
     print(f"JSON: {json_path}")
     for cat in (CATEGORY_TP, CATEGORY_FN, CATEGORY_FP):
         print(f"  {cat}: {payload['counts'][cat]}")
+    fp_reduced = int(baseline_sys.get("false_alarms") or 0) - int(filtered_sys.get("false_alarms") or 0)
+    print(
+        f"  dpf≤{REF_DPF} 过滤误报: {baseline_sys.get('false_alarms')} → "
+        f"{filtered_sys.get('false_alarms')} (-{fp_reduced})"
+    )
     return 0
 
 
