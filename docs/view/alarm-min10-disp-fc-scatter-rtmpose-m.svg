@@ -276,10 +276,14 @@
 <circle cx="257.06" cy="532.57" r="4.5" fill="#2ca02c" fill-opacity="0.72" stroke="#fff" stroke-width="0.6"><title>正确检测\nclip_0007_start_00-22-47_rtmpose_m\n机位 2-6-1\ndisp=19.7 px  dpf=1.035\nfc=19  dur=1.267s\n帧 1-20  token=Box_3096</title></circle>
 <circle cx="383.76" cy="542.90" r="4.5" fill="#2ca02c" fill-opacity="0.72" stroke="#fff" stroke-width="0.6"><title>正确检测\nclip_0011_start_00-40-16_rtmpose_m\n机位 2-6-1\ndisp=33.1 px  dpf=0.789\nfc=42  dur=1.640s\n帧 1740-1781  token=Box_3086</title></circle>
 <circle cx="379.90" cy="538.89" r="4.5" fill="#2ca02c" fill-opacity="0.72" stroke="#fff" stroke-width="0.6"><title>正确检测\nclip_0011_start_00-40-16_rtmpose_m\n机位 2-6-1\ndisp=32.7 px  dpf=0.884\nfc=37  dur=1.440s\n帧 1802-1838  token=Box_3088</title></circle>
-<circle cx="754" cy="60" r="5" fill="#2ca02c"/>
-<text x="766" y="64" font-size="12">正确检测 (160)</text>
-<circle cx="754" cy="80" r="5" fill="#ff7f0e"/>
-<text x="766" y="84" font-size="12">漏报 (58)</text>
-<circle cx="754" cy="100" r="5" fill="#d62728"/>
-<text x="766" y="104" font-size="12">误报 (26)</text>
+<rect x="688.0" y="54.0" width="212" height="58" fill="#fff" fill-opacity="0.93" stroke="#bbb" rx="5"/>
+<text x="698.0" y="72.0" font-size="12" font-weight="600">dpf≤2.5 过滤误报</text>
+<text x="698.0" y="88.0" font-size="11" fill="#333">FP 87 → 70  (−17)</text>
+<text x="698.0" y="104.0" font-size="10" fill="#666">召回 81.5% → 80.4%</text>
+<circle cx="754" cy="122" r="5" fill="#2ca02c"/>
+<text x="766" y="126" font-size="12">正确检测 (160)</text>
+<circle cx="754" cy="142" r="5" fill="#ff7f0e"/>
+<text x="766" y="146" font-size="12">漏报 (58)</text>
+<circle cx="754" cy="162" r="5" fill="#d62728"/>
+<text x="766" y="166" font-size="12">误报 (26)</text>
 </svg>
