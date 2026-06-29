@@ -53,6 +53,9 @@ const FRAME_CHUNK_PREFETCH_AHEAD = 2;
 /** 块内进度超过该比例时触发下一块预取 */
 const FRAME_CHUNK_PREFETCH_PROGRESS = 0.5;
 const COLLISION_CFG_STORAGE_KEY = "datacollect_collision_cfg";
+const DET_BBOX_STORAGE_KEY = "datacollect_playback_show_det_bbox";
+/** 回放叠加 RTMDet 人体框（person.bbox） */
+let showDetBbox = false;
 /** getDisplayLayout 缓存（窗口/视频尺寸变化时失效） */
 let cachedDisplayLayout = null;
 let cachedDisplayLayoutKey = "";

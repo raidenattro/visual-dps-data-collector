@@ -863,6 +863,45 @@ function getAnnotationDisplayCache() {
   return annotationDisplayCache;
 }
 
+/** 解析 person.bbox（推理坐标 [x1,y1,x2,y2]） */
+function personDetBbox(person) {
+  const b = person?.bbox;
+  if (!Array.isArray(b) || b.length < 4) return null;
+  const nums = b.map((v) => Number(v));
+  if (nums.some((v) => !Number.isFinite(v))) return null;
+  return nums;
+}
+
+/** RTMDet 人体检测框（虚线矩形，与货框/骨架区分） */
+function drawDetBboxes(frame, inferW, inferH) {
+  if (!showDetBbox || !frame?.persons?.length) return;
+
+  const layout = getDisplayLayout();
+  ctx.save();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "rgba(251, 146, 60, 0.92)";
+  ctx.setLineDash([7, 5]);
+
+  frame.persons.forEach((person, idx) => {
+    const b = personDetBbox(person);
+    if (!b) return;
+    const [x1, y1] = mapInferToDisplay(b[0], b[1], inferW, inferH, layout);
+    const [x2, y2] = mapInferToDisplay(b[2], b[3], inferW, inferH, layout);
+    const left = Math.min(x1, x2);
+    const top = Math.min(y1, y2);
+    ctx.strokeRect(left, top, Math.abs(x2 - x1), Math.abs(y2 - y1));
+
+    const label = person?.person_id != null ? `#${person.person_id}` : `#${idx}`;
+    ctx.setLineDash([]);
+    ctx.font = "12px system-ui, sans-serif";
+    ctx.fillStyle = "rgba(251, 146, 60, 0.95)";
+    ctx.fillText(label, left + 3, Math.max(14, top - 4));
+    ctx.setLineDash([7, 5]);
+  });
+
+  ctx.restore();
+}
+
 function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null, reviewCtx = null) {
   if (!annotationBoxes.length) return;
 
@@ -930,6 +969,7 @@ function drawSkeleton(frame, inferW, inferH, collisionSets = null) {
   const { cw, ch } = syncCanvasSize();
   ctx.clearRect(0, 0, cw, ch);
   drawAnnotationBoxes(frame, inferW, inferH, collisionSets);
+  drawDetBboxes(frame, inferW, inferH);
   if (!frame?.persons?.length) return;
 
   const layout = getDisplayLayout();

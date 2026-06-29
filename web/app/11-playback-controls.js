@@ -72,6 +72,35 @@ function initPlaybackSpeedControl() {
   readPlaybackSpeedFromSelect();
 }
 
+function readShowDetBboxFromStorage() {
+  try {
+    return localStorage.getItem(DET_BBOX_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function persistShowDetBbox() {
+  try {
+    localStorage.setItem(DET_BBOX_STORAGE_KEY, showDetBbox ? "1" : "0");
+  } catch {
+    /* ignore */
+  }
+}
+
+function initPlaybackDetBboxToggle() {
+  const cb = $("#playback-show-det-bbox");
+  if (!cb || cb.dataset.bound) return;
+  cb.dataset.bound = "1";
+  showDetBbox = readShowDetBboxFromStorage();
+  cb.checked = showDetBbox;
+  cb.addEventListener("change", () => {
+    showDetBbox = !!cb.checked;
+    persistShowDetBbox();
+    redrawCurrentFrame();
+  });
+}
+
 function isPlaybackActive() {
   if (jsonOnlyTimer) return true;
   return !!(videoEl.src && !videoEl.paused && !videoEl.ended);
@@ -272,6 +301,7 @@ seekBar.addEventListener("input", async () => {
 
 bindStageLayoutWatch();
 initPlaybackSpeedControl();
+initPlaybackDetBboxToggle();
 initEventReviewControls();
 initPlaybackRecordFilter();
 void loadInferenceConfigDefaults();
