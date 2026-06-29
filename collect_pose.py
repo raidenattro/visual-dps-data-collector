@@ -91,7 +91,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--det-backend",
         dest="det_variant",
         default=None,
-        help="检测档 t|s|m|l（同 Web models.det_variant；推荐 m）",
+        help="检测档 nano|s|m|l（同 Web models.det_variant；t 为 nano 旧别名；推荐 m）",
     )
     model.add_argument(
         "--models-dir",

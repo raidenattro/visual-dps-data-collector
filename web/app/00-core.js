@@ -46,7 +46,23 @@ let eventReviewSaveSeq = 0;
 let reviewBackKey = null;
 let currentEventReviewStatus = "not_started";
 const FRAME_CHUNK_SIZE = 120;
+/** 打开记录时并行预取的分块数 */
+const FRAME_CHUNK_PREFETCH_INITIAL = 4;
+/** 播放中提前预取的下一块数量 */
+const FRAME_CHUNK_PREFETCH_AHEAD = 2;
+/** 块内进度超过该比例时触发下一块预取 */
+const FRAME_CHUNK_PREFETCH_PROGRESS = 0.5;
 const COLLISION_CFG_STORAGE_KEY = "datacollect_collision_cfg";
+/** getDisplayLayout 缓存（窗口/视频尺寸变化时失效） */
+let cachedDisplayLayout = null;
+let cachedDisplayLayoutKey = "";
+/** frame_idx → events[]，加速播放时事件定位 */
+let playbackEventsFrameIndex = new Map();
+/** renderAtTime 合并：避免慢绘制时叠多个 in-flight 请求 */
+let renderAtTimeInflight = false;
+let renderAtTimePendingTime = null;
+/** 上次已同步到事件栏的骨架帧号 */
+let lastEventSyncFrameIdx = -1;
 let rafId = null;
 let playbackId = null;
 let playbackVideoObjectUrl = null;

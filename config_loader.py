@@ -24,13 +24,14 @@ _BACKEND_TO_VARIANT = {
 }
 
 _DET_BACKEND_TO_VARIANT = {
-    "rtmdet_t": "t",
+    "rtmdet_t": "nano",
     "rtmdet_s": "s",
     "rtmdet_m": "m",
     "rtmdet_l": "l",
-    "rtmdet_nano": "t",
-    "nano": "t",
-    "default": "t",
+    "rtmdet_nano": "nano",
+    "nano": "nano",
+    "t": "nano",
+    "default": "nano",
 }
 
 
@@ -153,12 +154,15 @@ def det_backend_to_variant(backend: str) -> str:
     key = str(backend or "").strip().lower()
     if key in _DET_BACKEND_TO_VARIANT:
         return _DET_BACKEND_TO_VARIANT[key]
-    if key in ("t", "s", "m", "l"):
+    if key in ("nano", "s", "m", "l"):
         return key
-    m = re.match(r"rtmdet[_-]?([tsml])", key)
+    if key == "t":
+        return "nano"
+    m = re.match(r"rtmdet[_-]?(nano|[tsml])", key)
     if m:
-        return m.group(1)
-    return "t"
+        v = m.group(1)
+        return "nano" if v == "t" else v
+    return "nano"
 
 
 def det_variant_to_backend_name(variant: str) -> str:
@@ -542,7 +546,7 @@ def build_settings(*, config_path: Path, cli: dict[str, Any]) -> CollectSettings
             models.get("det_variant")
             or models.get("det_backend")
             or legacy_collect.get("det_variant")
-            or "t"
+            or "nano"
         ).strip().lower()
         det_variant = det_backend_to_variant(det_raw)
     det_backend = det_variant_to_backend_name(det_variant)

@@ -137,7 +137,7 @@ class RTMPosePipeline:
         self,
         *,
         variant: str = "t",
-        det_variant: str = "t",
+        det_variant: str = "nano",
         models_dir: str,
         device: str = "cuda",
         backend: str = "onnxruntime",
@@ -223,7 +223,7 @@ class RTMPosePipeline:
             self._loaded_key = (self.det_variant, self.variant, dev)
 
         print(
-            f"✅ RTMDet-{self.det_variant} + RTMPose-{self.variant.upper()} 就绪 device={dev}"
+            f"✅ {det_label} + RTMPose-{self.variant.upper()} 就绪 device={dev}"
         )
 
     def infer(self, frame: np.ndarray) -> PoseBatch:

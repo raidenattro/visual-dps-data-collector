@@ -89,6 +89,7 @@ async function startPlaybackTransport() {
     }
     cancelAnimationFrame(rafId);
     tickPoseFrameIdx = -1;
+    lastEventSyncFrameIdx = -1;
     resetPlaybackCollisionTracker();
     tick();
     return;
@@ -234,6 +235,7 @@ videoEl.addEventListener("seeked", () => {
   }
   lastRenderedFrameIdx = -1;
   tickPoseFrameIdx = -1;
+  lastEventSyncFrameIdx = -1;
   resetPlaybackCollisionTracker();
   void renderAtTime(videoEl.currentTime).then(() => {
     if (pinnedEventNav) return;
@@ -254,6 +256,7 @@ seekBar.addEventListener("input", async () => {
   playbackEventLinkExact = false;
   lastRenderedFrameIdx = -1;
   tickPoseFrameIdx = -1;
+  lastEventSyncFrameIdx = -1;
   resetPlaybackCollisionTracker();
   if (!videoEl.duration || !Number.isFinite(videoEl.duration)) {
     const idx = Math.floor((seekBar.value / 1000) * frameByTime.length);

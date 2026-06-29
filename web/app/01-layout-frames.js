@@ -49,12 +49,29 @@ function chunkRangeForFrame(frameIdx) {
   return { from: start, to: start + FRAME_CHUNK_SIZE - 1 };
 }
 
+function displayLayoutCacheKey() {
+  const wrap = stageWrap || document.querySelector(".playback-layout-main .stage-wrap");
+  if (!wrap) return "";
+  const rect = wrap.getBoundingClientRect();
+  const { frameW, frameH } = getVideoFrameSize();
+  return `${Math.round(rect.width)}x${Math.round(rect.height)}@${frameW}x${frameH}`;
+}
+
+function invalidateDisplayLayoutCache() {
+  cachedDisplayLayout = null;
+  cachedDisplayLayoutKey = "";
+  if (typeof invalidateAnnotationDisplayCache === "function") {
+    invalidateAnnotationDisplayCache();
+  }
+}
+
 function resetFrameFetchState() {
   frameCache.clear();
   loadedChunkKeys.clear();
   prefetchPromises.clear();
   lastRenderedFrameIdx = -1;
   tickPoseFrameIdx = -1;
+  lastEventSyncFrameIdx = -1;
   renderGeneration++;
 }
 
@@ -84,15 +101,51 @@ async function prefetchFrameChunk(from, to) {
   return promise;
 }
 
-function prefetchNextChunkIfNeeded(frameIdx) {
+/** 从 from 起并行预取 count 个分块 */
+async function prefetchFrameChunksParallel(from, count = 1) {
+  const total = Number(poseData?.frame_count) || 0;
+  if (!total || !currentRecordId) return;
+  const promises = [];
+  let start = Math.max(1, from);
+  for (let i = 0; i < count && start <= total; i += 1) {
+    const to = Math.min(start + FRAME_CHUNK_SIZE - 1, total);
+    promises.push(prefetchFrameChunk(start, to));
+    start = to + 1;
+  }
+  await Promise.all(promises);
+}
+
+/** 打开记录后预取前几块，减少开播后跨块等待 */
+async function prefetchInitialPlaybackChunks() {
+  await prefetchFrameChunksParallel(1, FRAME_CHUNK_PREFETCH_INITIAL);
+}
+
+function prefetchAheadFromFrame(frameIdx) {
   const idx = Number(frameIdx) || 0;
   if (!idx || !currentRecordId) return;
   const { to } = chunkRangeForFrame(idx);
-  const nextFrom = to + 1;
   const total = Number(poseData?.frame_count) || 0;
-  if (nextFrom > total) return;
-  const nextTo = Math.min(nextFrom + FRAME_CHUNK_SIZE - 1, total);
-  void prefetchFrameChunk(nextFrom, nextTo);
+  let nextFrom = to + 1;
+  for (let i = 0; i < FRAME_CHUNK_PREFETCH_AHEAD && nextFrom <= total; i += 1) {
+    const nextTo = Math.min(nextFrom + FRAME_CHUNK_SIZE - 1, total);
+    void prefetchFrameChunk(nextFrom, nextTo);
+    nextFrom = nextTo + 1;
+  }
+}
+
+function maybePrefetchByChunkProgress(frameIdx) {
+  const idx = Number(frameIdx) || 0;
+  if (!idx) return;
+  const { from, to } = chunkRangeForFrame(idx);
+  const span = Math.max(1, to - from);
+  const progress = (idx - from) / span;
+  if (progress >= FRAME_CHUNK_PREFETCH_PROGRESS) {
+    prefetchAheadFromFrame(idx);
+  }
+}
+
+function prefetchNextChunkIfNeeded(frameIdx) {
+  prefetchAheadFromFrame(frameIdx);
 }
 
 async function ensureFrame(frameIdx) {
@@ -108,21 +161,29 @@ async function ensureFrame(frameIdx) {
 
 async function ensureFrameChunkLoaded(frameIdx) {
   if (frameIdx == null) return;
+  maybePrefetchByChunkProgress(frameIdx);
   if (frameCache.has(frameIdx)) {
-    prefetchNextChunkIfNeeded(frameIdx);
+    prefetchAheadFromFrame(frameIdx);
     return;
   }
   const { from, to } = chunkRangeForFrame(frameIdx);
   await prefetchFrameChunk(from, to);
-  prefetchNextChunkIfNeeded(frameIdx);
+  prefetchAheadFromFrame(frameIdx);
 }
 
 function getDisplayLayout() {
+  const key = displayLayoutCacheKey();
+  if (cachedDisplayLayout && key === cachedDisplayLayoutKey) {
+    return cachedDisplayLayout;
+  }
   const wrap = stageWrap || document.querySelector(".playback-layout-main .stage-wrap");
   if (!wrap) return computeContainLayout(640, 480, 640, 480);
   const rect = wrap.getBoundingClientRect();
   const { frameW, frameH } = getVideoFrameSize();
-  return computeContainLayout(rect.width, rect.height, frameW, frameH);
+  const layout = computeContainLayout(rect.width, rect.height, frameW, frameH);
+  cachedDisplayLayout = layout;
+  cachedDisplayLayoutKey = key;
+  return layout;
 }
 
 // --- 回放临时视频清理（仅服务端临时目录；本地 blob 用 revoke） ---

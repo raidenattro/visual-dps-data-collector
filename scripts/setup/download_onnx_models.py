@@ -19,6 +19,7 @@ from model_assets import (
     ensure_detection_onnx,
     ensure_pose_onnx,
     openmmlab_sdk_base,
+    resolve_det_assets,
 )
 
 
@@ -31,8 +32,8 @@ def main() -> int:
     )
     p.add_argument(
         "--det",
-        default="t,m",
-        help="检测档，逗号分隔：t,m（默认 t,m）",
+        default="nano,m",
+        help="检测档，逗号分隔：nano,m（默认 nano,m；t 为 nano 旧别名）",
     )
     p.add_argument(
         "--pose",
@@ -54,11 +55,13 @@ def main() -> int:
     pose_keys = [x.strip() for x in args.pose.split(",") if x.strip()]
 
     for d in det_keys:
-        if d not in RTMDET_VARIANT_ASSETS:
+        try:
+            _, assets = resolve_det_assets(d)
+        except ValueError:
             print(f"⚠️ 跳过未知 det 档: {d}", file=sys.stderr)
             continue
         path = ensure_detection_onnx(models_dir, d)
-        print(f"✅ detection/{RTMDET_VARIANT_ASSETS[d]['det_dir']}: {path}")
+        print(f"✅ detection/{assets['det_dir']}: {path}")
 
     for v in pose_keys:
         if v not in RTMPOSE_VARIANT_ASSETS:

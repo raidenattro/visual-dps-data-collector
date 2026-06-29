@@ -629,6 +629,7 @@ function syncAnnotationBoxesFromPose() {
   const ann = poseData?.annotation;
   annotationBoxes = Array.isArray(ann?.boxes) ? ann.boxes : [];
   annotationSize = ann?.annotation_size || null;
+  invalidateAnnotationDisplayCache();
 }
 
 function loadAnnotationBoxesFromData(data) {
@@ -636,6 +637,7 @@ function loadAnnotationBoxesFromData(data) {
     annotationBoxes = data.annotation.boxes;
     annotationSize = data.annotation.annotation_size || data.annotation_size || null;
     resetPlaybackCollisionTracker();
+    invalidateAnnotationDisplayCache();
     return;
   }
   annotationSize = data?.annotation_size || null;
@@ -649,15 +651,18 @@ function loadAnnotationBoxesFromData(data) {
       });
     });
     resetPlaybackCollisionTracker();
+    invalidateAnnotationDisplayCache();
     return;
   }
   if (Array.isArray(data?.boxes)) {
     annotationBoxes = data.boxes;
     resetPlaybackCollisionTracker();
+    invalidateAnnotationDisplayCache();
     return;
   }
   annotationBoxes = [];
   resetPlaybackCollisionTracker();
+  invalidateAnnotationDisplayCache();
 }
 
 async function loadAnnotationBoxesFromFile(file) {
@@ -712,12 +717,18 @@ function buildFrameIndex(recordId = null) {
 
 function findFrameAt(timeSec) {
   if (!frameByTime.length) return null;
-  let best = frameByTime[0];
-  for (const item of frameByTime) {
-    if (item.t <= timeSec) best = item;
-    else break;
+  const t = Math.max(0, Number(timeSec) || 0);
+  if (t <= frameByTime[0].t) return frameByTime[0];
+  const last = frameByTime[frameByTime.length - 1];
+  if (t >= last.t) return last;
+  let lo = 0;
+  let hi = frameByTime.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (frameByTime[mid].t <= t) lo = mid + 1;
+    else hi = mid - 1;
   }
-  return best;
+  return frameByTime[Math.max(0, hi)];
 }
 
 function syncCanvasSize() {
@@ -779,32 +790,7 @@ function getReviewBoxHighlightContext(frameIdx = null) {
 }
 
 function collectAnnotationDisplayPolygons() {
-  if (!annotationBoxes.length) return [];
-  const pl = window.previewLayout;
-  if (!pl?.resolvePolygonFramePoints || !pl?.mapPointToDisplay) return [];
-
-  const { frameW, frameH } = getVideoFrameSize();
-  const layout = getDisplayLayout();
-  const annSize = getEffectiveAnnotationSize();
-  const hits = [];
-
-  annotationBoxes.forEach((box) => {
-    const poly = box.video_polygon;
-    if (!Array.isArray(poly) || poly.length < 3) return;
-    const framePts = pl.resolvePolygonFramePoints(
-      poly,
-      box.video_polygon_norm,
-      annSize,
-      frameW,
-      frameH
-    );
-    if (framePts.length < 3) return;
-    const token = boxCollisionToken(box);
-    if (!token) return;
-    const displayPts = framePts.map(([x, y]) => pl.mapPointToDisplay(x, y, layout));
-    hits.push({ token, displayPts });
-  });
-  return hits;
+  return getAnnotationDisplayCache();
 }
 
 /** 画面坐标点击命中货框（返回 box token，自上而下取最上层） */
@@ -830,23 +816,32 @@ function updateStageBoxPickMode() {
   wrap.classList.toggle("stage-wrap--box-pick", canPick);
 }
 
-function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null, reviewCtx = null) {
-  if (!annotationBoxes.length) return;
+let annotationDisplayCacheKey = "";
+/** @type {{ token: string, displayPts: number[][] }[]} */
+let annotationDisplayCache = [];
+
+function invalidateAnnotationDisplayCache() {
+  annotationDisplayCacheKey = "";
+  annotationDisplayCache = [];
+}
+
+/** 货框显示多边形（layout/标注不变时可复用，避免每帧重算坐标） */
+function getAnnotationDisplayCache() {
+  if (!annotationBoxes.length) return [];
   const pl = window.previewLayout;
-  if (!pl?.resolvePolygonFramePoints || !pl?.mapPointToDisplay) return;
+  if (!pl?.resolvePolygonFramePoints || !pl?.mapPointToDisplay) return [];
 
   const { frameW, frameH } = getVideoFrameSize();
   const layout = getDisplayLayout();
   const annSize = getEffectiveAnnotationSize();
-  const { collisionSet, alarmSet } =
-    collisionSets || getFrameCollisionSets(frame, inferW, inferH);
-  const frameIdx =
-    lastRenderedFrameIdx >= 1
-      ? lastRenderedFrameIdx
-      : Number(frame?.frame_idx) || Number(frame?.source_frame_idx) || 0;
-  reviewCtx = reviewCtx ?? getReviewBoxHighlightContext(frameIdx);
-  const { missTokens, falseAlarmTokens } = getAccuracyOutlineForFrame(frameIdx, alarmSet);
+  const layoutKey =
+    typeof displayLayoutCacheKey === "function" ? displayLayoutCacheKey() : "";
+  const key = `${layoutKey}:${annSize?.width || 0}x${annSize?.height || 0}:${annotationBoxes.length}`;
+  if (key === annotationDisplayCacheKey && annotationDisplayCache.length) {
+    return annotationDisplayCache;
+  }
 
+  const next = [];
   annotationBoxes.forEach((box) => {
     const poly = box.video_polygon;
     if (!Array.isArray(poly) || poly.length < 3) return;
@@ -859,6 +854,28 @@ function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null, review
     );
     if (framePts.length < 3) return;
     const token = boxCollisionToken(box);
+    if (!token) return;
+    const displayPts = framePts.map(([x, y]) => pl.mapPointToDisplay(x, y, layout));
+    next.push({ token, displayPts });
+  });
+  annotationDisplayCacheKey = key;
+  annotationDisplayCache = next;
+  return annotationDisplayCache;
+}
+
+function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null, reviewCtx = null) {
+  if (!annotationBoxes.length) return;
+
+  const { collisionSet, alarmSet } =
+    collisionSets || getFrameCollisionSets(frame, inferW, inferH);
+  const frameIdx =
+    lastRenderedFrameIdx >= 1
+      ? lastRenderedFrameIdx
+      : Number(frame?.frame_idx) || Number(frame?.source_frame_idx) || 0;
+  reviewCtx = reviewCtx ?? getReviewBoxHighlightContext(frameIdx);
+  const { missTokens, falseAlarmTokens } = getAccuracyOutlineForFrame(frameIdx, alarmSet);
+
+  getAnnotationDisplayCache().forEach(({ token, displayPts }) => {
     const isAlarm = tokenInCollisionSet(token, alarmSet);
     const isHit = tokenInCollisionSet(token, collisionSet);
     const isManuallyConfirmed = tokenInTokenMap(token, reviewCtx?.confirmedByToken);
@@ -866,8 +883,7 @@ function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null, review
     const isFalseAlarm = tokenInTokenSet(token, falseAlarmTokens);
 
     ctx.beginPath();
-    framePts.forEach(([x, y], i) => {
-      const [dx, dy] = pl.mapPointToDisplay(x, y, layout);
+    displayPts.forEach(([dx, dy], i) => {
       if (i === 0) ctx.moveTo(dx, dy);
       else ctx.lineTo(dx, dy);
     });
@@ -884,7 +900,6 @@ function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null, review
     ctx.lineWidth = 3;
 
     if (isFalseAlarm) {
-      // 白描边 + 深色外缘，浅色画面上也可辨认
       ctx.strokeStyle = "rgba(0, 0, 0, 0.9)";
       ctx.lineWidth = 4.5;
       ctx.stroke();
@@ -918,7 +933,9 @@ function drawSkeleton(frame, inferW, inferH, collisionSets = null) {
   if (!frame?.persons?.length) return;
 
   const layout = getDisplayLayout();
-
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "rgba(34, 211, 238, 0.9)";
+  ctx.beginPath();
   frame.persons.forEach((person) => {
     const kpts = person.keypoints || [];
     COCO_LINES.forEach(([a, b]) => {
@@ -927,13 +944,14 @@ function drawSkeleton(frame, inferW, inferH, collisionSets = null) {
       if (!pa || !pb || pa[2] < SCORE_MIN || pb[2] < SCORE_MIN) return;
       const [x1, y1] = mapInferToDisplay(pa[0], pa[1], inferW, inferH, layout);
       const [x2, y2] = mapInferToDisplay(pb[0], pb[1], inferW, inferH, layout);
-      ctx.strokeStyle = "rgba(34, 211, 238, 0.9)";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
       ctx.moveTo(x1, y1);
       ctx.lineTo(x2, y2);
-      ctx.stroke();
     });
+  });
+  ctx.stroke();
+
+  frame.persons.forEach((person) => {
+    const kpts = person.keypoints || [];
     kpts.forEach((kp, i) => {
       if (!kp || kp[2] < SCORE_MIN) return;
       const [x, y] = mapInferToDisplay(kp[0], kp[1], inferW, inferH, layout);
@@ -948,6 +966,7 @@ function drawSkeleton(frame, inferW, inferH, collisionSets = null) {
 function redrawCurrentFrame() {
   lastRenderedFrameIdx = -1;
   tickPoseFrameIdx = -1;
+  lastEventSyncFrameIdx = -1;
   if (videoEl.src && videoEl.readyState >= 1) {
     void renderAtTime(videoEl.currentTime);
   } else if (frameByTime.length) {
@@ -978,7 +997,7 @@ async function renderFrameEntry(hit, renderGen) {
   }
 }
 
-async function renderAtTime(timeSec) {
+async function renderAtTimeCore(timeSec) {
   const gen = ++renderGeneration;
   const hit = findFrameAt(timeSec);
   if (!hit) {
@@ -995,19 +1014,45 @@ async function renderAtTime(timeSec) {
   await renderFrameEntry(hit, gen);
 }
 
+async function renderAtTime(timeSec) {
+  if (renderAtTimeInflight) {
+    renderAtTimePendingTime = timeSec;
+    return;
+  }
+  renderAtTimeInflight = true;
+  renderAtTimePendingTime = null;
+  try {
+    let nextTime = timeSec;
+    do {
+      renderAtTimePendingTime = null;
+      await renderAtTimeCore(nextTime);
+      nextTime = renderAtTimePendingTime;
+    } while (renderAtTimePendingTime != null);
+  } finally {
+    renderAtTimeInflight = false;
+  }
+}
+
 function tick() {
+  let syncFrameIdx = null;
   if (videoEl.readyState >= 2) {
     const hit = findFrameAt(videoEl.currentTime);
     const nextIdx = hit?.frameIdx ?? -1;
-    // 仅当骨架帧变化时触发绘制；tickPoseFrameIdx 在 renderFrameEntry 成功后再更新
     if (nextIdx >= 0 && nextIdx !== tickPoseFrameIdx) {
       void renderAtTime(videoEl.currentTime);
     }
+    syncFrameIdx = nextIdx >= 0 ? nextIdx : null;
   }
   if (videoEl.duration && Number.isFinite(videoEl.duration)) {
     seekBar.value = String((videoEl.currentTime / videoEl.duration) * 1000);
     timeLabel.textContent = formatTime(videoEl.currentTime);
-    syncActiveEventFromPlaybackPosition({ timeSec: videoEl.currentTime });
+  }
+  if (syncFrameIdx != null && syncFrameIdx !== lastEventSyncFrameIdx) {
+    lastEventSyncFrameIdx = syncFrameIdx;
+    syncActiveEventFromPlaybackPosition({
+      timeSec: videoEl.currentTime,
+      frameIdx: syncFrameIdx,
+    });
   }
   rafId = requestAnimationFrame(tick);
 }

@@ -24,10 +24,10 @@ _DET_NANO_ZIP = "rtmdet_nano_8xb32-100e_coco-obj365-person-05d8511e.zip"
 _DET_M_ZIP = "rtmdet_m_8xb32-100e_coco-obj365-person-235e8209.zip"
 
 RTMPOSE_VARIANTS = ("t", "s", "m")
-RTMDET_VARIANTS = ("t", "s", "m", "l")
+RTMDET_VARIANTS = ("nano", "s", "m", "l")
 
 RTMDET_VARIANT_ASSETS: dict[str, dict] = {
-    "t": {
+    "nano": {
         "det_dir": "rtmdet_nano",
         "det_zip": _DET_NANO_ZIP,
         "det_size": (320, 320),
@@ -243,11 +243,11 @@ def ensure_pose_onnx(models_onnx_dir: str, pose_variant: str) -> str:
 
 
 def parse_det_variant(raw: str) -> str:
-    v = str(raw or "t").strip().lower()
+    v = str(raw or "nano").strip().lower()
     if v.startswith("rtmdet_"):
         v = v.removeprefix("rtmdet_")
-    if v == "nano":
-        v = "t"
+    if v == "t":
+        v = "nano"
     if v not in RTMDET_VARIANTS:
         raise ValueError(f"det_variant 必须是 {RTMDET_VARIANTS} 之一")
     return v
@@ -258,12 +258,12 @@ def resolve_det_assets(det_variant: str) -> tuple[str, dict]:
     if requested in RTMDET_VARIANT_ASSETS:
         return requested, RTMDET_VARIANT_ASSETS[requested]
     if requested == "s":
-        print("⚠️ RTMDet-s 暂无官方 person ONNX，回退为 RTMDet-nano (t)")
-        return "t", RTMDET_VARIANT_ASSETS["t"]
+        print("⚠️ RTMDet-s 暂无官方 person ONNX，回退为 RTMDet-nano")
+        return "nano", RTMDET_VARIANT_ASSETS["nano"]
     if requested == "l":
         print("⚠️ RTMDet-l 暂无官方 person ONNX，回退为 RTMDet-m (m)")
         return "m", RTMDET_VARIANT_ASSETS["m"]
-    return "t", RTMDET_VARIANT_ASSETS["t"]
+    return "nano", RTMDET_VARIANT_ASSETS["nano"]
 
 
 def det_variant_to_backend(det_variant: str) -> str:

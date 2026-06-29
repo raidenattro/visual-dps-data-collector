@@ -39,6 +39,9 @@ function bindStageLayoutWatch() {
     if (layoutTimer) clearTimeout(layoutTimer);
     layoutTimer = setTimeout(() => {
       layoutTimer = null;
+      if (typeof invalidateDisplayLayoutCache === "function") {
+        invalidateDisplayLayoutCache();
+      }
       syncCanvasSize();
       redrawCurrentFrame();
     }, 50);

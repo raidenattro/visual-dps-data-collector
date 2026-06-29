@@ -16,7 +16,7 @@
 ```bash
 bash scripts/setup/setup_linux.sh
 python scripts/setup/verify_gpu.py
-python scripts/setup/download_onnx_models.py --det t,m --pose t
+python scripts/setup/download_onnx_models.py --det nano,m --pose t
 ```
 
 ## collect/ — 批量采集

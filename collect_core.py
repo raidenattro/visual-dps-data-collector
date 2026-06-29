@@ -287,7 +287,7 @@ def run_collect_job(
     output_path: Path,
     models_dir: str,
     variant: str,
-    det_variant: str = "t",
+    det_variant: str = "nano",
     device: str,
     ort_backend: str,
     width: int,

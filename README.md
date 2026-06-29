@@ -111,7 +111,7 @@ python server.py --port 8770
 | `paths` | `upload_dir` | 采集时临时视频目录（不长期保留） |
 | `paths` | `models_onnx_dir` | ONNX 权重根目录（见下方目录结构） |
 | `models` | `backend` | `rtmpose_t` / `rtmpose_s` / `rtmpose_m`（姿态档） |
-| `models` | `det_variant` | 检测档 `t`（nano 320）/ `m`（640）；`s`/`l` 无官方 ONNX 时自动回退 |
+| `models` | `det_variant` | 检测档 `nano`（320）/ `m`（640）；`s`/`l` 无官方 ONNX 时自动回退；旧配置 `t` 等同 `nano` |
 | `models` | `rtmpose_onnx_device` | CPU 设备名 |
 | `models` | `use_gpu` | 默认 `true`，使用 `rtmpose_onnx_device_gpu` |
 | `models` | `rtmpose_onnx_device_gpu` | GPU 设备名（`cuda`） |
@@ -133,7 +133,7 @@ GPU 配置见上文「安装 → GPU 说明」。
 ```
 localdata/models/onnx/
   detection/          # 人体检测（RTMDet）
-    rtmdet_nano/end2end.onnx   # det_variant=t，320×320
+    rtmdet_nano/end2end.onnx   # det_variant=nano，320×320
     rtmdet_m/end2end.onnx      # det_variant=m，640×640
   pose/               # 姿态估计（RTMPose）
     rtmpose_t/end2end.onnx     # backend=rtmpose_t
@@ -148,7 +148,7 @@ localdata/models/onnx/
 ```bash
 # 可选：复制 .env.example 并设置 OPENMMLAB_MIRROR_BASE 加速
 python scripts/setup/download_onnx_models.py
-python scripts/setup/download_onnx_models.py --det t,m --pose t
+python scripts/setup/download_onnx_models.py --det nano,m --pose t
 ```
 
 复用 visual-dps 已有权重时：

@@ -27,7 +27,7 @@ def main() -> int:
     p.add_argument(
         "--det",
         default="m",
-        help="检测档 t/m（默认 m）",
+        help="检测档 nano/m（默认 m；t 为 nano 旧别名）",
     )
     p.add_argument(
         "--skip-infer",

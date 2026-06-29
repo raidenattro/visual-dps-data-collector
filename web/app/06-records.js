@@ -1079,6 +1079,7 @@ async function startVideoPlayback(hintPrefix = "") {
     await videoEl.play();
     cancelAnimationFrame(rafId);
     tickPoseFrameIdx = -1;
+    lastEventSyncFrameIdx = -1;
     resetPlaybackCollisionTracker();
     tick();
     if (hintPrefix) setPlaybackInfo(`${hintPrefix}正在播放…`);
@@ -1145,9 +1146,9 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
     poseData = await poseRes.json();
   }
   await buildFrameIndex(recordId);
-  await prefetchFrameChunk(1, FRAME_CHUNK_SIZE);
+  await prefetchInitialPlaybackChunks();
   const annResult = await applyPlaybackRecordAnnotation(recordId);
-  await loadPlaybackEvents(recordId);
+  const eventsPromise = loadPlaybackEvents(recordId);
   if (typeof loadPlaybackWristFeatures === "function") {
     void loadPlaybackWristFeatures(recordId);
   }
@@ -1167,6 +1168,7 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
   const baseHint = `【${label}】${jsonFile}（${poseData.frame_count ?? 0} 帧${storageHint}）`;
 
   const videoLoaded = await loadSavedRecordVideo(recordId);
+  await eventsPromise;
   if (playbackEvents.length) {
     await beginEventReview();
   }

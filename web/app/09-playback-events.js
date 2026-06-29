@@ -1,5 +1,25 @@
 /** 回放事件加载、定位与清除 */
 
+/** 重建 frame_idx → events[] 索引，加速播放时同帧查找 */
+function rebuildPlaybackEventsFrameIndex() {
+  playbackEventsFrameIndex = new Map();
+  (playbackEvents || []).forEach((ev) => {
+    const fi = parseInt(ev.frame_idx, 10) || 0;
+    if (!fi) return;
+    if (!playbackEventsFrameIndex.has(fi)) playbackEventsFrameIndex.set(fi, []);
+    playbackEventsFrameIndex.get(fi).push(ev);
+  });
+}
+
+function eventsAtFrameIndexed(frameIdx, pool = null) {
+  const fi = parseInt(frameIdx, 10) || 0;
+  if (!fi) return [];
+  const atFrame = playbackEventsFrameIndex.get(fi) || [];
+  if (!pool) return atFrame;
+  const poolSet = new Set(pool);
+  return atFrame.filter((e) => poolSet.has(e));
+}
+
 /** 采集时是否已启用碰撞并落盘（有则信任存储字段，含空数组） */
 function collisionPersistedAtCollect() {
   return !!(poseData?.collision?.enabled);
@@ -132,6 +152,7 @@ async function loadPlaybackEvents(recordId = null) {
   playbackEvents.forEach((ev) => {
     if (isEventVerified(ev)) applyAutoConfirmedBoxOnVerify(ev);
   });
+  rebuildPlaybackEventsFrameIndex();
   renderEventReviewList();
   invalidatePlaybackAccuracyOverlay();
 }
@@ -153,8 +174,7 @@ function getCurrentPlaybackFrameIdx() {
 
 function findEventsAtFrame(frameIdx) {
   if (frameIdx == null || !playbackEvents.length) return [];
-  const fi = parseInt(frameIdx, 10) || 0;
-  return playbackEvents.filter((e) => (parseInt(e.frame_idx, 10) || 0) === fi);
+  return eventsAtFrameIndexed(frameIdx);
 }
 
 function isExactEventAtPosition(ev, timeSec, frameIdx) {
@@ -177,8 +197,7 @@ function findEventForPlaybackPosition(timeSec, frameIdx = null) {
   const pool = eventsForPlaybackLink();
   if (!pool.length) return null;
   if (frameIdx != null) {
-    const fi = parseInt(frameIdx, 10) || 0;
-    const atFrame = pool.filter((e) => (parseInt(e.frame_idx, 10) || 0) === fi);
+    const atFrame = eventsAtFrameIndexed(frameIdx, pool);
     if (atFrame.length === 1) return atFrame[0];
     if (atFrame.length > 1) {
       return atFrame.find((e) => e.event_type === "alarm") || atFrame[0];
@@ -244,6 +263,7 @@ function updateEventMarkerActiveState() {
 async function seekToTimestamp(timeSec, frameIdx = null, opts = {}) {
   lastRenderedFrameIdx = -1;
   tickPoseFrameIdx = -1;
+  lastEventSyncFrameIdx = -1;
   resetPlaybackCollisionTracker();
   const t = Math.max(0, Number(timeSec) || 0);
   if (videoEl.duration && Number.isFinite(videoEl.duration) && videoEl.duration > 0) {
@@ -294,6 +314,7 @@ async function seekToEvent(ev, { keepReviewBack = false } = {}) {
 function clearPlaybackEvents() {
   playbackEvents = [];
   playbackEventsFromRealtime = false;
+  playbackEventsFrameIndex = new Map();
   activeEventKey = null;
   playbackEventLinkExact = false;
   verifiedTrueKeys.clear();
