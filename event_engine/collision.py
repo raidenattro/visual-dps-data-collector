@@ -5,9 +5,12 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-import cv2
-
-from event_engine.box_identity import box_collision_token
+from event_engine.wrist_hits import (
+    DEFAULT_EXTENSION_RATIO,
+    ProbeMode,
+    WRIST_KPT_SCORE_MIN,
+    person_collision_probe_hits,
+)
 
 
 @dataclass
@@ -63,11 +66,19 @@ class CollisionProcessor:
         alarm_min_consecutive_frames: int = 3,
         alarm_cooldown_frames: int = 12,
         video_fps: float = 25.0,
+        probe_mode: ProbeMode = "wrist",
+        extension_ratio: float = DEFAULT_EXTENSION_RATIO,
+        fallback_to_wrist: bool = True,
+        score_min: float = WRIST_KPT_SCORE_MIN,
     ):
         self.boxes = boxes
         self.alarm_min_consecutive_frames = max(1, int(alarm_min_consecutive_frames))
-        self.alarm_cooldown_frames = max(1, int(alarm_cooldown_frames))
+        self.alarm_cooldown_frames = max(0, int(alarm_cooldown_frames))
         self.video_fps = max(1.0, float(video_fps))
+        self.probe_mode = probe_mode
+        self.extension_ratio = float(extension_ratio)
+        self.fallback_to_wrist = bool(fallback_to_wrist)
+        self.score_min = float(score_min)
         self.person_assigner = PersonTrackAssigner(max_match_dist=220.0, stale_sec=1.2)
         self._box_consecutive_hits: dict[str, int] = {}
         self._box_last_alarm_frame: dict[str, int] = {}
@@ -111,22 +122,18 @@ class CollisionProcessor:
             skel["person_track_id"] = person_track_id
             skeletons_data.append(skel)
 
-            for kpt_idx in (9, 10):
-                if len(keypoints) <= kpt_idx:
-                    continue
-                kp = keypoints[kpt_idx]
-                if len(kp) < 3 or float(kp[2]) <= 0.3:
-                    continue
-                wx, wy = float(kp[0]), float(kp[1])
-                for box in self.boxes:
-                    contour = box.get("orig_contour")
-                    if contour is None:
-                        continue
-                    if cv2.pointPolygonTest(contour, (wx, wy), False) >= 0:
-                        token = box_collision_token(box)
-                        if token:
-                            active_collisions.append(token)
-                        break
+            hits = person_collision_probe_hits(
+                person,
+                self.boxes,
+                score_min=self.score_min,
+                probe_mode=self.probe_mode,
+                extension_ratio=self.extension_ratio,
+                fallback_to_wrist=self.fallback_to_wrist,
+            )
+            for hit in hits:
+                token = hit.get("token")
+                if token:
+                    active_collisions.append(str(token))
 
         active_collisions = list(set(active_collisions))
         current_tokens = set(active_collisions)

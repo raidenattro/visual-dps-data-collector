@@ -185,7 +185,7 @@ def get_inference_config() -> dict[str, Any]:
         "alarm_min_consecutive_frames": max(
             1, int(inference.get("alarm_min_consecutive_frames") or 3)
         ),
-        "alarm_cooldown_frames": max(1, int(inference.get("alarm_cooldown_frames") or 6)),
+        "alarm_cooldown_frames": max(0, int(inference.get("alarm_cooldown_frames") or 6)),
     }
 
 
@@ -354,7 +354,8 @@ def post_accuracy_recompute(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
         raise HTTPException(400, "请选择机位")
     try:
         alarm_min = max(1, int(body.get("alarm_min_consecutive_frames") or 3))
-        alarm_cd = max(1, int(body.get("alarm_cooldown_frames") or 6))
+        raw_cd = body.get("alarm_cooldown_frames")
+        alarm_cd = max(0, int(raw_cd if raw_cd is not None else 6))
     except (TypeError, ValueError) as exc:
         raise HTTPException(400, "碰撞参数须为整数") from exc
     paths = resolve_app_paths()
@@ -381,7 +382,8 @@ def post_accuracy_recompute_evaluate(body: dict[str, Any] = Body(...)) -> dict[s
         raise HTTPException(400, "请选择机位")
     try:
         alarm_min = max(1, int(body.get("alarm_min_consecutive_frames") or 3))
-        alarm_cd = max(1, int(body.get("alarm_cooldown_frames") or 6))
+        raw_cd = body.get("alarm_cooldown_frames")
+        alarm_cd = max(0, int(raw_cd if raw_cd is not None else 6))
     except (TypeError, ValueError) as exc:
         raise HTTPException(400, "碰撞参数须为整数") from exc
     paths = resolve_app_paths()

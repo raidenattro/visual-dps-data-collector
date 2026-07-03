@@ -562,7 +562,7 @@ def recompute_camera_records_batch(
         raise ValueError(f"机位 {camera_label!r}（{slug}）下无「已复核」的 review 分片")
 
     alarm_min = max(1, int(alarm_min_consecutive_frames))
-    alarm_cd = max(1, int(alarm_cooldown_frames))
+    alarm_cd = max(0, int(alarm_cooldown_frames))
     recomputed: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
     seen_records: set[str] = set()

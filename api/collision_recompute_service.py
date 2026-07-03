@@ -98,7 +98,7 @@ def recompute_record_collisions(
     if alarm_min_consecutive_frames is not None:
         alarm_min = max(1, int(alarm_min_consecutive_frames))
     if alarm_cooldown_frames is not None:
-        alarm_cd = max(1, int(alarm_cooldown_frames))
+        alarm_cd = max(0, int(alarm_cooldown_frames))
 
     processor = CollisionProcessor(
         scaled_boxes,

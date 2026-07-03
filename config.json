@@ -29,7 +29,7 @@
         "pose_frame_interval": 1,
         "max_pose_frames": 0,
         "alarm_min_consecutive_frames": 3,
-        "alarm_cooldown_frames": 6
+        "alarm_cooldown_frames": 0
     },
     "source": {
         "enabled": false,

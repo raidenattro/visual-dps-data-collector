@@ -54,6 +54,8 @@ python scripts/data/merge_staging_batches.py --consolidate-after
 | `data/migrate_event_review_to_review_dir.py` | 将包内 `event_review` 迁到 `localdata/review/`（见 [docs/migrate-event-review.md](../docs/migrate-event-review.md)） |
 | `data/extract_wrist_features.py` | **手腕速度 + 碰撞段位移**特征提取（无需重跑模型） |
 | `data/analyze_wrist_feature_discrimination.py` | 按标签/机位批量提取并生成特征区分度报告（`docs/`） |
+| `data/compare_hand_probe_accuracy.py` | **手腕 vs 手臂延长**探针 A/B 准确率（含 `pose_frame_interval` 模拟，内存重算） |
+| `data/compare_alarm_threshold_accuracy.py` | 对比不同 `alarm_min` 门控下的漏报/误报 |
 
 ```bash
 # 本机 slug 归并（先 --dry-run）

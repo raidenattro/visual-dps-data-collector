@@ -659,7 +659,7 @@ def build_settings(*, config_path: Path, cli: dict[str, Any]) -> CollectSettings
         ),
     )
     alarm_cooldown = max(
-        1,
+        0,
         _pick_int(
             cli.get("alarm_cooldown_frames"),
             inference.get("alarm_cooldown_frames"),

@@ -131,7 +131,7 @@ def run_job(
 ) -> None:
     settings = build_settings(config_path=resolve_config_path(None), cli={})
     alarm_min = max(1, int(alarm_min_consecutive_frames))
-    alarm_cd = max(1, int(alarm_cooldown_frames))
+    alarm_cd = max(0, int(alarm_cooldown_frames))
     progress_target = progress_job_id or job_id
 
     def on_progress(current: int, total: int) -> None:
