@@ -1291,17 +1291,69 @@ def _patch_record_event_review_locked(
     return JSONResponse(payload)
 
 
-@router.get("/api/records/{record_id:path}/timeline")
-def get_record_timeline(record_id: str) -> JSONResponse:
-    """轻量时间轴（frame_idx / timestamp），供回放索引。"""
+@router.get("/api/records/{record_id:path}/collision-variants")
+def get_record_collision_variants(record_id: str) -> JSONResponse:
+    """碰撞变体 sidecar 元数据（wrist / hand_extended）。"""
+    from api.collision_variants_service import variants_available
+
     locator = locate_record_by_id(record_id)
     if not locator:
         raise HTTPException(404, "记录不存在")
     try:
-        timeline = load_timeline(locator)
-    except RuntimeError as exc:
+        return JSONResponse(variants_available(locator))
+    except (OSError, ValueError, FileNotFoundError) as exc:
         raise HTTPException(500, str(exc)) from exc
-    return JSONResponse({"record_id": record_id, "count": len(timeline), "timeline": timeline})
+
+
+@router.post("/api/records/{record_id:path}/collision-variants/build")
+def post_build_collision_variants(record_id: str) -> JSONResponse:
+    """为单条记录生成碰撞变体 sidecar。"""
+    from api.collision_variants_service import build_collision_variants_for_record
+
+    locator = locate_record_by_id(record_id)
+    if not locator:
+        raise HTTPException(404, "记录不存在")
+    try:
+        result = build_collision_variants_for_record(locator, skip_if_exists=False)
+    except (OSError, ValueError, FileNotFoundError, RuntimeError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return JSONResponse(result)
+
+
+@router.get("/api/records/{record_id:path}/timeline")
+def get_record_timeline(
+    record_id: str,
+    variant: str = "",
+    include_events: bool = False,
+) -> JSONResponse:
+    """轻量时间轴（frame_idx / timestamp）；variant 指定碰撞变体 sidecar。"""
+    variant_key = str(variant or "").strip()
+    locator = locate_record_by_id(record_id)
+    if not locator:
+        raise HTTPException(404, "记录不存在")
+    try:
+        if variant_key:
+            from api.collision_variants_service import load_collision_variant_timeline
+
+            timeline = load_collision_variant_timeline(
+                locator,
+                variant_key,
+                include_events=bool(include_events),
+            )
+        else:
+            timeline = load_timeline(locator, include_events=bool(include_events))
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return JSONResponse(
+        {
+            "record_id": record_id,
+            "variant": variant_key or None,
+            "count": len(timeline),
+            "timeline": timeline,
+        }
+    )
 
 
 @router.get("/api/records/{record_id:path}/wrist-features")
