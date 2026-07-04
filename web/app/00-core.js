@@ -29,6 +29,11 @@ let lastRenderedFrameIdx = -1;
 let tickPoseFrameIdx = -1;
 let currentRecordId = null;
 let playbackEvents = [];
+/** 采集 /events 原始事件（变体切换时保留标真范本） */
+let playbackEventsBaseline = [];
+/** 当前 playbackEvents 来自碰撞变体 sidecar */
+let playbackEventsFromVariant = false;
+let playbackActiveVariantKey = null;
 /** 事件列表来自回放实时重算（非采集落盘） */
 let playbackEventsFromRealtime = false;
 let activeEventKey = null;

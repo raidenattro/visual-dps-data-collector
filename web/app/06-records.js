@@ -1146,6 +1146,9 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
     poseData = await poseRes.json();
   }
   await buildFrameIndex(recordId);
+  if (typeof loadPlaybackCollisionVariant === "function") {
+    await loadPlaybackCollisionVariant(recordId);
+  }
   await prefetchInitialPlaybackChunks();
   const annResult = await applyPlaybackRecordAnnotation(recordId);
   const eventsPromise = loadPlaybackEvents(recordId);
@@ -1158,9 +1161,11 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
       ? " · 使用 pose 内嵌标注"
       : "";
   const collisionHint =
-    annotationBoxes.length && !collisionPersistedAtCollect()
-      ? `${annHint} · 回放时将实时计算碰撞`
-      : annHint;
+    typeof playbackCollisionVariantHint === "function" && playbackCollisionOverlay
+      ? `${annHint} · ${playbackCollisionVariantHint()}`
+      : annotationBoxes.length && !collisionPersistedAtCollect()
+        ? `${annHint} · 回放时将实时计算碰撞`
+        : annHint;
   $("#playback-video").value = "";
   const label = displayName || recordId;
   const jsonFile = jsonFileName || poseData?.pose_file || `${recordId}/manifest.json`;

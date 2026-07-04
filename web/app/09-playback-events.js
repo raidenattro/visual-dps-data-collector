@@ -96,12 +96,56 @@ async function buildPlaybackEventsFromRealtime(recordId) {
   return events;
 }
 
+/** 标真范本来源：变体展示时仍用采集 /events 中的标真段 */
+function getPlaybackGroundTruthEvents() {
+  if (playbackEventsFromVariant && playbackEventsBaseline.length) {
+    return playbackEventsBaseline;
+  }
+  return playbackEvents;
+}
+
+function snapshotPlaybackEventsBaseline() {
+  playbackEventsBaseline = (playbackEvents || []).map((ev) => ({
+    ...ev,
+    box_tokens: Array.isArray(ev.box_tokens) ? [...ev.box_tokens] : [],
+    confirmed_box_tokens: Array.isArray(ev.confirmed_box_tokens)
+      ? [...ev.confirmed_box_tokens]
+      : ev.confirmed_box_tokens,
+  }));
+  playbackEventsFromVariant = false;
+  playbackActiveVariantKey = null;
+}
+
+function restorePlaybackEventsBaseline() {
+  if (!playbackEventsFromVariant) return false;
+  playbackEvents = playbackEventsBaseline.map((ev) => ({
+    ...ev,
+    box_tokens: Array.isArray(ev.box_tokens) ? [...ev.box_tokens] : [],
+    confirmed_box_tokens: Array.isArray(ev.confirmed_box_tokens)
+      ? [...ev.confirmed_box_tokens]
+      : ev.confirmed_box_tokens,
+  }));
+  playbackEventsFromVariant = false;
+  playbackActiveVariantKey = null;
+  applyVerifiedFlagsToEvents();
+  rebuildPlaybackEventsFrameIndex();
+  if (typeof renderEventReviewList === "function") renderEventReviewList();
+  if (typeof invalidatePlaybackAccuracyOverlay === "function") {
+    invalidatePlaybackAccuracyOverlay();
+  }
+  return true;
+}
+
 async function loadPlaybackEvents(recordId = null) {
   playbackEvents = [];
+  playbackEventsBaseline = [];
+  playbackEventsFromVariant = false;
+  playbackActiveVariantKey = null;
   playbackEventsFromRealtime = false;
   activeEventKey = null;
   playbackEventLinkExact = false;
   verifiedTrueKeys.clear();
+  if (typeof clearPlaybackVerifiedReviewCache === "function") clearPlaybackVerifiedReviewCache();
   pendingConfirmedBoxesByKey.clear();
   boxAnnotationTouchedKeys.clear();
   eventReviewStatusEventKey = null;
@@ -152,9 +196,14 @@ async function loadPlaybackEvents(recordId = null) {
   playbackEvents.forEach((ev) => {
     if (isEventVerified(ev)) applyAutoConfirmedBoxOnVerify(ev);
   });
-  rebuildPlaybackEventsFrameIndex();
-  renderEventReviewList();
-  invalidatePlaybackAccuracyOverlay();
+  snapshotPlaybackEventsBaseline();
+  if (typeof syncPlaybackEventsFromCollisionVariant === "function") {
+    syncPlaybackEventsFromCollisionVariant();
+  } else {
+    rebuildPlaybackEventsFrameIndex();
+    renderEventReviewList();
+    invalidatePlaybackAccuracyOverlay();
+  }
 }
 
 function getCurrentPlaybackTimeSec() {
@@ -313,11 +362,15 @@ async function seekToEvent(ev, { keepReviewBack = false } = {}) {
 
 function clearPlaybackEvents() {
   playbackEvents = [];
+  playbackEventsBaseline = [];
+  playbackEventsFromVariant = false;
+  playbackActiveVariantKey = null;
   playbackEventsFromRealtime = false;
   playbackEventsFrameIndex = new Map();
   activeEventKey = null;
   playbackEventLinkExact = false;
   verifiedTrueKeys.clear();
+  if (typeof clearPlaybackVerifiedReviewCache === "function") clearPlaybackVerifiedReviewCache();
   pendingConfirmedBoxesByKey.clear();
   boxAnnotationTouchedKeys.clear();
   eventReviewStatusEventKey = null;

@@ -70,6 +70,33 @@ function eventTypeFrameKey(ev) {
   return `${String(ev?.event_type || "").trim()}:${parseInt(ev?.frame_idx, 10) || 0}`;
 }
 
+function eventPlaybackFrameKeys(ev) {
+  const keys = new Set();
+  const fi = parseInt(ev?.frame_idx, 10) || 0;
+  const sfi = parseInt(ev?.source_frame_idx, 10) || 0;
+  if (fi > 0) keys.add(fi);
+  if (sfi > 0) keys.add(sfi);
+  return keys;
+}
+
+function reviewEntryFrameKeys(entry) {
+  const keys = new Set();
+  const fi = parseInt(entry?.frame_idx, 10) || 0;
+  const sfi = parseInt(entry?.source_frame_idx, 10) || 0;
+  if (fi > 0) keys.add(fi);
+  if (sfi > 0) keys.add(sfi);
+  return keys;
+}
+
+function eventFramesOverlapWithReview(ev, entry) {
+  const evKeys = eventPlaybackFrameKeys(ev);
+  const entryKeys = reviewEntryFrameKeys(entry);
+  for (const k of evKeys) {
+    if (entryKeys.has(k)) return true;
+  }
+  return false;
+}
+
 function reviewEntryBoxIds(entry) {
   const ids = boxIdsFromTokenList(entry?.box_tokens);
   const confirmed =
@@ -86,9 +113,10 @@ function reviewEntryBoxIds(entry) {
   return ids;
 }
 
+/** 标真匹配：同帧 + 货位 id 重叠即可（collision/alarm 仅计算差异） */
 function eventMatchesReviewEntry(ev, entry) {
   if (!ev || !entry) return false;
-  if (eventTypeFrameKey(ev) !== eventTypeFrameKey(entry)) return false;
+  if (!eventFramesOverlapWithReview(ev, entry)) return false;
   const evIds = boxIdsFromTokenList(ev?.box_tokens);
   const revIds = reviewEntryBoxIds(entry);
   for (const id of evIds) {
@@ -99,8 +127,12 @@ function eventMatchesReviewEntry(ev, entry) {
 
 /** 与准确率 build_ground_truth_segments 一致：连续相同范本货框合并为段 */
 function buildVerifiedGroundTruthSegments() {
-  if (!playbackEvents?.length) return [];
-  const entries = playbackEvents
+  const sourceEvents =
+    typeof getPlaybackGroundTruthEvents === "function"
+      ? getPlaybackGroundTruthEvents()
+      : playbackEvents;
+  if (!sourceEvents?.length) return [];
+  const entries = sourceEvents
     .filter((ev) => typeof isEventVerified === "function" && isEventVerified(ev))
     .map((ev) => {
       const confirmed =
@@ -577,6 +609,16 @@ function getPlaybackCollisionTracker() {
 }
 
 function getFrameCollisionSets(frame, inferW, inferH) {
+  const overlay =
+    typeof getPlaybackCollisionOverlayForFrame === "function"
+      ? getPlaybackCollisionOverlayForFrame(frame)
+      : null;
+  if (overlay) {
+    return {
+      collisionSet: new Set(overlay.collisions || []),
+      alarmSet: new Set(overlay.alarm_collisions || []),
+    };
+  }
   if (frameUsesStoredCollisions(frame)) {
     return {
       collisionSet: new Set(frame.collisions || []),
@@ -965,6 +1007,80 @@ function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null, review
   });
 }
 
+/** COCO17 手腕关键点索引 */
+const WRIST_KPT_INDICES = new Set([9, 10]);
+
+/** 延长手腕探针可视化（橙/黄，与青色骨架区分） */
+function drawHandExtendedProbes(frame, inferW, inferH) {
+  if (typeof collectPlaybackHandProbePoints !== "function") return;
+  if (typeof isPlaybackHandProbeEnabled === "function" && !isPlaybackHandProbeEnabled()) {
+    return;
+  }
+  const probes = collectPlaybackHandProbePoints(frame);
+  if (!probes.length) return;
+
+  const layout = getDisplayLayout();
+  const sideStyle = {
+    left: { fill: "#f97316", stroke: "#fff7ed", dash: [5, 4] },
+    right: { fill: "#eab308", stroke: "#fefce8", dash: [5, 4] },
+  };
+
+  ctx.save();
+  probes.forEach((probe) => {
+    const style = sideStyle[probe.side] || sideStyle.left;
+    const [wx, wy] = mapInferToDisplay(probe.wx, probe.wy, inferW, inferH, layout);
+    const [px, py] = mapInferToDisplay(probe.x, probe.y, inferW, inferH, layout);
+
+    if (probe.kind === "hand_sim") {
+      ctx.setLineDash(style.dash);
+      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = style.fill;
+      ctx.globalAlpha = 0.92;
+      ctx.beginPath();
+      ctx.moveTo(wx, wy);
+      ctx.lineTo(px, py);
+      ctx.stroke();
+
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = style.fill;
+      ctx.strokeStyle = style.stroke;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(px, py, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.95)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(px - 3, py);
+      ctx.lineTo(px + 3, py);
+      ctx.moveTo(px, py - 3);
+      ctx.lineTo(px, py + 3);
+      ctx.stroke();
+
+      ctx.font = "bold 10px system-ui, sans-serif";
+      ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
+      ctx.fillText(probe.side === "left" ? "L" : "R", px + 7, py - 7);
+    } else {
+      ctx.setLineDash([3, 3]);
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = style.fill;
+      ctx.globalAlpha = 0.75;
+      ctx.beginPath();
+      const r = 5;
+      ctx.moveTo(px, py - r);
+      ctx.lineTo(px + r, py);
+      ctx.lineTo(px, py + r);
+      ctx.lineTo(px - r, py);
+      ctx.closePath();
+      ctx.stroke();
+    }
+  });
+  ctx.restore();
+}
+
 function drawSkeleton(frame, inferW, inferH, collisionSets = null) {
   const { cw, ch } = syncCanvasSize();
   ctx.clearRect(0, 0, cw, ch);
@@ -992,15 +1108,23 @@ function drawSkeleton(frame, inferW, inferH, collisionSets = null) {
 
   frame.persons.forEach((person) => {
     const kpts = person.keypoints || [];
+    const handProbeOn =
+      typeof isPlaybackHandProbeEnabled === "function" && isPlaybackHandProbeEnabled();
     kpts.forEach((kp, i) => {
       if (!kp || kp[2] < SCORE_MIN) return;
       const [x, y] = mapInferToDisplay(kp[0], kp[1], inferW, inferH, layout);
       ctx.fillStyle = ["#22d3ee", "#a78bfa", "#f472b6"][i % 3];
+      let radius = 2.5;
+      if (WRIST_KPT_INDICES.has(i)) {
+        radius = handProbeOn ? 1.8 : 2;
+      }
       ctx.beginPath();
-      ctx.arc(x, y, 4, 0, Math.PI * 2);
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
       ctx.fill();
     });
   });
+
+  drawHandExtendedProbes(frame, inferW, inferH);
 }
 
 function redrawCurrentFrame() {

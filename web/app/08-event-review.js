@@ -303,11 +303,18 @@ function isEventVerified(ev) {
     verifiedTrueKeys.add(key);
     return true;
   }
+  for (const item of playbackVerifiedReviewEntries) {
+    if (eventMatchesReviewEntry(ev, item)) return true;
+  }
   return false;
 }
 
 function countVerifiedEvents() {
-  return playbackEvents.filter((e) => isEventVerified(e)).length;
+  const pool =
+    playbackEventsFromVariant && playbackEventsBaseline.length
+      ? playbackEventsBaseline
+      : playbackEvents;
+  return pool.filter((e) => isEventVerified(e)).length;
 }
 
 /** 按 activeEventKey 在完整事件列表中定位（不受筛选影响） */
@@ -333,7 +340,42 @@ function refreshEventCountLabel() {
       accuracyHint = ` · 漏报段 ${missN} · 误报 ${falseN}`;
     }
   }
-  eventCountLabel.textContent = `告警 ${alarmN} · 碰撞 ${collN} · 标真 ${verifiedN}${accuracyHint}${rtHint}${filterHint}`;
+  let variantHint = "";
+  if (playbackEventsFromVariant && playbackActiveVariantKey) {
+    const labelFn =
+      typeof playbackVariantEventsLabel === "function"
+        ? playbackVariantEventsLabel
+        : (k) => k;
+    variantHint = ` · 事件源 ${labelFn(playbackActiveVariantKey)}`;
+  }
+  eventCountLabel.textContent = `告警 ${alarmN} · 碰撞 ${collN} · 标真 ${verifiedN}${accuracyHint}${variantHint}${rtHint}${filterHint}`;
+}
+
+/** 来自 event_review.json 的标真条目（供变体事件按帧+货框对齐） */
+let playbackVerifiedReviewEntries = [];
+
+function clearPlaybackVerifiedReviewCache() {
+  playbackVerifiedReviewEntries = [];
+}
+
+function applyVerifiedReviewToEvents(events = playbackEvents) {
+  if (!playbackVerifiedReviewEntries.length || !events?.length) return;
+  for (const ev of events) {
+    for (const item of playbackVerifiedReviewEntries) {
+      if (!eventMatchesReviewEntry(ev, item)) continue;
+      ev.verified_true = true;
+      verifiedTrueKeys.add(eventRowKey(ev));
+      const tokens = normalizeBoxTokenList(
+        item.confirmed_box_tokens ||
+          (item.confirmed_box_token ? [item.confirmed_box_token] : [])
+      );
+      if (tokens.length) {
+        ev.confirmed_box_tokens = [...tokens];
+        delete ev.confirmed_box_token;
+      }
+      break;
+    }
+  }
 }
 
 function syncVerifiedKeysFromEvents(events, reviewPayload = null) {
@@ -342,9 +384,11 @@ function syncVerifiedKeysFromEvents(events, reviewPayload = null) {
     if (ev?.verified_true) verifiedTrueKeys.add(eventRowKey(ev));
   });
   const reviewList = reviewPayload?.verified_true;
-  if (Array.isArray(reviewList)) {
-    for (const item of reviewList) {
-      if (!item || typeof item !== "object") continue;
+  playbackVerifiedReviewEntries = Array.isArray(reviewList)
+    ? reviewList.filter((item) => item && typeof item === "object")
+    : [];
+  if (playbackVerifiedReviewEntries.length) {
+    for (const item of playbackVerifiedReviewEntries) {
       verifiedTrueKeys.add(eventRowKey(item));
       (events || []).forEach((ev) => {
         if (eventMatchesReviewEntry(ev, item)) {
