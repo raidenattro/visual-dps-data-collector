@@ -55,6 +55,8 @@ python scripts/data/merge_staging_batches.py --consolidate-after
 | `data/extract_wrist_features.py` | **手腕速度 + 碰撞段位移**特征提取（无需重跑模型） |
 | `data/analyze_wrist_feature_discrimination.py` | 按标签/机位批量提取并生成特征区分度报告（`docs/`） |
 | `data/compare_hand_probe_accuracy.py` | **手腕 vs 手臂延长**探针 A/B 准确率（含 `pose_frame_interval` 模拟，内存重算） |
+| `data/export_rule_baseline_frames.py` | 导出现场规则 baseline 逐帧 JSON（28 条，`is_picking`=告警帧） |
+| `data/build_collision_variants.py` | 生成碰撞变体 sidecar（wrist + hand_ext）供回放切换 |
 | `data/compare_alarm_threshold_accuracy.py` | 对比不同 `alarm_min` 门控下的漏报/误报 |
 
 ```bash
