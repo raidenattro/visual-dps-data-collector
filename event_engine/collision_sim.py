@@ -74,6 +74,38 @@ def simulate_alarms_from_frames(
     fallback_to_wrist: bool = True,
 ) -> list[tuple[int, str]]:
     """内存重算告警列表 [(source_frame_idx, box_token), ...]。"""
+    events = simulate_frame_events_from_frames(
+        frames,
+        boxes,
+        alarm_min_consecutive_frames=alarm_min_consecutive_frames,
+        alarm_cooldown_frames=alarm_cooldown_frames,
+        video_fps=video_fps,
+        probe_mode=probe_mode,
+        extension_ratio=extension_ratio,
+        fallback_to_wrist=fallback_to_wrist,
+    )
+    out: list[tuple[int, str]] = []
+    for row in events:
+        fi = int(row.get("frame_idx") or 0)
+        for raw in row.get("alarm_collisions") or []:
+            token = canonical_box_token(str(raw).strip())
+            if token:
+                out.append((fi, token))
+    return out
+
+
+def simulate_frame_events_from_frames(
+    frames: list[dict[str, Any]],
+    boxes: list[dict[str, Any]],
+    *,
+    alarm_min_consecutive_frames: int = 3,
+    alarm_cooldown_frames: int = 0,
+    video_fps: float = 15.0,
+    probe_mode: ProbeMode = "wrist",
+    extension_ratio: float = DEFAULT_EXTENSION_RATIO,
+    fallback_to_wrist: bool = True,
+) -> list[dict[str, Any]]:
+    """逐帧重算碰撞/告警，返回 [{frame_idx, collisions, alarm_collisions}, ...]。"""
     processor = CollisionProcessor(
         boxes,
         alarm_min_consecutive_frames=max(1, int(alarm_min_consecutive_frames)),
@@ -84,14 +116,25 @@ def simulate_alarms_from_frames(
         fallback_to_wrist=fallback_to_wrist,
     )
 
-    out: list[tuple[int, str]] = []
+    out: list[dict[str, Any]] = []
     for fr in frames:
         if not isinstance(fr, dict):
             continue
         idx = int(fr.get("source_frame_idx") or fr.get("frame_idx") or 0)
         event = processor.process({"frame_idx": idx, "persons": fr.get("persons") or []})
-        for raw in event.get("alarm_collisions") or []:
-            token = canonical_box_token(str(raw).strip())
-            if token:
-                out.append((idx, token))
+        collisions = [
+            canonical_box_token(str(t).strip())
+            for t in (event.get("collisions") or [])
+            if canonical_box_token(str(t).strip())
+        ]
+        alarms = [
+            canonical_box_token(str(t).strip())
+            for t in (event.get("alarm_collisions") or [])
+            if canonical_box_token(str(t).strip())
+        ]
+        out.append({
+            "frame_idx": idx,
+            "collisions": collisions,
+            "alarm_collisions": alarms,
+        })
     return out
