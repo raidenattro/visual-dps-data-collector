@@ -22,6 +22,74 @@
   let dragTarget = null;
   let gridReady = false;
   let onSelectionChange = null;
+  /** 是否绘制并可拖拽货架四角（沙盒加载已有标注时可关闭） */
+  let shelfOutlineVisible = true;
+  /** 沙盒微调模式：提高货位描边/编号对比度 */
+  let cellRenderHighContrast = false;
+
+  function getCellDrawStyle(isSelected) {
+    if (cellRenderHighContrast) {
+      if (isSelected) {
+        return {
+          stroke: "#22d3ee",
+          lineWidth: 3.5,
+          fill: "rgba(34, 211, 238, 0.3)",
+          handle: "#fb923c",
+          handleR: 6,
+          labelFill: "#ffffff",
+          labelStroke: "rgba(0, 0, 0, 0.85)",
+          labelWidth: 4,
+          font: "bold 18px Arial",
+        };
+      }
+      return {
+        stroke: "rgba(250, 204, 21, 0.95)",
+        lineWidth: 2.25,
+        fill: "rgba(250, 204, 21, 0.16)",
+        handle: null,
+        handleR: 0,
+        labelFill: null,
+        labelStroke: null,
+        labelWidth: 0,
+        font: "bold 16px Arial",
+      };
+    }
+    if (isSelected) {
+      return {
+        stroke: "#00d4aa",
+        lineWidth: 2.5,
+        fill: "rgba(0, 212, 170, 0.12)",
+        handle: "#e67e22",
+        handleR: 5,
+        labelFill: "#00ffcc",
+        labelStroke: null,
+        labelWidth: 0,
+        font: "bold 16px Arial",
+      };
+    }
+    return {
+      stroke: "rgba(241, 196, 15, 0.28)",
+      lineWidth: 1,
+      fill: null,
+      handle: null,
+      handleR: 0,
+      labelFill: null,
+      labelStroke: null,
+      labelWidth: 0,
+      font: "bold 16px Arial",
+    };
+  }
+
+  function drawCellLabel(ctx, text, x, y, style) {
+    ctx.font = style.font;
+    if (style.labelStroke) {
+      ctx.lineWidth = style.labelWidth;
+      ctx.strokeStyle = style.labelStroke;
+      ctx.strokeText(text, x, y);
+    }
+    ctx.fillStyle = style.labelFill || "#00ffcc";
+    ctx.fillText(text, x, y);
+  }
 
   function getCellKey(rowIdx, colIdx) {
     return `${rowIdx + 1}-${colIdx + 1}`;
@@ -273,7 +341,7 @@
   }
 
   function drawShelfOutline(ctx) {
-    if (!shelfPoints.length) return;
+    if (!shelfPoints.length || !shelfOutlineVisible) return;
     ctx.lineWidth = 3;
     ctx.strokeStyle = "#2ecc71";
     ctx.beginPath();
@@ -292,12 +360,10 @@
   function drawEditableGridBoxes(ctx) {
     if (!M_inv) return;
     const { rows, cols } = getGridExtent();
-    const handleR = 5;
     const selRow = selectedCell?.rowIdx;
     const selCol = selectedCell?.colIdx;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.font = "bold 16px Arial";
 
     for (let i = 0; i < rows; i += 1) {
       for (let j = 0; j < cols; j += 1) {
@@ -309,10 +375,11 @@
             (dragTarget.type === "cell-body" || dragTarget.type === "cell-corner") &&
             dragTarget.row === i &&
             dragTarget.col === j);
-        ctx.strokeStyle = isSelected ? "#00d4aa" : "rgba(241, 196, 15, 0.28)";
-        ctx.lineWidth = isSelected ? 2.5 : 1;
-        if (isSelected) {
-          ctx.fillStyle = "rgba(0, 212, 170, 0.12)";
+        const style = getCellDrawStyle(isSelected);
+        ctx.strokeStyle = style.stroke;
+        ctx.lineWidth = style.lineWidth;
+        if (style.fill) {
+          ctx.fillStyle = style.fill;
           ctx.beginPath();
           ctx.moveTo(poly[0][0], poly[0][1]);
           for (let k = 1; k < poly.length; k += 1) ctx.lineTo(poly[k][0], poly[k][1]);
@@ -325,16 +392,17 @@
         ctx.closePath();
         ctx.stroke();
         if (!isSelected) continue;
-        ctx.fillStyle = "#e67e22";
-        for (const pt of poly) {
-          ctx.beginPath();
-          ctx.arc(pt[0], pt[1], handleR, 0, Math.PI * 2);
-          ctx.fill();
+        if (style.handle) {
+          ctx.fillStyle = style.handle;
+          for (const pt of poly) {
+            ctx.beginPath();
+            ctx.arc(pt[0], pt[1], style.handleR, 0, Math.PI * 2);
+            ctx.fill();
+          }
         }
         const centerX = poly.reduce((s, p) => s + p[0], 0) / poly.length;
         const centerY = poly.reduce((s, p) => s + p[1], 0) / poly.length;
-        ctx.fillStyle = "#00ffcc";
-        ctx.fillText(getEffectiveBoxId(i, j), centerX, centerY);
+        drawCellLabel(ctx, getEffectiveBoxId(i, j), centerX, centerY, style);
       }
     }
   }
@@ -354,6 +422,20 @@
       gridReady = false;
       gridRows = 4;
       gridCols = 4;
+      shelfOutlineVisible = true;
+      cellRenderHighContrast = false;
+    },
+
+    setShelfOutlineVisible(visible) {
+      shelfOutlineVisible = !!visible;
+    },
+
+    isShelfOutlineVisible() {
+      return shelfOutlineVisible;
+    },
+
+    setCellRenderHighContrast(enabled) {
+      cellRenderHighContrast = !!enabled;
     },
 
     setGridSize(rows, cols) {
@@ -535,7 +617,7 @@
         const cornerHit = canvasHitRadius(canvas, 10);
         const shelfHit = canvasHitRadius(canvas, 12);
 
-        if (shelfPoints.length === 4) {
+        if (shelfOutlineVisible && shelfPoints.length === 4) {
           for (let i = 0; i < shelfPoints.length; i += 1) {
             if (geo().getPointDist([x, y], shelfPoints[i]) < shelfHit) {
               dragTarget = { type: "shelf-corner", i };

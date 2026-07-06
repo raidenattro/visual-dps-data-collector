@@ -943,6 +943,21 @@ function bootAnnotatePanel() {
   initAnnotatePanel();
 }
 
+/** 供沙盒页接管 AnnotateVisualMode 前释放标注画布绑定 */
+window.releaseAnnotateVisualCanvas = function releaseAnnotateVisualCanvas() {
+  if (unbindVisualCanvas) {
+    unbindVisualCanvas();
+    unbindVisualCanvas = null;
+  }
+  visualMode()?.reset();
+};
+
+/** 从沙盒页返回标注页时重新绑定 #annotate-canvas */
+window.rebindAnnotateVisualCanvas = function rebindAnnotateVisualCanvas() {
+  if (!unbindVisualCanvas) bindCanvasEvents();
+  renderAnnotator();
+};
+
 window.initAnnotatePanel = initAnnotatePanel;
 
 if (document.readyState === "loading") {
