@@ -61,13 +61,13 @@ localdata/review/{camera_slug}/{source_stem}__{start}__{end}/event_review.json
 ### 2. 预览（dry-run）
 
 ```bash
-python scripts/data/migrate_event_review_to_review_dir.py --dry-run
+python scripts/archive/data/migrate_event_review_to_review_dir.py --dry-run
 ```
 
 可选：仅处理某一模型层：
 
 ```bash
-python scripts/data/migrate_event_review_to_review_dir.py --dry-run --tier rtmpose-t
+python scripts/archive/data/migrate_event_review_to_review_dir.py --dry-run --tier rtmpose-t
 ```
 
 检查输出中的「扫描 / 迁移 / 合并 / 错误」数量是否符合预期。
@@ -75,7 +75,7 @@ python scripts/data/migrate_event_review_to_review_dir.py --dry-run --tier rtmpo
 ### 3. 正式迁移
 
 ```bash
-python scripts/data/migrate_event_review_to_review_dir.py
+python scripts/archive/data/migrate_event_review_to_review_dir.py
 ```
 
 脚本会：
@@ -106,7 +106,7 @@ curl "http://127.0.0.1:8765/api/records/import-event-reviews"
 确认无误后再执行：
 
 ```bash
-python scripts/data/migrate_event_review_to_review_dir.py --remove-legacy
+python scripts/archive/data/migrate_event_review_to_review_dir.py --remove-legacy
 ```
 
 仅删除已成功写入 `review_dir` 的记录包内旧 `event_review.json`，**不删除** `review_dir` 中的文件。
@@ -124,7 +124,7 @@ python scripts/data/merge_pose_tier_data.py --source /path/to/export --tier rtmp
 
 | 脚本 | 用途 |
 |------|------|
-| `scripts/data/migrate_event_review_to_review_dir.py` | 本迁移主脚本 |
+| `scripts/archive/data/migrate_event_review_to_review_dir.py` | 本迁移主脚本 |
 | `scripts/data/backfill_no_collision_review.py` | 无碰撞记录写回复核（已走 `review_dir`） |
 | `scripts/data/demote_incomplete_box_review.py` | 缺货框确认的已复核记录降级 |
 | `scripts/data/merge_pose_tier_data.py` | 跨机数据合并（复核按 `review_key`） |

@@ -217,7 +217,7 @@ CLI 批处理（`--with-collision`）**复用** `reflection.json` 指向的 `ann
 
 ```bash
 # 旧扁平目录 → rtmpose-t 模型层
-python scripts/data/migrate_pose_model_tiers.py --dry-run
+python scripts/archive/data/migrate_pose_model_tiers.py --dry-run
 
 # 同机位 -(2)/(3) slug 归并（同名记录自动加后缀，不覆盖）
 python scripts/data/consolidate_camera_slugs.py --tier rtmpose-t --dry-run

@@ -39,37 +39,52 @@ python scripts/collect/batch_staging_parallel.py --terminal --with-collision --m
 python scripts/data/merge_staging_batches.py --consolidate-after
 ```
 
-## data/ — 数据迁移与维护
+## data/ — 数据维护、评估与导出
 
-推荐顺序：**模型层迁移 → slug 归并 → 跨机合并**。
+### 公共模块
+
+| 模块 | 用途 |
+|------|------|
+| `data/eval_dataset.py` | 优质 28 条样本筛选（标签/机位/复核）、段重叠判定 |
+| `data/report_paths.py` | `docs/` / `docs/json/` 报告路径约定 |
+| `event_engine/cv2_shim.py` | cv2.pointPolygonTest 兜底 |
+
+### 日常脚本
 
 | 脚本 | 用途 |
 |------|------|
-| `data/migrate_pose_model_tiers.py` | 扁平 `localdata/json|video/{机位}` → `rtmpose-t/{机位}` |
-| `data/consolidate_camera_slugs.py` | 同机位 `-(2)/(3)` slug 归并到 canonical 机位（同名记录加后缀，不覆盖） |
-| `data/merge_pose_tier_data.py` | 合并另一台机器/导出目录的采集数据（含复核 `event_review` 并集） |
-| `data/repair_batch_records.py` | 为已有记录补 `annotation.json` 回放副本 |
-| `data/restore_source_videos.py` | 将 `localdata/video` 配套视频复制回批处理源目录 |
-| `data/backfill_no_collision_review.py` | 批量为无碰撞记录写入 `event_review`（无碰撞） |
-| `data/migrate_event_review_to_review_dir.py` | 将包内 `event_review` 迁到 `localdata/review/`（见 [docs/migrate-event-review.md](../docs/migrate-event-review.md)） |
-| `data/extract_wrist_features.py` | **手腕速度 + 碰撞段位移**特征提取（无需重跑模型） |
-| `data/analyze_wrist_feature_discrimination.py` | 按标签/机位批量提取并生成特征区分度报告（`docs/`） |
-| `data/compare_hand_probe_accuracy.py` | **手腕 vs 手臂延长**探针 A/B 准确率（含 `pose_frame_interval` 模拟，内存重算） |
-| `data/export_rule_baseline_frames.py` | 导出现场规则 baseline 逐帧 JSON（28 条，`is_picking`=告警帧） |
-| `data/build_collision_variants.py` | 生成碰撞变体 sidecar（wrist + hand_ext）供回放切换 |
-| `data/compare_alarm_threshold_accuracy.py` | 对比不同 `alarm_min` 门控下的漏报/误报 |
+| `data/consolidate_camera_slugs.py` | 同机位 `-(2)/(3)` slug 归并 |
+| `data/merge_pose_tier_data.py` | 跨机合并采集数据 |
+| `data/merge_staging_batches.py` | staging → 主 `localdata/` |
+| `data/repair_batch_records.py` | 补包内 `annotation.json` 回放副本 |
+| `data/restore_source_videos.py` | 视频复制回批处理源目录 |
+| `data/backfill_no_collision_review.py` | 无碰撞记录写回复核 |
+| `data/demote_incomplete_box_review.py` | 缺货框确认的已复核记录降级 |
+| `data/extract_wrist_features.py` | 手腕速度 + 碰撞段特征提取 |
+| `data/analyze_wrist_feature_discrimination.py` | 特征区分度报告 |
+| `data/compare_hand_probe_accuracy.py` | 手腕 vs 手臂延长 A/B |
+| `data/compare_alarm_threshold_accuracy.py` | alarm_min 门控对比 |
+| `data/evaluate_combo1_segment_filter.py` | 段特征组合过滤 combo1–4 |
+| `data/plot_alarm_min_disp_fc_scatter.py` | alarm_min 散点图报告 |
+| `data/export_rule_baseline_frames.py` | 现场规则 baseline 逐帧 JSON |
+| `data/export_shelf_picksense.py` | 导出 ShelfPickSense 记录包（`--layout demo\|data28-merged`） |
+| `data/build_collision_variants.py` | 碰撞变体 sidecar |
 
 ```bash
-# 本机 slug 归并（先 --dry-run）
+# ShelfPickSense 数据包（合并标注，与 baseline 对齐）
+python scripts/data/export_shelf_picksense.py --layout data28-merged --clean
+
+# baseline 导出（与 infer-collision 对比时加 infer-size-record-root）
+python scripts/data/export_rule_baseline_frames.py \\
+  --out-dir localdata/export/rule-baseline-prod \\
+  --infer-size-record-root D:/path/to/ShelfPickSense/data/data28-merged/Train
+
+# slug 归并 / 跨机合并
 python scripts/data/consolidate_camera_slugs.py --tier rtmpose-t --dry-run
-python scripts/data/consolidate_camera_slugs.py --tier rtmpose-t
-
-# 跨机合并
 python scripts/data/merge_pose_tier_data.py --source /path/to/export --tier rtmpose-t --dry-run
-
-# 手腕特征（见下方说明）
-python scripts/data/extract_wrist_features.py --tier rtmpose-m --dry-run
 ```
+
+一次性迁移脚本已移至 **`archive/data/`**（见该目录 README）。
 
 ### 手腕特征提取（`extract_wrist_features.py`）
 
@@ -137,5 +152,7 @@ seg = pq.read_table(base / "wrist_box_segments.parquet").to_pandas()
 | 脚本 | 说明 |
 |------|------|
 | `archive/split_app_js.py` | 将 `web/app.monolith.js` 拆分为 `web/app/` 模块（拆分已完成） |
+| `archive/data/migrate_pose_model_tiers.py` | 扁平机位 → 模型层目录（已执行） |
+| `archive/data/migrate_event_review_to_review_dir.py` | event_review 迁到 review_dir（已执行） |
 
 已删除的失效脚本（重构一次性工具，勿恢复）：`build_http_routes.py`、`split_server_modules.py`、`clean_http_routes.py`、`test_manifest_api.py`。
