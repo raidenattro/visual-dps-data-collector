@@ -70,6 +70,10 @@ from api.accuracy_service import (
     recompute_and_evaluate_camera_batch,
     recompute_camera_records_batch,
 )
+from api.inference_eval_service import (
+    evaluate_upload_directory,
+    evaluate_uploaded_files,
+)
 from api.annotate_service import (
     build_annotate_context,
     first_frame_video_for_camera,
@@ -393,6 +397,61 @@ def post_accuracy_recompute_evaluate(body: dict[str, Any] = Body(...)) -> dict[s
             camera_label=camera,
             alarm_min_consecutive_frames=alarm_min,
             alarm_cooldown_frames=alarm_cd,
+            tags=tag_filter or None,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/api/accuracy/evaluate-upload")
+async def post_accuracy_evaluate_upload(
+    files: list[UploadFile] = File(...),
+    tags: str = Form(""),
+    keep_upload: bool = Form(False),
+) -> dict[str, Any]:
+    """上传推测 JSON 文件夹，与本地 review 标真对比评估（is_picking + 货框匹配）。"""
+    if not files:
+        raise HTTPException(400, "请上传至少一个 JSON 文件（可选择整个文件夹）")
+
+    tag_filter = parse_accuracy_tag_filter(tags)
+    file_items: list[tuple[str, bytes]] = []
+    for uf in files:
+        name = str(uf.filename or "").strip()
+        if not name:
+            continue
+        content = await uf.read()
+        if not content:
+            continue
+        if not Path(name).name.lower().endswith(".json") and Path(name).name != "_manifest.json":
+            continue
+        file_items.append((name, content))
+
+    if not file_items:
+        raise HTTPException(400, "上传内容无有效 .json 文件")
+
+    try:
+        return evaluate_uploaded_files(
+            file_items,
+            tags=tag_filter or None,
+            keep_upload=bool(keep_upload),
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/api/accuracy/evaluate-upload-path")
+def post_accuracy_evaluate_upload_path(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    """评估服务端目录下的推测 JSON（CLI / 批处理）。"""
+    dir_raw = str(body.get("dir") or body.get("path") or "").strip()
+    if not dir_raw:
+        raise HTTPException(400, "请提供 dir 目录路径")
+    tag_filter = parse_accuracy_tag_filter(body.get("tags"))
+    dir_path = Path(dir_raw)
+    if not dir_path.is_dir():
+        raise HTTPException(400, f"目录不存在: {dir_raw}")
+    try:
+        return evaluate_upload_directory(
+            dir_path,
             tags=tag_filter or None,
         )
     except ValueError as exc:
