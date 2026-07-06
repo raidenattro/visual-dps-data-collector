@@ -265,6 +265,7 @@
               <option value="evaluate_only" selected>仅评估（不重算）</option>
               <option value="recompute_evaluate">重算碰撞并评估</option>
               <option value="recompute_only">仅重算碰撞（不评估）</option>
+              <option value="upload_evaluate">上传推测结果评估</option>
             </select>
           </label>
           <label>
@@ -299,6 +300,24 @@
           </label>
         </div>
         <datalist id="accuracy-tag-suggestions"></datalist>
+        <div id="accuracy-upload-panel" class="accuracy-upload-panel hidden">
+          <fieldset>
+            <legend class="legend-with-tip">上传推测结果
+              <button type="button" class="field-tip" data-tip="可选择一个或多个 JSON 文件，或选择整个文件夹。is_picking=true 视为碰撞告警，货框取自 rule_alarm_collisions 或 rule_collisions，与标真 verified_true 按 box_id 匹配。">?</button>
+            </legend>
+            <div class="row">
+              <label class="accuracy-upload-files-label">
+                <span>JSON 文件</span>
+                <input type="file" id="accuracy-upload-file" accept=".json,application/json" multiple />
+              </label>
+              <label class="accuracy-upload-files-label">
+                <span>JSON 文件夹</span>
+                <input type="file" id="accuracy-upload-folder" accept=".json,application/json" webkitdirectory directory multiple />
+              </label>
+            </div>
+            <p id="accuracy-upload-hint" class="hint hidden" role="status"></p>
+          </fieldset>
+        </div>
         <fieldset class="collision-config accuracy-collision-config">
           <legend class="legend-with-tip">碰撞检测参数（重算时使用）
             <button type="button" class="field-tip" data-tip="与采集页一致：基于已有骨架 keypoints 重算 collisions / alarm_collisions，仅覆盖写回 timeline 与 manifest.collision；不修改 localdata/review 人工复核。">?</button>
@@ -646,6 +665,6 @@
   <script src="app/11-playback-controls.js?v=72"></script>
   <script src="app/12-playback-wrist-features.js?v=3"></script>
   <script src="annotate.js?v=17"></script>
-  <script src="accuracy.js?v=6"></script>
+  <script src="accuracy.js?v=9"></script>
 </body>
 </html>

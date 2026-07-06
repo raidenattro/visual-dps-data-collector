@@ -169,7 +169,14 @@ function renderAccuracySummary(result) {
   const tagHint = tagFilter.length
     ? `<p class="hint accuracy-tag-hint">记录标签筛选：<code>${escHtml(tagFilter.join(", "))}</code>（须同时命中）· 标签未命中排除 <strong>${s.tag_filtered ?? 0}</strong> 片</p>`
     : "";
-  if (!s.evaluated && !recomputeBlock && !tagHint) {
+  const isUpload = result.source === "upload";
+  const uploadHint = isUpload
+    ? `<p class="hint accuracy-upload-hint">规则：is_picking=true 为碰撞告警，货框匹配 rule_alarm_collisions / rule_collisions（box_id 兼容）</p>`
+    : "";
+  const headingLabel = isUpload
+    ? "上传推测评估"
+    : `${escHtml(result.camera_label || "")} · ${escHtml(result.pose_tier || "")}`;
+  if (!s.evaluated && !recomputeBlock && !tagHint && !uploadHint) {
     el.classList.add("hidden");
     return;
   }
@@ -177,7 +184,8 @@ function renderAccuracySummary(result) {
   el.innerHTML = `
     ${recomputeBlock}
     ${tagHint}
-    <h2 class="accuracy-summary-heading">汇总 · ${escHtml(result.camera_label)} · ${escHtml(result.pose_tier)}</h2>
+    ${uploadHint}
+    <h2 class="accuracy-summary-heading">汇总 · ${headingLabel}</h2>
     <div class="accuracy-metrics-grid">
       <div class="accuracy-metric"><span class="accuracy-metric-label">评估分片</span><span class="accuracy-metric-value">${s.evaluated ?? 0} / ${s.clip_count ?? 0}</span></div>
       <div class="accuracy-metric"><span class="accuracy-metric-label">范本取货段</span><span class="accuracy-metric-value">${s.gt_segments ?? 0}</span></div>
@@ -233,7 +241,8 @@ function renderAccuracyClipActions(c) {
 
 function renderAccuracyClipRow(c) {
   const rk = c.review_key || "";
-  const shortKey = rk.includes("/") ? rk.split("/").slice(1).join("/") : rk;
+  const uploadFile = c.upload_file || "";
+  const shortKey = uploadFile || (rk.includes("/") ? rk.split("/").slice(1).join("/") : rk);
   const meta = accuracyClipStatusMeta(c.status);
   const detail = c.error ? escHtml(c.error) : "—";
 
@@ -339,12 +348,127 @@ async function gotoPlaybackFromAccuracy(recordId, autoPlay = false) {
 function syncAccuracyCollisionUi() {
   const mode = getAccuracyEvalMode();
   const fieldset = acc$(".accuracy-collision-config");
+  const uploadPanel = acc$("#accuracy-upload-panel");
   const needsCollision = mode === "recompute_evaluate" || mode === "recompute_only";
+  const isUpload = mode === "upload_evaluate";
   fieldset?.classList.toggle("hidden", !needsCollision);
+  uploadPanel?.classList.toggle("hidden", !isUpload);
+  acc$("#accuracy-camera")?.closest("label")?.classList.toggle("hidden", isUpload);
+  acc$("#accuracy-pose-tier")?.closest("label")?.classList.toggle("hidden", isUpload);
+  if (isUpload) {
+    acc$("#accuracy-context-hint")?.classList.add("hidden");
+  }
+}
+
+function countAccuracyUploadJsonFiles(fileList) {
+  let n = 0;
+  if (!fileList?.length) return 0;
+  for (const f of fileList) {
+    const base = (f.webkitRelativePath || f.name || "").split("/").pop();
+    if (base?.toLowerCase().endsWith(".json")) n += 1;
+  }
+  return n;
+}
+
+function updateAccuracyUploadHint() {
+  const hint = acc$("#accuracy-upload-hint");
+  if (!hint) return;
+  const single = acc$("#accuracy-upload-file")?.files;
+  const folder = acc$("#accuracy-upload-folder")?.files;
+  const singleN = countAccuracyUploadJsonFiles(single);
+  const folderN = countAccuracyUploadJsonFiles(folder);
+  const total = singleN + folderN;
+  if (!total) {
+    hint.classList.add("hidden");
+    hint.textContent = "";
+    return;
+  }
+  const parts = [];
+  if (singleN) parts.push(`${singleN} 个文件`);
+  if (folderN) parts.push(`文件夹内 ${folderN} 个 JSON`);
+  hint.classList.remove("hidden");
+  hint.textContent = `已选：${parts.join("，")}`;
+}
+
+function appendAccuracyUploadFilesToForm(form) {
+  const single = acc$("#accuracy-upload-file")?.files;
+  const folder = acc$("#accuracy-upload-folder")?.files;
+  let jsonCount = 0;
+  for (const f of single || []) {
+    const name = f.name || "";
+    if (!name.toLowerCase().endsWith(".json")) continue;
+    form.append("files", f, name);
+    jsonCount += 1;
+  }
+  for (const f of folder || []) {
+    const rel = f.webkitRelativePath || f.name;
+    if (!rel) continue;
+    const base = rel.split("/").pop() || rel;
+    if (!base.toLowerCase().endsWith(".json")) continue;
+    form.append("files", f, rel);
+    jsonCount += 1;
+  }
+  return jsonCount;
+}
+
+async function runAccuracyUploadJob() {
+  const singleInput = acc$("#accuracy-upload-file");
+  const folderInput = acc$("#accuracy-upload-folder");
+  const hasSingle = (singleInput?.files?.length || 0) > 0;
+  const hasFolder = (folderInput?.files?.length || 0) > 0;
+  if (!hasSingle && !hasFolder) {
+    setAccuracyStatus("请选择 JSON 文件或文件夹", true);
+    return;
+  }
+
+  const tags = parseAccuracyTagFilterQuery();
+  const form = new FormData();
+  const jsonCount = appendAccuracyUploadFilesToForm(form);
+  if (!jsonCount) {
+    setAccuracyStatus("所选内容无 .json 文件", true);
+    return;
+  }
+  if (tags.length) form.append("tags", tags.join(","));
+
+  setAccuracyStatus(`正在评估 ${jsonCount} 个 JSON…`);
+  acc$("#accuracy-summary")?.classList.add("hidden");
+  acc$("#accuracy-clips-wrap")?.classList.add("hidden");
+  lastAccuracyClips = [];
+
+  try {
+    const res = await fetch("/api/accuracy/evaluate-upload", {
+      method: "POST",
+      body: form,
+    });
+    if (!res.ok) throw new Error(await readApiError(res));
+    const result = await res.json();
+
+    lastAccuracyMeta = {
+      pose_tier: "",
+      camera_slug: "",
+      camera_label: "",
+    };
+
+    const filterSel = acc$("#accuracy-clip-status-filter");
+    if (filterSel) filterSel.value = "all";
+
+    renderAccuracySummary(result);
+    renderAccuracyClips(result.clips, lastAccuracyMeta);
+    const s = result.summary || {};
+    setAccuracyStatus(
+      `✅ 上传评估完成：${s.evaluated ?? 0} 个分片，召回率 ${pct(s.recall)}，误报 ${s.false_alarms ?? 0} 次`
+    );
+  } catch (err) {
+    setAccuracyStatus(`❌ ${escHtml(err.message)}`, true);
+  }
 }
 
 async function runAccuracyJob() {
   const mode = getAccuracyEvalMode();
+  if (mode === "upload_evaluate") {
+    await runAccuracyUploadJob();
+    return;
+  }
   const body = readAccuracyRequestBody();
   if (!body.camera) {
     setAccuracyStatus("请选择机位", true);
@@ -467,6 +591,20 @@ function initAccuracyPanel() {
   });
   acc$("#accuracy-run")?.addEventListener("click", () => {
     void runAccuracyJob();
+  });
+  acc$("#accuracy-upload-file")?.addEventListener("change", () => {
+    if (acc$("#accuracy-upload-file")?.files?.length) {
+      const folderInput = acc$("#accuracy-upload-folder");
+      if (folderInput) folderInput.value = "";
+    }
+    updateAccuracyUploadHint();
+  });
+  acc$("#accuracy-upload-folder")?.addEventListener("change", () => {
+    if (acc$("#accuracy-upload-folder")?.files?.length) {
+      const singleInput = acc$("#accuracy-upload-file");
+      if (singleInput) singleInput.value = "";
+    }
+    updateAccuracyUploadHint();
   });
 }
 
