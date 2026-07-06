@@ -1857,6 +1857,190 @@ async def collect_batch(
     }
 
 
+# ---------------------------------------------------------------------------
+# 碰撞沙盒（仅读写 upload/sandbox，不修改正式记录）
+# ---------------------------------------------------------------------------
+
+
+@router.post("/api/sandbox/sessions")
+def post_sandbox_session(body: dict[str, Any] = Body(...)) -> JSONResponse:
+    from api.sandbox_service import create_sandbox_session
+
+    record_id = str(body.get("record_id") or "").strip()
+    if not record_id:
+        raise HTTPException(400, "缺少 record_id")
+    try:
+        result = create_sandbox_session(record_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except (OSError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return JSONResponse(result)
+
+
+@router.get("/api/sandbox/sessions")
+def get_sandbox_sessions() -> JSONResponse:
+    from api.sandbox_service import list_sandbox_sessions
+
+    return JSONResponse({"sessions": list_sandbox_sessions()})
+
+
+@router.delete("/api/sandbox/sessions")
+def delete_all_sandbox_sessions_api() -> JSONResponse:
+    from api.sandbox_service import delete_all_sandbox_sessions
+
+    return JSONResponse(delete_all_sandbox_sessions())
+
+
+@router.post("/api/sandbox/cleanup")
+def post_sandbox_cleanup(body: dict[str, Any] = Body(default={})) -> JSONResponse:
+    from api.sandbox_service import cleanup_expired_sandbox_sessions
+
+    ttl = body.get("ttl_hours") if isinstance(body, dict) else None
+    try:
+        ttl_hours = float(ttl) if ttl is not None else 72.0
+    except (TypeError, ValueError):
+        ttl_hours = 72.0
+    return JSONResponse(cleanup_expired_sandbox_sessions(ttl_hours=ttl_hours))
+
+
+@router.get("/api/sandbox/sessions/{session_id}")
+def get_sandbox_session_api(session_id: str) -> JSONResponse:
+    from api.sandbox_service import get_sandbox_session
+
+    try:
+        return JSONResponse(get_sandbox_session(session_id))
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.delete("/api/sandbox/sessions/{session_id}")
+def delete_sandbox_session_api(session_id: str) -> JSONResponse:
+    from api.sandbox_service import delete_sandbox_session
+
+    try:
+        return JSONResponse(delete_sandbox_session(session_id))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/api/sandbox/sessions/{session_id}/annotation.json")
+def get_sandbox_annotation_api(session_id: str) -> JSONResponse:
+    from api.sandbox_service import load_sandbox_annotation
+
+    try:
+        return JSONResponse(load_sandbox_annotation(session_id))
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.put("/api/sandbox/sessions/{session_id}/annotation.json")
+def put_sandbox_annotation_api(session_id: str, body: dict[str, Any] = Body(...)) -> JSONResponse:
+    from api.sandbox_service import update_sandbox_annotation
+
+    try:
+        return JSONResponse(update_sandbox_annotation(session_id, body))
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/api/sandbox/sessions/{session_id}/recompute")
+def post_sandbox_recompute(session_id: str, body: dict[str, Any] = Body(default={})) -> JSONResponse:
+    from api.sandbox_service import recompute_sandbox_collisions
+
+    payload = body if isinstance(body, dict) else {}
+    try:
+        result = recompute_sandbox_collisions(
+            session_id,
+            alarm_min_consecutive_frames=payload.get("alarm_min_consecutive_frames"),
+            alarm_cooldown_frames=payload.get("alarm_cooldown_frames"),
+            probe_mode=payload.get("probe_mode"),
+            extension_ratio=payload.get("extension_ratio"),
+            pose_frame_interval=payload.get("pose_frame_interval"),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return JSONResponse(result)
+
+
+@router.get("/api/sandbox/sessions/{session_id}/timeline")
+def get_sandbox_timeline_api(
+    session_id: str,
+    include_events: bool = False,
+) -> JSONResponse:
+    from api.sandbox_service import get_sandbox_session, load_sandbox_timeline
+
+    try:
+        timeline = load_sandbox_timeline(session_id, include_events=bool(include_events))
+        meta = get_sandbox_session(session_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return JSONResponse(
+        {
+            "session_id": session_id,
+            "source_record_id": meta.get("source_record_id"),
+            "sandbox": True,
+            "count": len(timeline),
+            "timeline": timeline,
+        }
+    )
+
+
+@router.get("/api/sandbox/sessions/{session_id}/events")
+def get_sandbox_events_api(session_id: str) -> JSONResponse:
+    from api.sandbox_service import get_sandbox_session, load_sandbox_events
+
+    locator_record_id = ""
+    try:
+        meta = get_sandbox_session(session_id)
+        locator_record_id = str(meta.get("source_record_id") or "")
+        events = load_sandbox_events(session_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    review = {}
+    review_status = "not_started"
+    if locator_record_id:
+        locator = locate_record_by_id(locator_record_id)
+        if locator:
+            try:
+                review = load_event_review(locator)
+                events = enrich_events_with_review(events, locator)
+                review_status = resolve_event_review_status(review, event_count=len(events))
+            except RuntimeError:
+                pass
+    alarm_n = sum(1 for e in events if e.get("event_type") == "alarm")
+    collision_n = sum(1 for e in events if e.get("event_type") == "collision")
+    verified_n = sum(1 for e in events if e.get("verified_true"))
+    return JSONResponse(
+        {
+            "session_id": session_id,
+            "source_record_id": locator_record_id,
+            "sandbox": True,
+            "count": len(events),
+            "alarm_count": alarm_n,
+            "collision_count": collision_n,
+            "verified_true_count": verified_n,
+            "event_review_status": review_status,
+            "event_review_label": event_review_status_label(review_status),
+            "events": events,
+            "event_review": review,
+        }
+    )
+
+
 @router.post("/api/playback/video")
 async def upload_playback_video(file: UploadFile = File(...)) -> dict[str, str]:
     """回放用临时视频，结束后请调用 DELETE 删除。"""

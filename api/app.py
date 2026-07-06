@@ -21,7 +21,22 @@ from pose_store import migrate_v1_json_dir
 
 
 def create_app() -> FastAPI:
-    application = FastAPI(title="visual-dps-datacollect", version="0.2.0")
+    from contextlib import asynccontextmanager
+
+    from api.sandbox_service import cleanup_expired_sandbox_sessions
+
+    @asynccontextmanager
+    async def lifespan(_application: FastAPI):
+        try:
+            result = cleanup_expired_sandbox_sessions()
+            removed = int(result.get("removed_count") or 0)
+            if removed:
+                print(f"🧪 沙盒：已清理过期 session {removed} 个")
+        except Exception as exc:
+            print(f"⚠ 沙盒清理跳过: {exc}")
+        yield
+
+    application = FastAPI(title="visual-dps-datacollect", version="0.2.0", lifespan=lifespan)
     application.include_router(http_router)
     web_dir = project_root() / "web"
     if web_dir.is_dir():
@@ -87,5 +102,6 @@ def main(argv: list[str] | None = None) -> int:
             print(f"✅ ORT GPU 就绪: {ort_available_providers()}")
         except RuntimeError as exc:
             print(f"❌ {exc}")
+    print(f"🧪 沙盒目录: {(paths.upload_dir / 'sandbox').resolve()}（临时碰撞实验，不写正式库）")
     uvicorn.run("api.app:app", host=host, port=port, reload=False)
     return 0
