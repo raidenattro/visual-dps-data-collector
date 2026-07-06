@@ -379,6 +379,26 @@
           </table>
         </div>
       </div>
+      <div id="accuracy-diagnostics-wrap" class="card accuracy-diagnostics-wrap hidden">
+        <div class="accuracy-diagnostics-header">
+          <h2 class="accuracy-diagnostics-heading">漏报 / 误报诊断 · <span id="accuracy-diagnostics-title">—</span></h2>
+          <div class="accuracy-diagnostics-header-actions">
+            <label class="accuracy-diagnostics-filter-label">
+              筛选
+              <select id="accuracy-diagnostics-filter" title="诊断项类型">
+                <option value="all">全部</option>
+                <option value="fn">漏报</option>
+                <option value="fp">误报</option>
+              </select>
+            </label>
+            <button type="button" id="accuracy-diagnostics-collapse" class="link-btn accuracy-diagnostics-collapse" aria-expanded="true" title="收起诊断面板">收起</button>
+          </div>
+        </div>
+        <div id="accuracy-diagnostics-body" class="accuracy-diagnostics-body">
+          <p id="accuracy-diagnostics-hint" class="hint">选择分片「诊断」查看漏报段与误报帧，点击可跳转回放对应位置。</p>
+          <div id="accuracy-diagnostics-list" class="accuracy-diagnostics-list" role="list"></div>
+        </div>
+      </div>
     </section>
 
     <section id="panel-playback" class="panel">
@@ -665,6 +685,6 @@
   <script src="app/11-playback-controls.js?v=72"></script>
   <script src="app/12-playback-wrist-features.js?v=3"></script>
   <script src="annotate.js?v=17"></script>
-  <script src="accuracy.js?v=9"></script>
+  <script src="accuracy.js?v=12"></script>
 </body>
 </html>

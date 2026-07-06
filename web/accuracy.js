@@ -44,6 +44,100 @@ async function readApiError(res) {
 /** 最近一次评估结果（供筛选与跳转回放） */
 let lastAccuracyClips = [];
 let lastAccuracyMeta = { pose_tier: "", camera_slug: "", camera_label: "" };
+let lastEvalId = "";
+let lastEvalSource = "";
+const lastEvalClipByRecordId = new Map();
+let selectedDiagnosticsRecordId = "";
+
+function poseTierFromRecordIdForAccuracy(recordId) {
+  const rid = String(recordId || "").trim();
+  const parts = rid.split("/").filter(Boolean);
+  if (parts.length >= 3 && /^rtmpose-/i.test(parts[0])) return parts[0];
+  return lastAccuracyMeta.pose_tier || "rtmpose-m";
+}
+
+function cameraSlugFromRecordIdForAccuracy(recordId) {
+  const rid = String(recordId || "").trim();
+  const parts = rid.split("/").filter(Boolean);
+  if (parts.length >= 3) return parts[1];
+  return lastAccuracyMeta.camera_slug || "";
+}
+
+function rememberEvalResult(result) {
+  lastEvalId = String(result?.eval_id || result?.summary?.eval_id || "").trim();
+  lastEvalSource = String(result?.source || "").trim();
+  lastEvalClipByRecordId.clear();
+  const clips = Array.isArray(result?.clips) ? result.clips : [];
+  clips.forEach((clip) => {
+    const rid = String(clip?.record_id || "").trim();
+    if (rid) lastEvalClipByRecordId.set(rid, clip);
+  });
+}
+
+async function fetchEvalClipDetail(recordId) {
+  const rid = String(recordId || "").trim();
+  if (!rid) return null;
+  const cached = lastEvalClipByRecordId.get(rid);
+  if (cached?.diagnostics) return cached;
+  if (!lastEvalId) return cached || null;
+  const res = await fetch(`/api/accuracy/eval-runs/${encodeURIComponent(lastEvalId)}/clips/${encodeURIComponent(rid)}`);
+  if (!res.ok) throw new Error(await readApiError(res));
+  const clip = await res.json();
+  lastEvalClipByRecordId.set(rid, clip);
+  return clip;
+}
+
+function inferEvalSourceLabel(clip) {
+  const overlayLabel = String(clip?.diagnostics?.playback_overlay?.source_label || "").trim();
+  if (overlayLabel) return overlayLabel;
+  if (lastEvalSource === "upload") return "上传推测 · is_picking";
+  if (lastEvalSource === "local_timeline" && lastAccuracyMeta.pose_tier) {
+    return `${lastAccuracyMeta.pose_tier} · timeline 告警`;
+  }
+  const mode = getAccuracyEvalMode();
+  if (mode === "upload_evaluate") return "上传推测 · is_picking";
+  if (lastAccuracyMeta.pose_tier) return `${lastAccuracyMeta.pose_tier} · timeline 告警`;
+  return "准确率评估";
+}
+
+function enrichAccuracyPlaybackOverlay(overlay, clip) {
+  if (!overlay || typeof overlay !== "object") return overlay;
+  const counts = overlay.counts && typeof overlay.counts === "object" ? { ...overlay.counts } : {};
+  const diagCounts = clip?.diagnostics?.counts || {};
+  if (counts.alarms == null && clip?.alarm_count != null) counts.alarms = clip.alarm_count;
+  if (counts.collisions == null && clip?.collision_count != null) counts.collisions = clip.collision_count;
+  if (counts.verified == null && clip?.verified_entry_count != null) {
+    counts.verified = clip.verified_entry_count;
+  }
+  if (counts.missed_segments == null) {
+    counts.missed_segments = clip?.missed ?? diagCounts.missed_segments;
+  }
+  if (counts.false_alarms == null) {
+    counts.false_alarms = clip?.false_alarms ?? diagCounts.false_alarms;
+  }
+  return {
+    ...overlay,
+    source_label: String(overlay.source_label || inferEvalSourceLabel(clip)).trim(),
+    counts,
+  };
+}
+
+function updateAccuracyDiagnosticsCollapseBtn() {
+  const btn = acc$("#accuracy-diagnostics-collapse");
+  const wrap = acc$("#accuracy-diagnostics-wrap");
+  if (!btn || !wrap) return;
+  const collapsed = wrap.classList.contains("is-collapsed");
+  btn.textContent = collapsed ? "展开" : "收起";
+  btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  btn.title = collapsed ? "展开诊断面板" : "收起诊断面板";
+}
+
+function toggleAccuracyDiagnosticsCollapse() {
+  const wrap = acc$("#accuracy-diagnostics-wrap");
+  if (!wrap || wrap.classList.contains("hidden")) return;
+  wrap.classList.toggle("is-collapsed");
+  updateAccuracyDiagnosticsCollapseBtn();
+}
 
 function getAccuracyEvalMode() {
   return acc$("#accuracy-eval-mode")?.value || "evaluate_only";
@@ -173,10 +267,14 @@ function renderAccuracySummary(result) {
   const uploadHint = isUpload
     ? `<p class="hint accuracy-upload-hint">规则：is_picking=true 为碰撞告警，货框匹配 rule_alarm_collisions / rule_collisions（box_id 兼容）</p>`
     : "";
+  const evalId = String(result.eval_id || s.eval_id || lastEvalId || "").trim();
+  const evalHint = evalId
+    ? `<p class="hint accuracy-eval-id-hint">评估已落盘：<code>${escHtml(evalId)}</code> · 可在分片行点「诊断」查看漏报/误报并跳转回放</p>`
+    : "";
   const headingLabel = isUpload
     ? "上传推测评估"
     : `${escHtml(result.camera_label || "")} · ${escHtml(result.pose_tier || "")}`;
-  if (!s.evaluated && !recomputeBlock && !tagHint && !uploadHint) {
+  if (!s.evaluated && !recomputeBlock && !tagHint && !uploadHint && !evalHint) {
     el.classList.add("hidden");
     return;
   }
@@ -185,6 +283,7 @@ function renderAccuracySummary(result) {
     ${recomputeBlock}
     ${tagHint}
     ${uploadHint}
+    ${evalHint}
     <h2 class="accuracy-summary-heading">汇总 · ${headingLabel}</h2>
     <div class="accuracy-metrics-grid">
       <div class="accuracy-metric"><span class="accuracy-metric-label">评估分片</span><span class="accuracy-metric-value">${s.evaluated ?? 0} / ${s.clip_count ?? 0}</span></div>
@@ -233,7 +332,11 @@ function renderAccuracyRecordCell(recordId) {
 function renderAccuracyClipActions(c) {
   const rid = String(c.record_id || "").trim();
   if (!rid) return `<span class="hint">无记录</span>`;
+  const fn = Number(c.missed ?? c.diagnostics_counts?.missed_segments ?? 0);
+  const fp = Number(c.false_alarms ?? c.diagnostics_counts?.false_alarms ?? 0);
+  const diagDisabled = c.status !== "ok" || (fn <= 0 && fp <= 0);
   return `<span class="accuracy-clip-actions">
+    <button type="button" class="link-btn accuracy-open-diagnostics" data-record-id="${escAttr(rid)}" ${diagDisabled ? "disabled" : ""}>诊断</button>
     <button type="button" class="link-btn accuracy-goto-playback" data-record-id="${escAttr(rid)}" data-autoplay="0">查看</button>
     <button type="button" class="link-btn accuracy-goto-playback accuracy-goto-playback--play" data-record-id="${escAttr(rid)}" data-autoplay="1">回放</button>
   </span>`;
@@ -313,20 +416,125 @@ function renderAccuracyClips(clips, meta = lastAccuracyMeta) {
   body.innerHTML = filtered.map(renderAccuracyClipRow).join("");
 }
 
-async function gotoPlaybackFromAccuracy(recordId, autoPlay = false) {
+function renderAccuracyDiagnosticsList(clip, filter = "all") {
+  const listEl = acc$("#accuracy-diagnostics-list");
+  if (!listEl || !clip) return;
+  const diag = clip.diagnostics || {};
+  const f = String(filter || "all").trim().toLowerCase();
+  const items = [];
+  if (f === "all" || f === "fn") {
+    (diag.missed_segments || []).forEach((row) => {
+      items.push({ ...row, kind: "fn" });
+    });
+  }
+  if (f === "all" || f === "fp") {
+    (diag.false_alarms || []).forEach((row) => {
+      items.push({ ...row, kind: "fp" });
+    });
+  }
+  if (!items.length) {
+    listEl.innerHTML = `<p class="hint accuracy-diagnostics-empty">当前筛选无诊断项</p>`;
+    return;
+  }
+  items.sort((a, b) => {
+    const af = Number(a.seek_frame ?? a.frame_idx ?? a.frame_start) || 0;
+    const bf = Number(b.seek_frame ?? b.frame_idx ?? b.frame_start) || 0;
+    return af - bf || String(a.kind).localeCompare(String(b.kind));
+  });
+  listEl.innerHTML = items
+    .map((item) => {
+      const kind = item.kind === "fp" ? "fp" : "fn";
+      const seek = Number(item.seek_frame ?? item.frame_idx ?? item.frame_start) || 0;
+      const label = escHtml(item.label || (kind === "fn" ? `漏报 · 帧 ${seek}` : `误报 · 帧 ${seek}`));
+      return `<div class="accuracy-diagnostic-item accuracy-diagnostic-item--${kind}" role="listitem">
+        <span class="accuracy-diagnostic-kind">${kind === "fn" ? "漏报" : "误报"}</span>
+        <span class="accuracy-diagnostic-label">${label}</span>
+        <button type="button" class="link-btn accuracy-diagnostic-seek"
+          data-record-id="${escAttr(clip.record_id)}"
+          data-seek-frame="${seek}"
+          data-kind="${escAttr(kind)}">跳转回放</button>
+      </div>`;
+    })
+    .join("");
+}
+
+async function openAccuracyDiagnostics(recordId) {
+  const rid = String(recordId || "").trim();
+  if (!rid) return;
+  selectedDiagnosticsRecordId = rid;
+  const wrap = acc$("#accuracy-diagnostics-wrap");
+  const titleEl = acc$("#accuracy-diagnostics-title");
+  if (!wrap) return;
+  wrap.classList.remove("hidden", "is-collapsed");
+  updateAccuracyDiagnosticsCollapseBtn();
+  if (titleEl) titleEl.textContent = rid.split("/").pop() || rid;
+  setAccuracyStatus("正在加载诊断…");
+  try {
+    const clip = await fetchEvalClipDetail(rid);
+    if (!clip?.diagnostics) {
+      listElEmpty("无诊断数据（可能评估时未落盘或该分片未成功评估）");
+      return;
+    }
+    const filter = acc$("#accuracy-diagnostics-filter")?.value || "all";
+    renderAccuracyDiagnosticsList(clip, filter);
+    const fn = (clip.diagnostics.missed_segments || []).length;
+    const fp = (clip.diagnostics.false_alarms || []).length;
+    setAccuracyStatus(`✅ 诊断：漏报 ${fn} 段，误报 ${fp} 次 · 点击「跳转回放」定位到对应帧`);
+  } catch (err) {
+    setAccuracyStatus(`❌ 加载诊断失败：${escHtml(err.message)}`, true);
+  }
+
+  function listElEmpty(msg) {
+    const listEl = acc$("#accuracy-diagnostics-list");
+    if (listEl) listEl.innerHTML = `<p class="hint accuracy-diagnostics-empty">${escHtml(msg)}</p>`;
+  }
+}
+
+async function gotoPlaybackFromAccuracy(recordId, options = {}) {
+  const opts = typeof options === "boolean" ? { autoPlay: options } : options || {};
   const rid = String(recordId || "").trim();
   if (!rid) return;
   if (typeof window.navigateToPlaybackRecord !== "function") {
     setAccuracyStatus("❌ 回放模块未加载，请刷新页面后重试", true);
     return;
   }
+  const autoPlay = Boolean(opts.autoPlay);
+  const seekFrameIdx = opts.seekFrameIdx != null ? Number(opts.seekFrameIdx) : null;
+  let accuracyOverlay = opts.accuracyOverlay || null;
+  let clipForOverlay = null;
+  if (!accuracyOverlay && (seekFrameIdx != null || autoPlay)) {
+    try {
+      clipForOverlay = await fetchEvalClipDetail(rid);
+      accuracyOverlay = clipForOverlay?.diagnostics?.playback_overlay || null;
+    } catch {
+      /* 忽略，仅跳转记录 */
+    }
+  } else if (!accuracyOverlay) {
+    try {
+      clipForOverlay = await fetchEvalClipDetail(rid);
+    } catch {
+      /* 忽略 */
+    }
+  }
+  if (accuracyOverlay) {
+    if (!clipForOverlay) {
+      try {
+        clipForOverlay = await fetchEvalClipDetail(rid);
+      } catch {
+        clipForOverlay = null;
+      }
+    }
+    accuracyOverlay = enrichAccuracyPlaybackOverlay(accuracyOverlay, clipForOverlay);
+  }
   setAccuracyStatus(autoPlay ? "正在跳转并加载回放…" : "正在跳转到回放列表…");
   try {
     const found = await window.navigateToPlaybackRecord({
       recordId: rid,
-      poseTier: lastAccuracyMeta.pose_tier,
-      cameraSlug: lastAccuracyMeta.camera_slug,
-      autoPlay,
+      poseTier: opts.poseTier || poseTierFromRecordIdForAccuracy(rid),
+      cameraSlug: opts.cameraSlug || cameraSlugFromRecordIdForAccuracy(rid),
+      autoPlay: autoPlay || seekFrameIdx != null,
+      seekFrameIdx,
+      accuracyOverlay,
     });
     if (!found) {
       setAccuracyStatus(
@@ -454,6 +662,8 @@ async function runAccuracyUploadJob() {
 
     renderAccuracySummary(result);
     renderAccuracyClips(result.clips, lastAccuracyMeta);
+    rememberEvalResult(result);
+    acc$("#accuracy-diagnostics-wrap")?.classList.add("hidden");
     const s = result.summary || {};
     setAccuracyStatus(
       `✅ 上传评估完成：${s.evaluated ?? 0} 个分片，召回率 ${pct(s.recall)}，误报 ${s.false_alarms ?? 0} 次`
@@ -531,6 +741,8 @@ async function runAccuracyJob() {
 
     renderAccuracySummary(result);
     renderAccuracyClips(result.clips, lastAccuracyMeta);
+    rememberEvalResult(result);
+    acc$("#accuracy-diagnostics-wrap")?.classList.add("hidden");
     const s = result.summary || {};
     const rc = result.recompute;
     const recomputeHint = rc
@@ -547,11 +759,15 @@ async function runAccuracyJob() {
 let accuracyPanelInited = false;
 
 function initAccuracyPanel() {
-  if (accuracyPanelInited) return;
-  accuracyPanelInited = true;
-  loadAccuracyCameras();
-  void loadAccuracyTagSuggestions();
+  const firstInit = !accuracyPanelInited;
+  if (firstInit) {
+    accuracyPanelInited = true;
+    loadAccuracyCameras();
+    void loadAccuracyTagSuggestions();
+  }
   syncAccuracyCollisionUi();
+
+  if (!firstInit) return;
 
   if (typeof window.applyAccuracyCollisionConfigToForm === "function") {
     const stored =
@@ -583,11 +799,35 @@ function initAccuracyPanel() {
     renderAccuracyClips(lastAccuracyClips);
   });
   acc$("#accuracy-clips-body")?.addEventListener("click", (e) => {
+    const diagBtn = e.target.closest(".accuracy-open-diagnostics");
+    if (diagBtn?.dataset?.recordId) {
+      e.preventDefault();
+      void openAccuracyDiagnostics(diagBtn.dataset.recordId);
+      return;
+    }
     const btn = e.target.closest(".accuracy-goto-playback, .accuracy-record-link");
     if (!btn?.dataset?.recordId) return;
     e.preventDefault();
     const autoPlay = btn.dataset.autoplay === "1";
-    void gotoPlaybackFromAccuracy(btn.dataset.recordId, autoPlay);
+    void gotoPlaybackFromAccuracy(btn.dataset.recordId, { autoPlay });
+  });
+  acc$("#accuracy-diagnostics-list")?.addEventListener("click", (e) => {
+    const btn = e.target.closest(".accuracy-diagnostic-seek");
+    if (!btn?.dataset?.recordId) return;
+    e.preventDefault();
+    const seek = parseInt(btn.dataset.seekFrame, 10) || 0;
+    void gotoPlaybackFromAccuracy(btn.dataset.recordId, {
+      autoPlay: true,
+      seekFrameIdx: seek,
+    });
+  });
+  acc$("#accuracy-diagnostics-filter")?.addEventListener("change", async () => {
+    if (!selectedDiagnosticsRecordId) return;
+    const clip = await fetchEvalClipDetail(selectedDiagnosticsRecordId);
+    if (clip) renderAccuracyDiagnosticsList(clip, acc$("#accuracy-diagnostics-filter")?.value || "all");
+  });
+  acc$("#accuracy-diagnostics-collapse")?.addEventListener("click", () => {
+    toggleAccuracyDiagnosticsCollapse();
   });
   acc$("#accuracy-run")?.addEventListener("click", () => {
     void runAccuracyJob();

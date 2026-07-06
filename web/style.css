@@ -2425,3 +2425,115 @@ button.danger-btn {
 .accuracy-st-err {
   color: #f87171;
 }
+
+.accuracy-eval-id-hint {
+  margin-bottom: 0.5rem;
+}
+
+.accuracy-diagnostics-wrap {
+  margin-top: 1rem;
+}
+
+.accuracy-diagnostics-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.accuracy-diagnostics-heading {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.accuracy-diagnostics-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.accuracy-diagnostics-collapse {
+  flex-shrink: 0;
+}
+
+.accuracy-diagnostics-wrap.is-collapsed .accuracy-diagnostics-body {
+  display: none;
+}
+
+.accuracy-diagnostics-wrap.is-collapsed {
+  padding-bottom: 0.75rem;
+}
+
+.accuracy-diagnostics-filter-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.88rem;
+  color: #8b9cb3;
+}
+
+.accuracy-diagnostics-filter-label select {
+  min-width: 7rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid #3d4f66;
+  background: #1a2332;
+  color: #e7ecf3;
+}
+
+.accuracy-diagnostics-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  max-height: 320px;
+  overflow-y: auto;
+  margin-top: 0.5rem;
+}
+
+.accuracy-diagnostic-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: 6px;
+  background: #151c26;
+  border: 1px solid #2a3441;
+}
+
+.accuracy-diagnostic-item--fn {
+  border-left: 3px solid #fbbf24;
+}
+
+.accuracy-diagnostic-item--fp {
+  border-left: 3px solid #f87171;
+}
+
+.accuracy-diagnostic-kind {
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  background: #0f172a;
+}
+
+.accuracy-diagnostic-item--fn .accuracy-diagnostic-kind {
+  color: #fbbf24;
+}
+
+.accuracy-diagnostic-item--fp .accuracy-diagnostic-kind {
+  color: #f87171;
+}
+
+.accuracy-diagnostic-label {
+  flex: 1 1 12rem;
+  font-size: 0.88rem;
+  color: #cbd5e1;
+}
+
+.accuracy-diagnostics-empty {
+  margin: 0.5rem 0;
+}
