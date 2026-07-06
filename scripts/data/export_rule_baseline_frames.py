@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """导出现场规则 baseline 逐帧 JSON（28 条优质样本，内存重算，不写 timeline）。
 
+帧枚举与 ShelfPickSense infer-collision 对齐：skeleton frame_idx 的 min~max 范围、
+pose_frame_interval 跳帧、缺失帧不推进碰撞状态机；infer 尺寸与货框缩放复刻
+ShelfPickSense（event_engine/shelf_picksense_align.py）。
+
 每 clip 一个 JSON 文件，帧字段含 rule_collisions / rule_alarm_collisions；
 is_picking = 本帧是否有 rule 告警；picking_prob / predicted_box_tokens 暂空。
 
@@ -69,13 +73,13 @@ def _ensure_cv2_point_polygon_test() -> None:
 _ensure_cv2_point_polygon_test()
 
 from config_loader import parse_record_path_segments, resolve_app_paths, resolve_config_path
-from event_engine.annotation_boxes import load_scaled_boxes
+from event_engine.annotation_boxes import load_annotation_config
 from event_engine.box_identity import box_id_from_token
 from event_engine.collision_sim import (
-    filter_pose_inference_frames,
-    simulate_frame_events_from_frames,
+    simulate_frame_events_infer_collision,
     stored_pose_frame_interval,
 )
+from event_engine.shelf_picksense_align import build_collision_boxes, resolve_infer_frame_size
 from pose_store import load_all_frames, load_manifest
 
 from api.accuracy_service import resolve_annotation_for_accuracy_record
@@ -92,6 +96,7 @@ from scripts.data.analyze_wrist_feature_discrimination import (
 
 
 def _infer_size_from_frames(frames: list[dict[str, Any]], manifest: dict[str, Any]) -> tuple[int, int]:
+    """保留供其他脚本使用；baseline 导出已改用 shelf_picksense_align.resolve_infer_frame_size。"""
     infer_w = int(manifest.get("infer_width") or 0)
     infer_h = int(manifest.get("infer_height") or 0)
     if infer_w > 0 and infer_h > 0:
@@ -142,6 +147,7 @@ def export_record_frames(
     pose_frame_interval: int,
     alarm_min: int,
     alarm_cooldown: int,
+    infer_size_record_dir: Path | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     paths = resolve_app_paths()
     locator = locate_record_by_id(record_id)
@@ -157,31 +163,30 @@ def export_record_frames(
     if not ann_path or not ann_path.is_file():
         raise FileNotFoundError(f"无标注 JSON: {record_id}")
 
-    infer_w, infer_h = _infer_size_from_frames(all_frames, manifest)
-    boxes = load_scaled_boxes(ann_path, infer_w, infer_h)
+    ann_config = load_annotation_config(ann_path)
+    size_dir = infer_size_record_dir if infer_size_record_dir is not None else locator.path
+    infer_w, infer_h = resolve_infer_frame_size(size_dir, ann_config)
+    boxes = build_collision_boxes(ann_config, infer_w=infer_w, infer_h=infer_h)
     if not boxes:
         raise ValueError(f"标注无有效货框: {record_id}")
 
     token_lookup = build_export_token_lookup(boxes)
     stored_interval = stored_pose_frame_interval(manifest)
-    frames = filter_pose_inference_frames(
-        all_frames,
-        pose_frame_interval,
-        stored_interval=stored_interval,
-    )
 
     fps = float(manifest.get("fps") or 15.0)
     if fps <= 0:
         fps = 15.0
 
-    events = simulate_frame_events_from_frames(
-        frames,
+    events, skel_stats = simulate_frame_events_infer_collision(
+        all_frames,
         boxes,
+        pose_frame_interval=pose_frame_interval,
         alarm_min_consecutive_frames=alarm_min,
         alarm_cooldown_frames=alarm_cooldown,
         video_fps=fps,
-        probe_mode="wrist",
     )
+    if skel_stats["skeleton_frame_count"] <= 0:
+        raise ValueError(f"无骨架帧（skeleton 无 person）: {record_id}")
 
     rows: list[dict[str, Any]] = []
     picking_frames = 0
@@ -206,13 +211,41 @@ def export_record_frames(
         "record_id": record_id,
         "clip_name": locator.path.name,
         "camera_slug": slug,
-        "frame_count_all": len(all_frames),
+        "frame_count_timeline": len(all_frames),
+        "frame_count_skeleton": skel_stats["skeleton_frame_count"],
+        "frame_range_min": skel_stats["min_frame"],
+        "frame_range_max": skel_stats["max_frame"],
         "frame_count_exported": len(rows),
         "stored_pose_frame_interval": stored_interval,
         "picking_frame_count": picking_frames,
         "annotation_file": ann_path.name,
+        "infer_width": infer_w,
+        "infer_height": infer_h,
+        "infer_size_record_dir": str(size_dir.resolve()),
     }
     return rows, meta
+
+
+def _load_infer_size_dir_map(manifest_path: Path, train_root: Path) -> dict[str, Path]:
+    """从 data28 manifest 构建 source_record_id -> Train/record_XXX 映射。"""
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    records = data.get("records")
+    if not isinstance(records, list):
+        raise ValueError(f"manifest 无 records: {manifest_path}")
+    mapping: dict[str, Path] = {}
+    for row in records:
+        if not isinstance(row, dict):
+            continue
+        record_id = str(row.get("source_record_id") or "").strip()
+        folder = str(row.get("folder") or "").strip()
+        if not record_id or not folder:
+            continue
+        record_dir = (train_root / folder).resolve()
+        if record_dir.is_dir():
+            mapping[record_id] = record_dir
+    if not mapping:
+        raise ValueError(f"manifest 未解析到有效 record 目录: {manifest_path}")
+    return mapping
 
 
 def main() -> int:
@@ -226,6 +259,22 @@ def main() -> int:
     parser.add_argument(
         "--out-dir",
         default=str(ROOT / "localdata" / "export" / "rule-baseline-prod"),
+    )
+    parser.add_argument(
+        "--infer-size-record-dir",
+        default="",
+        help="infer 尺寸解析用的单条记录目录（全部记录共用；与 --infer-size-record-root 互斥）",
+    )
+    parser.add_argument(
+        "--infer-size-record-root",
+        default="",
+        help="infer 尺寸解析用的 Train 根目录（配合 --data28-manifest 按 record 映射；"
+        "与 ShelfPickSense data28-merged 对比时使用）",
+    )
+    parser.add_argument(
+        "--data28-manifest",
+        default=str(Path(r"D:\work\workspace\git-repo\ShelfPickSense\data\data28\manifest.json")),
+        help="data28 manifest.json（含 source_record_id 与 folder 映射）",
     )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
@@ -248,7 +297,7 @@ def main() -> int:
     params = {
         "baseline_type": "rule_production_config",
         "pose_tier": args.tier,
-        "probe_mode": "wrist",
+        "collision_engine": "box_human_det_infer",
         "pose_frame_interval": int(args.pose_frame_interval),
         "alarm_min_consecutive_frames": int(args.alarm_min),
         "alarm_cooldown_frames": int(args.cooldown),
@@ -269,13 +318,30 @@ def main() -> int:
     exported: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
 
+    infer_size_dir = Path(args.infer_size_record_dir).resolve() if args.infer_size_record_dir else None
+    infer_size_dir_map: dict[str, Path] | None = None
+    if args.infer_size_record_root:
+        if infer_size_dir is not None:
+            print("错误: --infer-size-record-dir 与 --infer-size-record-root 不能同时使用", file=sys.stderr)
+            return 1
+        train_root = Path(args.infer_size_record_root).resolve()
+        manifest_path = Path(args.data28_manifest).resolve()
+        infer_size_dir_map = _load_infer_size_dir_map(manifest_path, train_root)
+        print(f"infer 尺寸映射: {len(infer_size_dir_map)} 条 ← {train_root}")
+
     for rid in record_ids:
         try:
+            per_infer_dir = infer_size_dir
+            if infer_size_dir_map is not None:
+                per_infer_dir = infer_size_dir_map.get(rid)
+                if per_infer_dir is None:
+                    raise FileNotFoundError(f"manifest 中无 infer 尺寸目录: {rid}")
             rows, meta = export_record_frames(
                 rid,
                 pose_frame_interval=args.pose_frame_interval,
                 alarm_min=args.alarm_min,
                 alarm_cooldown=args.cooldown,
+                infer_size_record_dir=per_infer_dir,
             )
             clip_name = meta["clip_name"]
             out_path = out_dir / f"{clip_name}.json"
