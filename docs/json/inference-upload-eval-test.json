@@ -1,0 +1,2082 @@
+{
+  "source": "upload",
+  "upload_label": "localdata\\export\\rule-baseline-prod-test",
+  "prediction_source": "rule_alarm",
+  "summary": {
+    "clip_count": 28,
+    "evaluated": 28,
+    "skipped": 0,
+    "errors": 0,
+    "excluded": 0,
+    "tag_filtered": 0,
+    "gt_segments": 161,
+    "detected": 147,
+    "missed": 14,
+    "false_alarms": 423,
+    "alarm_count": 1924,
+    "recall": 0.913,
+    "miss_rate": 0.087,
+    "precision_proxy": 0.2579
+  },
+  "clips": [
+    {
+      "upload_file": "clip_0002_start_00-00-53_rtmpose_m.json",
+      "record_id": "rtmpose-m/2-3-1/clip_0002_start_00-00-53_rtmpose_m",
+      "review_key": "2-3-1/clip_0002_start_00-00-53.080_end_00-01-19__00-00-53__full",
+      "clip": "clip_0002_start_00-00-53_rtmpose_m",
+      "camera_slug": "2-3-1",
+      "source_video": "",
+      "status": "ok",
+      "prediction_source": "rule_alarm",
+      "gt_segments": 1,
+      "detected": 1,
+      "missed": 0,
+      "false_alarms": 4,
+      "recall": 1.0,
+      "miss_rate": 0.0,
+      "alarm_count": 26,
+      "verified_entry_count": 45,
+      "precision_proxy": 0.2,
+      "missed_segments": [],
+      "false_alarm_samples": [
+        {
+          "frame_idx": 193,
+          "box_token": "Box_3041"
+        },
+        {
+          "frame_idx": 209,
+          "box_token": "Box_3037"
+        },
+        {
+          "frame_idx": 211,
+          "box_token": "Box_3037"
+        },
+        {
+          "frame_idx": 213,
+          "box_token": "Box_3037"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0002_start_00-24-56_rtmpose_m.json",
+      "record_id": "rtmpose-m/2-4-1/clip_0002_start_00-24-56_rtmpose_m",
+      "review_key": "2-4-1/clip_0002_start_00-24-56.600_end_00-51-03__00-24-56__full",
+      "clip": "clip_0002_start_00-24-56_rtmpose_m",
+      "camera_slug": "2-4-1",
+      "source_video": "",
+      "status": "ok",
+      "prediction_source": "rule_alarm",
+      "gt_segments": 19,
+      "detected": 19,
+      "missed": 0,
+      "false_alarms": 61,
+      "recall": 1.0,
+      "miss_rate": 0.0,
+      "alarm_count": 216,
+      "verified_entry_count": 303,
+      "precision_proxy": 0.2375,
+      "missed_segments": [],
+      "false_alarm_samples": [
+        {
+          "frame_idx": 10517,
+          "box_token": "Box_3049"
+        },
+        {
+          "frame_idx": 10525,
+          "box_token": "Box_3053"
+        },
+        {
+          "frame_idx": 10541,
+          "box_token": "Box_3053"
+        },
+        {
+          "frame_idx": 10567,
+          "box_token": "Box_3053"
+        },
+        {
+          "frame_idx": 10585,
+          "box_token": "Box_3050"
+        },
+        {
+          "frame_idx": 10597,
+          "box_token": "Box_3057"
+        },
+        {
+          "frame_idx": 10611,
+          "box_token": "Box_3058"
+        },
+        {
+          "frame_idx": 10613,
+          "box_token": "Box_3058"
+        },
+        {
+          "frame_idx": 10615,
+          "box_token": "Box_3058"
+        },
+        {
+          "frame_idx": 10617,
+          "box_token": "Box_3058"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0002_start_00-30-28_rtmpose_m.json",
+      "record_id": "rtmpose-m/1-2-1/clip_0002_start_00-30-28_rtmpose_m",
+      "review_key": "1-2-1/clip_0002_start_00-30-28.067_end_00-37-12__00-30-28__full",
+      "clip": "clip_0002_start_00-30-28_rtmpose_m",
+      "camera_slug": "1-2-1",
+      "source_video": "clip_0002_start_00-30-28.067_end_00-37-12.067.mp4",
+      "status": "ok",
+      "prediction_source": "rule_alarm",
+      "gt_segments": 1,
+      "detected": 1,
+      "missed": 0,
+      "false_alarms": 1,
+      "recall": 1.0,
+      "miss_rate": 0.0,
+      "alarm_count": 43,
+      "verified_entry_count": 86,
+      "precision_proxy": 0.5,
+      "missed_segments": [],
+      "false_alarm_samples": [
+        {
+          "frame_idx": 4285,
+          "box_token": "Box_1025"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0003_start_00-02-43_rtmpose_m.json",
+      "record_id": "rtmpose-m/2-2-2/clip_0003_start_00-02-43_rtmpose_m",
+      "review_key": "2-2-2/clip_0003_start_00-02-43.000_end_00-02-59__00-02-43__full",
+      "clip": "clip_0003_start_00-02-43_rtmpose_m",
+      "camera_slug": "2-2-2",
+      "source_video": "",
+      "status": "ok",
+      "prediction_source": "rule_alarm",
+      "gt_segments": 1,
+      "detected": 1,
+      "missed": 0,
+      "false_alarms": 18,
+      "recall": 1.0,
+      "miss_rate": 0.0,
+      "alarm_count": 32,
+      "verified_entry_count": 33,
+      "precision_proxy": 0.0526,
+      "missed_segments": [],
+      "false_alarm_samples": [
+        {
+          "frame_idx": 139,
+          "box_token": "Box_4016"
+        },
+        {
+          "frame_idx": 141,
+          "box_token": "Box_4016"
+        },
+        {
+          "frame_idx": 143,
+          "box_token": "Box_4016"
+        },
+        {
+          "frame_idx": 145,
+          "box_token": "Box_4016"
+        },
+        {
+          "frame_idx": 151,
+          "box_token": "Box_4017"
+        },
+        {
+          "frame_idx": 153,
+          "box_token": "Box_4017"
+        },
+        {
+          "frame_idx": 155,
+          "box_token": "Box_4017"
+        },
+        {
+          "frame_idx": 157,
+          "box_token": "Box_4017"
+        },
+        {
+          "frame_idx": 159,
+          "box_token": "Box_4017"
+        },
+        {
+          "frame_idx": 161,
+          "box_token": "Box_4017"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0003_start_00-39-45_rtmpose_m.json",
+      "record_id": "rtmpose-m/2-3-1/clip_0003_start_00-39-45_rtmpose_m",
+      "review_key": "2-3-1/clip_0003_start_00-39-45.533_end_00-45-11__00-39-45__full",
+      "clip": "clip_0003_start_00-39-45_rtmpose_m",
+      "camera_slug": "2-3-1",
+      "source_video": "",
+      "status": "ok",
+      "prediction_source": "rule_alarm",
+      "gt_segments": 1,
+      "detected": 0,
+      "missed": 1,
+      "false_alarms": 20,
+      "recall": 0.0,
+      "miss_rate": 1.0,
+      "alarm_count": 20,
+      "verified_entry_count": 34,
+      "precision_proxy": 0.0,
+      "missed_segments": [
+        {
+          "gt_tokens": [
+            "Box_3040"
+          ],
+          "frame_start": 1708,
+          "frame_end": 1741,
+          "entry_count": 34,
+          "detected": false
+        }
+      ],
+      "false_alarm_samples": [
+        {
+          "frame_idx": 1705,
+          "box_token": "Box_3043"
+        },
+        {
+          "frame_idx": 1711,
+          "box_token": "Box_3044"
+        },
+        {
+          "frame_idx": 1713,
+          "box_token": "Box_3044"
+        },
+        {
+          "frame_idx": 1715,
+          "box_token": "Box_3044"
+        },
+        {
+          "frame_idx": 1717,
+          "box_token": "Box_3044"
+        },
+        {
+          "frame_idx": 1719,
+          "box_token": "Box_3044"
+        },
+        {
+          "frame_idx": 1721,
+          "box_token": "Box_3044"
+        },
+        {
+          "frame_idx": 1723,
+          "box_token": "Box_3044"
+        },
+        {
+          "frame_idx": 1725,
+          "box_token": "Box_3044"
+        },
+        {
+          "frame_idx": 1727,
+          "box_token": "Box_3044"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0005_start_00-07-59_rtmpose_m.json",
+      "record_id": "rtmpose-m/2-6-1/clip_0005_start_00-07-59_rtmpose_m",
+      "review_key": "2-6-1/clip_0005_start_00-07-59.133_end_00-14-01__00-07-59__full",
+      "clip": "clip_0005_start_00-07-59_rtmpose_m",
+      "camera_slug": "2-6-1",
+      "source_video": "",
+      "status": "ok",
+      "prediction_source": "rule_alarm",
+      "gt_segments": 10,
+      "detected": 9,
+      "missed": 1,
+      "false_alarms": 6,
+      "recall": 0.9,
+      "miss_rate": 0.1,
+      "alarm_count": 92,
+      "verified_entry_count": 170,
+      "precision_proxy": 0.6,
+      "missed_segments": [
+        {
+          "gt_tokens": [
+            "Box_3093"
+          ],
+          "frame_start": 3281,
+          "frame_end": 3299,
+          "entry_count": 15,
+          "detected": false
+        }
+      ],
+      "false_alarm_samples": [
+        {
+          "frame_idx": 3129,
+          "box_token": "Box_3082"
+        },
+        {
+          "frame_idx": 3177,
+          "box_token": "Box_3087"
+        },
+        {
+          "frame_idx": 3269,
+          "box_token": "Box_3090"
+        },
+        {
+          "frame_idx": 3301,
+          "box_token": "Box_3093"
+        },
+        {
+          "frame_idx": 3359,
+          "box_token": "Box_3091"
+        },
+        {
+          "frame_idx": 3391,
+          "box_token": "Box_3092"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0006_start_00-14-11_rtmpose_m.json",
+      "record_id": "rtmpose-m/2-6-1/clip_0006_start_00-14-11_rtmpose_m",
+      "review_key": "2-6-1/clip_0006_start_00-14-11.533_end_00-21-38__00-14-11__full",
+      "clip": "clip_0006_start_00-14-11_rtmpose_m",
+      "camera_slug": "2-6-1",
+      "source_video": "",
+      "status": "ok",
+      "prediction_source": "rule_alarm",
+      "gt_segments": 7,
+      "detected": 7,
+      "missed": 0,
+      "false_alarms": 7,
+      "recall": 1.0,
+      "miss_rate": 0.0,
+      "alarm_count": 80,
+      "verified_entry_count": 163,
+      "precision_proxy": 0.5,
+      "missed_segments": [],
+      "false_alarm_samples": [
+        {
+          "frame_idx": 543,
+          "box_token": "Box_3083"
+        },
+        {
+          "frame_idx": 637,
+          "box_token": "Box_3093"
+        },
+        {
+          "frame_idx": 639,
+          "box_token": "Box_3093"
+        },
+        {
+          "frame_idx": 731,
+          "box_token": "Box_3092"
+        },
+        {
+          "frame_idx": 957,
+          "box_token": "Box_3089"
+        },
+        {
+          "frame_idx": 959,
+          "box_token": "Box_3089"
+        },
+        {
+          "frame_idx": 961,
+          "box_token": "Box_3089"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0006_start_00-41-26_rtmpose_m.json",
+      "record_id": "rtmpose-m/2-2-2/clip_0006_start_00-41-26_rtmpose_m",
+      "review_key": "2-2-2/clip_0006_start_00-41-26.200_end_00-42-19__00-41-26__full",
+      "clip": "clip_0006_start_00-41-26_rtmpose_m",
+      "camera_slug": "2-2-2",
+      "source_video": "",
+      "status": "ok",
+      "prediction_source": "rule_alarm",
+      "gt_segments": 8,
+      "detected": 7,
+      "missed": 1,
+      "false_alarms": 11,
+      "recall": 0.875,
+      "miss_rate": 0.125,
+      "alarm_count": 92,
+      "verified_entry_count": 199,
+      "precision_proxy": 0.3889,
+      "missed_segments": [
+        {
+          "gt_tokens": [
+            "Box_3022"
+          ],
+          "frame_start": 553,
+          "frame_end": 556,
+          "entry_count": 4,
+          "detected": false
+        }
+      ],
+      "false_alarm_samples": [
+        {
+          "frame_idx": 457,
+          "box_token": "Box_3018"
+        },
+        {
+          "frame_idx": 459,
+          "box_token": "Box_3018"
+        },
+        {
+          "frame_idx": 563,
+          "box_token": "Box_3032"
+        },
+        {
+          "frame_idx": 565,
+          "box_token": "Box_3032"
+        },
+        {
+          "frame_idx": 621,
+          "box_token": "Box_3030"
+        },
+        {
+          "frame_idx": 623,
+          "box_token": "Box_3030"
+        },
+        {
+          "frame_idx": 625,
+          "box_token": "Box_3030"
+        },
+        {
+          "frame_idx": 627,
+          "box_token": "Box_3030"
+        },
+        {
+          "frame_idx": 629,
+          "box_token": "Box_3030"
+        },
+        {
+          "frame_idx": 631,
+          "box_token": "Box_3030"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0007_start_00-22-47_rtmpose_m.json",
+      "record_id": "rtmpose-m/2-6-1/clip_0007_start_00-22-47_rtmpose_m",
+      "review_key": "2-6-1/clip_0007_start_00-22-47.000_end_00-23-20__00-22-47__full",
+      "clip": "clip_0007_start_00-22-47_rtmpose_m",
+      "camera_slug": "2-6-1",
+      "source_video": "",
+      "status": "ok",
+      "prediction_source": "rule_alarm",
+      "gt_segments": 1,
+      "detected": 1,
+      "missed": 0,
+      "false_alarms": 0,
+      "recall": 1.0,
+      "miss_rate": 0.0,
+      "alarm_count": 8,
+      "verified_entry_count": 19,
+      "precision_proxy": 1.0,
+      "missed_segments": [],
+      "false_alarm_samples": []
+    },
+    {
+      "upload_file": "clip_0008_start_00-30-49_rtmpose_m.json",
+      "record_id": "rtmpose-m/2-5-1/clip_0008_start_00-30-49_rtmpose_m",
+      "review_key": "2-5-1/clip_0008_start_00-30-49.133_end_00-37-53__00-30-49__full",
+      "clip": "clip_0008_start_00-30-49_rtmpose_m",
+      "camera_slug": "2-5-1",
+      "source_video": "",
+      "status": "ok",
+      "prediction_source": "rule_alarm",
+      "gt_segments": 12,
+      "detected": 12,
+      "missed": 0,
+      "false_alarms": 24,
+      "recall": 1.0,
+      "miss_rate": 0.0,
+      "alarm_count": 163,
+      "verified_entry_count": 226,
+      "precision_proxy": 0.3333,
+      "missed_segments": [],
+      "false_alarm_samples": [
+        {
+          "frame_idx": 3385,
+          "box_token": "Box_3069"
+        },
+        {
+          "frame_idx": 3387,
+          "box_token": "Box_3069"
+        },
+        {
+          "frame_idx": 3389,
+          "box_token": "Box_3069"
+        },
+        {
+          "frame_idx": 5325,
+          "box_token": "Box_3066"
+        },
+        {
+          "frame_idx": 5341,
+          "box_token": "Box_3066"
+        },
+        {
+          "frame_idx": 5353,
+          "box_token": "Box_3070"
+        },
+        {
+          "frame_idx": 5355,
+          "box_token": "Box_3070"
+        },
+        {
+          "frame_idx": 5357,
+          "box_token": "Box_3070"
+        },
+        {
+          "frame_idx": 5469,
+          "box_token": "Box_3079"
+        },
+        {
+          "frame_idx": 5487,
+          "box_token": "Box_3079"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0009_start_00-17-17_rtmpose_m.json",
+      "record_id": "rtmpose-m/2-2-2/clip_0009_start_00-17-17_rtmpose_m",
+      "review_key": "2-2-2/clip_0009_start_00-17-17.000_end_00-17-37__00-17-17__full",
+      "clip": "clip_0009_start_00-17-17_rtmpose_m",
+      "camera_slug": "2-2-2",
+      "source_video": "",
+      "status": "ok",
+      "prediction_source": "rule_alarm",
+      "gt_segments": 7,
+      "detected": 7,
+      "missed": 0,
+      "false_alarms": 2,
+      "recall": 1.0,
+      "miss_rate": 0.0,
+      "alarm_count": 77,
+      "verified_entry_count": 183,
+      "precision_proxy": 0.7778,
+      "missed_segments": [],
+      "false_alarm_samples": [
+        {
+          "frame_idx": 13,
+          "box_token": "Box_4014"
+        },
+        {
+          "frame_idx": 105,
+          "box_token": "Box_4018"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0009_start_00-37-59_rtmpose_m.json",
+      "record_id": "rtmpose-m/2-5-1/clip_0009_start_00-37-59_rtmpose_m",
+      "review_key": "2-5-1/clip_0009_start_00-37-59.667_end_00-55-10__00-37-59__full",
+      "clip": "clip_0009_start_00-37-59_rtmpose_m",
+      "camera_slug": "2-5-1",
+      "source_video": "",
+      "status": "ok",
+      "prediction_source": "rule_alarm",
+      "gt_segments": 5,
+      "detected": 4,
+      "missed": 1,
+      "false_alarms": 71,
+      "recall": 0.8,
+      "miss_rate": 0.2,
+      "alarm_count": 100,
+      "verified_entry_count": 54,
+      "precision_proxy": 0.0533,
+      "missed_segments": [
+        {
+          "gt_tokens": [
+            "Box_3079"
+          ],
+          "frame_start": 111,
+          "frame_end": 111,
+          "entry_count": 1,
+          "detected": false
+        }
+      ],
+      "false_alarm_samples": [
+        {
+          "frame_idx": 63,
+          "box_token": "Box_3075"
+        },
+        {
+          "frame_idx": 91,
+          "box_token": "Box_3079"
+        },
+        {
+          "frame_idx": 93,
+          "box_token": "Box_3079"
+        },
+        {
+          "frame_idx": 155,
+          "box_token": "Box_3076"
+        },
+        {
+          "frame_idx": 171,
+          "box_token": "Box_3076"
+        },
+        {
+          "frame_idx": 5633,
+          "box_token": "Box_4044"
+        },
+        {
+          "frame_idx": 5635,
+          "box_token": "Box_4044"
+        },
+        {
+          "frame_idx": 5637,
+          "box_token": "Box_4044"
+        },
+        {
+          "frame_idx": 5639,
+          "box_token": "Box_4044"
+        },
+        {
+          "frame_idx": 5641,
+          "box_token": "Box_4044"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0010_start_00-18-36_rtmpose_m.json",
+      "record_id": "rtmpose-m/2-3-1/clip_0010_start_00-18-36_rtmpose_m",
+      "review_key": "2-3-1/clip_0010_start_00-18-36.467_end_00-19-24__00-18-36__full",
+      "clip": "clip_0010_start_00-18-36_rtmpose_m",
+      "camera_slug": "2-3-1",
+      "source_video": "",
+      "status": "ok",
+      "prediction_source": "rule_alarm",
+      "gt_segments": 5,
+      "detected": 4,
+      "missed": 1,
+      "false_alarms": 5,
+      "recall": 0.8,
+      "miss_rate": 0.2,
+      "alarm_count": 36,
+      "verified_entry_count": 54,
+      "precision_proxy": 0.4444,
+      "missed_segments": [
+        {
+          "gt_tokens": [
+            "Box_4025"
+          ],
+          "frame_start": 633,
+          "frame_end": 646,
+          "entry_count": 4,
+          "detected": false
+        }
+      ],
+      "false_alarm_samples": [
+        {
+          "frame_idx": 599,
+          "box_token": "Box_4022"
+        },
+        {
+          "frame_idx": 609,
+          "box_token": "Box_4022"
+        },
+        {
+          "frame_idx": 625,
+          "box_token": "Box_4025"
+        },
+        {
+          "frame_idx": 659,
+          "box_token": "Box_4023"
+        },
+        {
+          "frame_idx": 679,
+          "box_token": "Box_4023"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0011_start_00-20-06_rtmpose_m.json",
+      "record_id": "rtmpose-m/2-3-1/clip_0011_start_00-20-06_rtmpose_m",
+      "review_key": "2-3-1/clip_0011_start_00-20-06.733_end_00-30-43__00-20-06__full",
+      "clip": "clip_0011_start_00-20-06_rtmpose_m",
+      "camera_slug": "2-3-1",
+      "source_video": "clip_0011_start_00-20-06.733_end_00-30-43.267.mp4",
+      "status": "ok",
+      "prediction_source": "rule_alarm",
+      "gt_segments": 1,
+      "detected": 1,
+      "missed": 0,
+      "false_alarms": 6,
+      "recall": 1.0,
+      "miss_rate": 0.0,
+      "alarm_count": 18,
+      "verified_entry_count": 18,
+      "precision_proxy": 0.1429,
+      "missed_segments": [],
+      "false_alarm_samples": [
+        {
+          "frame_idx": 5,
+          "box_token": "Box_4026"
+        },
+        {
+          "frame_idx": 7,
+          "box_token": "Box_4026"
+        },
+        {
+          "frame_idx": 79,
+          "box_token": "Box_4019"
+        },
+        {
+          "frame_idx": 103,
+          "box_token": "Box_4025"
+        },
+        {
+          "frame_idx": 1463,
+          "box_token": "Box_4027"
+        },
+        {
+          "frame_idx": 4047,
+          "box_token": "Box_3046"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0011_start_00-40-16_rtmpose_m.json",
+      "record_id": "rtmpose-m/2-6-1/clip_0011_start_00-40-16_rtmpose_m",
+      "review_key": "2-6-1/clip_0011_start_00-40-16.500_end_00-41-47__00-40-16__full",
+      "clip": "clip_0011_start_00-40-16_rtmpose_m",
+      "camera_slug": "2-6-1",
+      "source_video": "clip_0011_start_00-40-16.500_end_00-41-47.000.mp4",
+      "status": "ok",
+      "prediction_source": "rule_alarm",
+      "gt_segments": 2,
+      "detected": 2,
+      "missed": 0,
+      "false_alarms": 2,
+      "recall": 1.0,
+      "miss_rate": 0.0,
+      "alarm_count": 36,
+      "verified_entry_count": 67,
+      "precision_proxy": 0.5,
+      "missed_segments": [],
+      "false_alarm_samples": [
+        {
+          "frame_idx": 1781,
+          "box_token": "Box_3086"
+        },
+        {
+          "frame_idx": 1789,
+          "box_token": "Box_3093"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0013_start_00-11-22_rtmpose_m.json",
+      "record_id": "rtmpose-m/1-1-1/clip_0013_start_00-11-22_rtmpose_m",
+      "review_key": "1-1-1/clip_0013_start_00-11-22.089_end_00-21-28__00-11-22__full",
+      "clip": "clip_0013_start_00-11-22_rtmpose_m",
+      "camera_slug": "1-1-1",
+      "source_video": "clip_0013_start_00-11-22.089_end_00-21-28.949.mp4",
+      "status": "ok",
+      "prediction_source": "rule_alarm",
+      "gt_segments": 54,
+      "detected": 47,
+      "missed": 7,
+      "false_alarms": 26,
+      "recall": 0.8703703703703703,
+      "miss_rate": 0.12962962962962962,
+      "alarm_count": 445,
+      "verified_entry_count": 1051,
+      "precision_proxy": 0.6438,
+      "missed_segments": [
+        {
+          "gt_tokens": [
+            "Box_1006"
+          ],
+          "frame_start": 970,
+          "frame_end": 970,
+          "entry_count": 1,
+          "detected": false
+        },
+        {
+          "gt_tokens": [
+            "Box_1012"
+          ],
+          "frame_start": 1648,
+          "frame_end": 1648,
+          "entry_count": 1,
+          "detected": false
+        },
+        {
+          "gt_tokens": [
+            "Box_2002"
+          ],
+          "frame_start": 3982,
+          "frame_end": 3982,
+          "entry_count": 1,
+          "detected": false
+        },
+        {
+          "gt_tokens": [
+            "Box_2006"
+          ],
+          "frame_start": 3983,
+          "frame_end": 3983,
+          "entry_count": 1,
+          "detected": false
+        },
+        {
+          "gt_tokens": [
+            "Box_2005"
+          ],
+          "frame_start": 3998,
+          "frame_end": 3998,
+          "entry_count": 1,
+          "detected": false
+        },
+        {
+          "gt_tokens": [
+            "Box_2009"
+          ],
+          "frame_start": 4027,
+          "frame_end": 4027,
+          "entry_count": 1,
+          "detected": false
+        },
+        {
+          "gt_tokens": [
+            "Box_2013"
+          ],
+          "frame_start": 4780,
+          "frame_end": 4780,
+          "entry_count": 1,
+          "detected": false
+        }
+      ],
+      "false_alarm_samples": [
+        {
+          "frame_idx": 815,
+          "box_token": "Box_1009"
+        },
+        {
+          "frame_idx": 1005,
+          "box_token": "Box_1007"
+        },
+        {
+          "frame_idx": 1007,
+          "box_token": "Box_1007"
+        },
+        {
+          "frame_idx": 1139,
+          "box_token": "Box_1015"
+        },
+        {
+          "frame_idx": 1141,
+          "box_token": "Box_1015"
+        },
+        {
+          "frame_idx": 1685,
+          "box_token": "Box_2013"
+        },
+        {
+          "frame_idx": 1883,
+          "box_token": "Box_1002"
+        },
+        {
+          "frame_idx": 1891,
+          "box_token": "Box_1005"
+        },
+        {
+          "frame_idx": 3947,
+          "box_token": "Box_2001"
+        },
+        {
+          "frame_idx": 3975,
+          "box_token": "Box_2005"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0013_start_00-29-53_rtmpose_m.json",
+      "record_id": "rtmpose-m/2-2-2/clip_0013_start_00-29-53_rtmpose_m",
+      "review_key": "2-2-2/clip_0013_start_00-29-53.320_end_00-31-23__00-29-53__full",
+      "clip": "clip_0013_start_00-29-53_rtmpose_m",
+      "camera_slug": "2-2-2",
+      "source_video": "",
+      "status": "ok",
+      "prediction_source": "rule_alarm",
+      "gt_segments": 3,
+      "detected": 3,
+      "missed": 0,
+      "false_alarms": 16,
+      "recall": 1.0,
+      "miss_rate": 0.0,
+      "alarm_count": 50,
+      "verified_entry_count": 83,
+      "precision_proxy": 0.1579,
+      "missed_segments": [],
+      "false_alarm_samples": [
+        {
+          "frame_idx": 2055,
+          "box_token": "Box_4016"
+        },
+        {
+          "frame_idx": 2093,
+          "box_token": "Box_4013"
+        },
+        {
+          "frame_idx": 2095,
+          "box_token": "Box_4013"
+        },
+        {
+          "frame_idx": 2101,
+          "box_token": "Box_4010"
+        },
+        {
+          "frame_idx": 2103,
+          "box_token": "Box_4010"
+        },
+        {
+          "frame_idx": 2105,
+          "box_token": "Box_4010"
+        },
+        {
+          "frame_idx": 2137,
+          "box_token": "Box_4018"
+        },
+        {
+          "frame_idx": 2139,
+          "box_token": "Box_4018"
+        },
+        {
+          "frame_idx": 2141,
+          "box_token": "Box_4018"
+        },
+        {
+          "frame_idx": 2145,
+          "box_token": "Box_4010"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0013_start_00-42-48_rtmpose_m.json",
+      "record_id": "rtmpose-m/2-7-2/clip_0013_start_00-42-48_rtmpose_m",
+      "review_key": "2-7-2/clip_0013_start_00-42-48.000_end_00-43-06__00-42-48__full",
+      "clip": "clip_0013_start_00-42-48_rtmpose_m",
+      "camera_slug": "2-7-2",
+      "source_video": "",
+      "status": "ok",
+      "prediction_source": "rule_alarm",
+      "gt_segments": 2,
+      "detected": 2,
+      "missed": 0,
+      "false_alarms": 14,
+      "recall": 1.0,
+      "miss_rate": 0.0,
+      "alarm_count": 16,
+      "verified_entry_count": 17,
+      "precision_proxy": 0.125,
+      "missed_segments": [],
+      "false_alarm_samples": [
+        {
+          "frame_idx": 117,
+          "box_token": "Box_3097"
+        },
+        {
+          "frame_idx": 125,
+          "box_token": "Box_3097"
+        },
+        {
+          "frame_idx": 127,
+          "box_token": "Box_3097"
+        },
+        {
+          "frame_idx": 129,
+          "box_token": "Box_3097"
+        },
+        {
+          "frame_idx": 143,
+          "box_token": "Box_3107"
+        },
+        {
+          "frame_idx": 145,
+          "box_token": "Box_3107"
+        },
+        {
+          "frame_idx": 147,
+          "box_token": "Box_3107"
+        },
+        {
+          "frame_idx": 153,
+          "box_token": "Box_3105"
+        },
+        {
+          "frame_idx": 155,
+          "box_token": "Box_3105"
+        },
+        {
+          "frame_idx": 157,
+          "box_token": "Box_3105"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0014_start_00-31-27_rtmpose_m.json",
+      "record_id": "rtmpose-m/2-2-2/clip_0014_start_00-31-27_rtmpose_m",
+      "review_key": "2-2-2/clip_0014_start_00-31-27.320_end_00-31-45__00-31-27__full",
+      "clip": "clip_0014_start_00-31-27_rtmpose_m",
+      "camera_slug": "2-2-2",
+      "source_video": "",
+      "status": "ok",
+      "prediction_source": "rule_alarm",
+      "gt_segments": 2,
+      "detected": 1,
+      "missed": 1,
+      "false_alarms": 0,
+      "recall": 0.5,
+      "miss_rate": 0.5,
+      "alarm_count": 21,
+      "verified_entry_count": 67,
+      "precision_proxy": 1.0,
+      "missed_segments": [
+        {
+          "gt_tokens": [
+            "Box_4018"
+          ],
+          "frame_start": 48,
+          "frame_end": 163,
+          "entry_count": 20,
+          "detected": false
+        }
+      ],
+      "false_alarm_samples": []
+    },
+    {
+      "upload_file": "clip_0018_start_00-39-31_rtmpose_m.json",
+      "record_id": "rtmpose-m/2-2-2/clip_0018_start_00-39-31_rtmpose_m",
+      "review_key": "2-2-2/clip_0018_start_00-39-31.400_end_00-39-52__00-39-31__full",
+      "clip": "clip_0018_start_00-39-31_rtmpose_m",
+      "camera_slug": "2-2-2",
+      "source_video": "",
+      "status": "ok",
+      "prediction_source": "rule_alarm",
+      "gt_segments": 1,
+      "detected": 1,
+      "missed": 0,
+      "false_alarms": 10,
+      "recall": 1.0,
+      "miss_rate": 0.0,
+      "alarm_count": 15,
+      "verified_entry_count": 59,
+      "precision_proxy": 0.0909,
+      "missed_segments": [],
+      "false_alarm_samples": [
+        {
+          "frame_idx": 387,
+          "box_token": "Box_4018"
+        },
+        {
+          "frame_idx": 389,
+          "box_token": "Box_4018"
+        },
+        {
+          "frame_idx": 391,
+          "box_token": "Box_4018"
+        },
+        {
+          "frame_idx": 393,
+          "box_token": "Box_4018"
+        },
+        {
+          "frame_idx": 395,
+          "box_token": "Box_4018"
+        },
+        {
+          "frame_idx": 397,
+          "box_token": "Box_4018"
+        },
+        {
+          "frame_idx": 399,
+          "box_token": "Box_4018"
+        },
+        {
+          "frame_idx": 483,
+          "box_token": "Box_4017"
+        },
+        {
+          "frame_idx": 485,
+          "box_token": "Box_4017"
+        },
+        {
+          "frame_idx": 487,
+          "box_token": "Box_4017"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0019_start_00-40-01_rtmpose_m.json",
+      "record_id": "rtmpose-m/2-2-2/clip_0019_start_00-40-01_rtmpose_m",
+      "review_key": "2-2-2/clip_0019_start_00-40-01.640_end_00-40-23__00-40-01__full",
+      "clip": "clip_0019_start_00-40-01_rtmpose_m",
+      "camera_slug": "2-2-2",
+      "source_video": "",
+      "status": "ok",
+      "prediction_source": "rule_alarm",
+      "gt_segments": 1,
+      "detected": 1,
+      "missed": 0,
+      "false_alarms": 35,
+      "recall": 1.0,
+      "miss_rate": 0.0,
+      "alarm_count": 49,
+      "verified_entry_count": 40,
+      "precision_proxy": 0.0278,
+      "missed_segments": [],
+      "false_alarm_samples": [
+        {
+          "frame_idx": 5,
+          "box_token": "Box_4017"
+        },
+        {
+          "frame_idx": 7,
+          "box_token": "Box_4017"
+        },
+        {
+          "frame_idx": 9,
+          "box_token": "Box_4017"
+        },
+        {
+          "frame_idx": 11,
+          "box_token": "Box_4017"
+        },
+        {
+          "frame_idx": 13,
+          "box_token": "Box_4017"
+        },
+        {
+          "frame_idx": 15,
+          "box_token": "Box_4017"
+        },
+        {
+          "frame_idx": 17,
+          "box_token": "Box_4017"
+        },
+        {
+          "frame_idx": 23,
+          "box_token": "Box_4018"
+        },
+        {
+          "frame_idx": 25,
+          "box_token": "Box_4018"
+        },
+        {
+          "frame_idx": 27,
+          "box_token": "Box_4018"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0019_start_00-47-26_rtmpose_m.json",
+      "record_id": "rtmpose-m/2-5-1/clip_0019_start_00-47-26_rtmpose_m",
+      "review_key": "2-5-1/clip_0019_start_00-47-26.500_end_00-50-32__00-47-26__full",
+      "clip": "clip_0019_start_00-47-26_rtmpose_m",
+      "camera_slug": "2-5-1",
+      "source_video": "clip_0019_start_00-47-26.500_end_00-50-32.500.mp4",
+      "status": "ok",
+      "prediction_source": "rule_alarm",
+      "gt_segments": 1,
+      "detected": 1,
+      "missed": 0,
+      "false_alarms": 12,
+      "recall": 1.0,
+      "miss_rate": 0.0,
+      "alarm_count": 32,
+      "verified_entry_count": 34,
+      "precision_proxy": 0.0769,
+      "missed_segments": [],
+      "false_alarm_samples": [
+        {
+          "frame_idx": 2039,
+          "box_token": "Box_4044"
+        },
+        {
+          "frame_idx": 2041,
+          "box_token": "Box_4044"
+        },
+        {
+          "frame_idx": 2043,
+          "box_token": "Box_4044"
+        },
+        {
+          "frame_idx": 2053,
+          "box_token": "Box_4042"
+        },
+        {
+          "frame_idx": 2055,
+          "box_token": "Box_4042"
+        },
+        {
+          "frame_idx": 2057,
+          "box_token": "Box_4042"
+        },
+        {
+          "frame_idx": 2059,
+          "box_token": "Box_4042"
+        },
+        {
+          "frame_idx": 2083,
+          "box_token": "Box_4044"
+        },
+        {
+          "frame_idx": 2091,
+          "box_token": "Box_4044"
+        },
+        {
+          "frame_idx": 2093,
+          "box_token": "Box_4044"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0020_start_00-48-44_rtmpose_m.json",
+      "record_id": "rtmpose-m/2-2-2/clip_0020_start_00-48-44_rtmpose_m",
+      "review_key": "2-2-2/clip_0020_start_00-48-44.440_end_00-49-05__00-48-44__full",
+      "clip": "clip_0020_start_00-48-44_rtmpose_m",
+      "camera_slug": "2-2-2",
+      "source_video": "",
+      "status": "ok",
+      "prediction_source": "rule_alarm",
+      "gt_segments": 1,
+      "detected": 1,
+      "missed": 0,
+      "false_alarms": 4,
+      "recall": 1.0,
+      "miss_rate": 0.0,
+      "alarm_count": 6,
+      "verified_entry_count": 4,
+      "precision_proxy": 0.2,
+      "missed_segments": [],
+      "false_alarm_samples": [
+        {
+          "frame_idx": 65,
+          "box_token": "Box_3023"
+        },
+        {
+          "frame_idx": 67,
+          "box_token": "Box_3023"
+        },
+        {
+          "frame_idx": 75,
+          "box_token": "Box_3018"
+        },
+        {
+          "frame_idx": 77,
+          "box_token": "Box_3018"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0020_start_00-50-44_rtmpose_m.json",
+      "record_id": "rtmpose-m/2-5-1/clip_0020_start_00-50-44_rtmpose_m",
+      "review_key": "2-5-1/clip_0020_start_00-50-44.000_end_00-51-51__00-50-44__full",
+      "clip": "clip_0020_start_00-50-44_rtmpose_m",
+      "camera_slug": "2-5-1",
+      "source_video": "",
+      "status": "ok",
+      "prediction_source": "rule_alarm",
+      "gt_segments": 3,
+      "detected": 3,
+      "missed": 0,
+      "false_alarms": 19,
+      "recall": 1.0,
+      "miss_rate": 0.0,
+      "alarm_count": 62,
+      "verified_entry_count": 84,
+      "precision_proxy": 0.1364,
+      "missed_segments": [],
+      "false_alarm_samples": [
+        {
+          "frame_idx": 695,
+          "box_token": "Box_3069"
+        },
+        {
+          "frame_idx": 697,
+          "box_token": "Box_3069"
+        },
+        {
+          "frame_idx": 705,
+          "box_token": "Box_3069"
+        },
+        {
+          "frame_idx": 707,
+          "box_token": "Box_3069"
+        },
+        {
+          "frame_idx": 709,
+          "box_token": "Box_3069"
+        },
+        {
+          "frame_idx": 711,
+          "box_token": "Box_3069"
+        },
+        {
+          "frame_idx": 805,
+          "box_token": "Box_3073"
+        },
+        {
+          "frame_idx": 807,
+          "box_token": "Box_3073"
+        },
+        {
+          "frame_idx": 829,
+          "box_token": "Box_3071"
+        },
+        {
+          "frame_idx": 831,
+          "box_token": "Box_3071"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0023_start_00-49-39_rtmpose_m.json",
+      "record_id": "rtmpose-m/2-3-1/clip_0023_start_00-49-39_rtmpose_m",
+      "review_key": "2-3-1/clip_0023_start_00-49-39.400_end_00-50-03__00-49-39__full",
+      "clip": "clip_0023_start_00-49-39_rtmpose_m",
+      "camera_slug": "2-3-1",
+      "source_video": "",
+      "status": "ok",
+      "prediction_source": "rule_alarm",
+      "gt_segments": 7,
+      "detected": 6,
+      "missed": 1,
+      "false_alarms": 35,
+      "recall": 0.8571428571428571,
+      "miss_rate": 0.14285714285714285,
+      "alarm_count": 120,
+      "verified_entry_count": 258,
+      "precision_proxy": 0.1463,
+      "missed_segments": [
+        {
+          "gt_tokens": [
+            "Box_4027"
+          ],
+          "frame_start": 589,
+          "frame_end": 598,
+          "entry_count": 5,
+          "detected": false
+        }
+      ],
+      "false_alarm_samples": [
+        {
+          "frame_idx": 239,
+          "box_token": "Box_4025"
+        },
+        {
+          "frame_idx": 241,
+          "box_token": "Box_4025"
+        },
+        {
+          "frame_idx": 243,
+          "box_token": "Box_4025"
+        },
+        {
+          "frame_idx": 245,
+          "box_token": "Box_4025"
+        },
+        {
+          "frame_idx": 247,
+          "box_token": "Box_4025"
+        },
+        {
+          "frame_idx": 249,
+          "box_token": "Box_4025"
+        },
+        {
+          "frame_idx": 287,
+          "box_token": "Box_4025"
+        },
+        {
+          "frame_idx": 289,
+          "box_token": "Box_4025"
+        },
+        {
+          "frame_idx": 295,
+          "box_token": "Box_4022"
+        },
+        {
+          "frame_idx": 297,
+          "box_token": "Box_4022"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0025_start_00-43-15_rtmpose_m.json",
+      "record_id": "rtmpose-m/1-1-1/clip_0025_start_00-43-15_rtmpose_m",
+      "review_key": "1-1-1/clip_0025_start_00-43-15.667_end_00-43-29__00-43-15__full",
+      "clip": "clip_0025_start_00-43-15_rtmpose_m",
+      "camera_slug": "1-1-1",
+      "source_video": "",
+      "status": "ok",
+      "prediction_source": "rule_alarm",
+      "gt_segments": 2,
+      "detected": 2,
+      "missed": 0,
+      "false_alarms": 2,
+      "recall": 1.0,
+      "miss_rate": 0.0,
+      "alarm_count": 25,
+      "verified_entry_count": 48,
+      "precision_proxy": 0.5,
+      "missed_segments": [],
+      "false_alarm_samples": [
+        {
+          "frame_idx": 59,
+          "box_token": "Box_2007"
+        },
+        {
+          "frame_idx": 89,
+          "box_token": "Box_2005"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0025_start_00-50-13_rtmpose_m.json",
+      "record_id": "rtmpose-m/2-2-2/clip_0025_start_00-50-13_rtmpose_m",
+      "review_key": "2-2-2/clip_0025_start_00-50-13.560_end_00-50-44__00-50-13__full",
+      "clip": "clip_0025_start_00-50-13_rtmpose_m",
+      "camera_slug": "2-2-2",
+      "source_video": "",
+      "status": "ok",
+      "prediction_source": "rule_alarm",
+      "gt_segments": 1,
+      "detected": 1,
+      "missed": 0,
+      "false_alarms": 4,
+      "recall": 1.0,
+      "miss_rate": 0.0,
+      "alarm_count": 7,
+      "verified_entry_count": 9,
+      "precision_proxy": 0.2,
+      "missed_segments": [],
+      "false_alarm_samples": [
+        {
+          "frame_idx": 15,
+          "box_token": "Box_3031"
+        },
+        {
+          "frame_idx": 17,
+          "box_token": "Box_3031"
+        },
+        {
+          "frame_idx": 19,
+          "box_token": "Box_3031"
+        },
+        {
+          "frame_idx": 21,
+          "box_token": "Box_3031"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0028_start_00-33-12_rtmpose_m.json",
+      "record_id": "rtmpose-m/1-2-1/clip_0028_start_00-33-12_rtmpose_m",
+      "review_key": "1-2-1/clip_0028_start_00-33-12.440_end_00-33-44__00-33-12__full",
+      "clip": "clip_0028_start_00-33-12_rtmpose_m",
+      "camera_slug": "1-2-1",
+      "source_video": "",
+      "status": "ok",
+      "prediction_source": "rule_alarm",
+      "gt_segments": 2,
+      "detected": 2,
+      "missed": 0,
+      "false_alarms": 8,
+      "recall": 1.0,
+      "miss_rate": 0.0,
+      "alarm_count": 37,
+      "verified_entry_count": 66,
+      "precision_proxy": 0.2,
+      "missed_segments": [],
+      "false_alarm_samples": [
+        {
+          "frame_idx": 239,
+          "box_token": "Box_2025"
+        },
+        {
+          "frame_idx": 241,
+          "box_token": "Box_2025"
+        },
+        {
+          "frame_idx": 543,
+          "box_token": "Box_2023"
+        },
+        {
+          "frame_idx": 545,
+          "box_token": "Box_2023"
+        },
+        {
+          "frame_idx": 551,
+          "box_token": "Box_2024"
+        },
+        {
+          "frame_idx": 553,
+          "box_token": "Box_2024"
+        },
+        {
+          "frame_idx": 555,
+          "box_token": "Box_2024"
+        },
+        {
+          "frame_idx": 557,
+          "box_token": "Box_2024"
+        }
+      ]
+    }
+  ],
+  "manifest": {
+    "exported_at": "2026-07-06T07:01:51.270444+00:00",
+    "params": {
+      "baseline_type": "rule_production_config",
+      "pose_tier": "rtmpose-m",
+      "collision_engine": "box_human_det_infer",
+      "pose_frame_interval": 2,
+      "alarm_min_consecutive_frames": 3,
+      "alarm_cooldown_frames": 0,
+      "tags": [
+        "单人",
+        "无遮挡"
+      ],
+      "cameras": [
+        "1-1-1",
+        "1-2-1",
+        "2-2-2",
+        "2-3-1",
+        "2-4-1",
+        "2-5-1",
+        "2-6-1",
+        "2-7-2"
+      ]
+    },
+    "record_count": 28,
+    "exported_count": 28,
+    "error_count": 0,
+    "records": [
+      {
+        "record_id": "rtmpose-m/1-1-1/clip_0013_start_00-11-22_rtmpose_m",
+        "clip_name": "clip_0013_start_00-11-22_rtmpose_m",
+        "camera_slug": "1-1-1",
+        "frame_count_timeline": 9103,
+        "frame_count_skeleton": 5527,
+        "frame_range_min": 1,
+        "frame_range_max": 8239,
+        "frame_count_exported": 4120,
+        "stored_pose_frame_interval": 1,
+        "picking_frame_count": 444,
+        "annotation_file": "tmptvldp35p_1_1组_1.json",
+        "infer_width": 853.0,
+        "infer_height": 480.0,
+        "infer_size_record_dir": "D:\\work\\workspace\\git-repo\\ShelfPickSense\\data\\data28-merged\\Train\\record_001",
+        "file": "clip_0013_start_00-11-22_rtmpose_m.json",
+        "path": "D:\\work\\workspace\\git-repo\\visual-dps-datacollect\\localdata\\export\\rule-baseline-prod-test\\clip_0013_start_00-11-22_rtmpose_m.json"
+      },
+      {
+        "record_id": "rtmpose-m/1-1-1/clip_0025_start_00-43-15_rtmpose_m",
+        "clip_name": "clip_0025_start_00-43-15_rtmpose_m",
+        "camera_slug": "1-1-1",
+        "frame_count_timeline": 204,
+        "frame_count_skeleton": 189,
+        "frame_range_min": 7,
+        "frame_range_max": 204,
+        "frame_count_exported": 99,
+        "stored_pose_frame_interval": 1,
+        "picking_frame_count": 25,
+        "annotation_file": "tmpleyxlmah_1_1组_1.json",
+        "infer_width": 853.0,
+        "infer_height": 480.0,
+        "infer_size_record_dir": "D:\\work\\workspace\\git-repo\\ShelfPickSense\\data\\data28-merged\\Train\\record_002",
+        "file": "clip_0025_start_00-43-15_rtmpose_m.json",
+        "path": "D:\\work\\workspace\\git-repo\\visual-dps-datacollect\\localdata\\export\\rule-baseline-prod-test\\clip_0025_start_00-43-15_rtmpose_m.json"
+      },
+      {
+        "record_id": "rtmpose-m/1-2-1/clip_0002_start_00-30-28_rtmpose_m",
+        "clip_name": "clip_0002_start_00-30-28_rtmpose_m",
+        "camera_slug": "1-2-1",
+        "frame_count_timeline": 6060,
+        "frame_count_skeleton": 3959,
+        "frame_range_min": 1,
+        "frame_range_max": 6060,
+        "frame_count_exported": 3030,
+        "stored_pose_frame_interval": 1,
+        "picking_frame_count": 43,
+        "annotation_file": "tmpb75z_7xz_1_2组_1.json",
+        "infer_width": 852.0,
+        "infer_height": 480.0,
+        "infer_size_record_dir": "D:\\work\\workspace\\git-repo\\ShelfPickSense\\data\\data28-merged\\Train\\record_003",
+        "file": "clip_0002_start_00-30-28_rtmpose_m.json",
+        "path": "D:\\work\\workspace\\git-repo\\visual-dps-datacollect\\localdata\\export\\rule-baseline-prod-test\\clip_0002_start_00-30-28_rtmpose_m.json"
+      },
+      {
+        "record_id": "rtmpose-m/1-2-1/clip_0028_start_00-33-12_rtmpose_m",
+        "clip_name": "clip_0028_start_00-33-12_rtmpose_m",
+        "camera_slug": "1-2-1",
+        "frame_count_timeline": 806,
+        "frame_count_skeleton": 673,
+        "frame_range_min": 1,
+        "frame_range_max": 806,
+        "frame_count_exported": 403,
+        "stored_pose_frame_interval": 1,
+        "picking_frame_count": 37,
+        "annotation_file": "tmp9ndapgir_1_2组_1.json",
+        "infer_width": 852.0,
+        "infer_height": 480.0,
+        "infer_size_record_dir": "D:\\work\\workspace\\git-repo\\ShelfPickSense\\data\\data28-merged\\Train\\record_004",
+        "file": "clip_0028_start_00-33-12_rtmpose_m.json",
+        "path": "D:\\work\\workspace\\git-repo\\visual-dps-datacollect\\localdata\\export\\rule-baseline-prod-test\\clip_0028_start_00-33-12_rtmpose_m.json"
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0003_start_00-02-43_rtmpose_m",
+        "clip_name": "clip_0003_start_00-02-43_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "frame_count_timeline": 413,
+        "frame_count_skeleton": 192,
+        "frame_range_min": 119,
+        "frame_range_max": 310,
+        "frame_count_exported": 96,
+        "stored_pose_frame_interval": 1,
+        "picking_frame_count": 32,
+        "annotation_file": "tmpyx1dep_q_2_2组_2.json",
+        "infer_width": 852.0,
+        "infer_height": 480.0,
+        "infer_size_record_dir": "D:\\work\\workspace\\git-repo\\ShelfPickSense\\data\\data28-merged\\Train\\record_005",
+        "file": "clip_0003_start_00-02-43_rtmpose_m.json",
+        "path": "D:\\work\\workspace\\git-repo\\visual-dps-datacollect\\localdata\\export\\rule-baseline-prod-test\\clip_0003_start_00-02-43_rtmpose_m.json"
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0006_start_00-41-26_rtmpose_m",
+        "clip_name": "clip_0006_start_00-41-26_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "frame_count_timeline": 792,
+        "frame_count_skeleton": 696,
+        "frame_range_min": 1,
+        "frame_range_max": 792,
+        "frame_count_exported": 396,
+        "stored_pose_frame_interval": 1,
+        "picking_frame_count": 92,
+        "annotation_file": "tmpqn1y4plf_2_2组_2.json",
+        "infer_width": 852.0,
+        "infer_height": 480.0,
+        "infer_size_record_dir": "D:\\work\\workspace\\git-repo\\ShelfPickSense\\data\\data28-merged\\Train\\record_006",
+        "file": "clip_0006_start_00-41-26_rtmpose_m.json",
+        "path": "D:\\work\\workspace\\git-repo\\visual-dps-datacollect\\localdata\\export\\rule-baseline-prod-test\\clip_0006_start_00-41-26_rtmpose_m.json"
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0009_start_00-17-17_rtmpose_m",
+        "clip_name": "clip_0009_start_00-17-17_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "frame_count_timeline": 312,
+        "frame_count_skeleton": 312,
+        "frame_range_min": 1,
+        "frame_range_max": 312,
+        "frame_count_exported": 156,
+        "stored_pose_frame_interval": 1,
+        "picking_frame_count": 77,
+        "annotation_file": "tmpfc94w8pl_2_2组_2.json",
+        "infer_width": 852.0,
+        "infer_height": 480.0,
+        "infer_size_record_dir": "D:\\work\\workspace\\git-repo\\ShelfPickSense\\data\\data28-merged\\Train\\record_007",
+        "file": "clip_0009_start_00-17-17_rtmpose_m.json",
+        "path": "D:\\work\\workspace\\git-repo\\visual-dps-datacollect\\localdata\\export\\rule-baseline-prod-test\\clip_0009_start_00-17-17_rtmpose_m.json"
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0013_start_00-29-53_rtmpose_m",
+        "clip_name": "clip_0013_start_00-29-53_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "frame_count_timeline": 2254,
+        "frame_count_skeleton": 326,
+        "frame_range_min": 1917,
+        "frame_range_max": 2254,
+        "frame_count_exported": 169,
+        "stored_pose_frame_interval": 1,
+        "picking_frame_count": 47,
+        "annotation_file": "tmp5hxutqaz_2_2组_2.json",
+        "infer_width": 852.0,
+        "infer_height": 480.0,
+        "infer_size_record_dir": "D:\\work\\workspace\\git-repo\\ShelfPickSense\\data\\data28-merged\\Train\\record_008",
+        "file": "clip_0013_start_00-29-53_rtmpose_m.json",
+        "path": "D:\\work\\workspace\\git-repo\\visual-dps-datacollect\\localdata\\export\\rule-baseline-prod-test\\clip_0013_start_00-29-53_rtmpose_m.json"
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0014_start_00-31-27_rtmpose_m",
+        "clip_name": "clip_0014_start_00-31-27_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "frame_count_timeline": 466,
+        "frame_count_skeleton": 466,
+        "frame_range_min": 1,
+        "frame_range_max": 466,
+        "frame_count_exported": 233,
+        "stored_pose_frame_interval": 1,
+        "picking_frame_count": 21,
+        "annotation_file": "tmp0okskget_2_2组_2.json",
+        "infer_width": 852.0,
+        "infer_height": 480.0,
+        "infer_size_record_dir": "D:\\work\\workspace\\git-repo\\ShelfPickSense\\data\\data28-merged\\Train\\record_009",
+        "file": "clip_0014_start_00-31-27_rtmpose_m.json",
+        "path": "D:\\work\\workspace\\git-repo\\visual-dps-datacollect\\localdata\\export\\rule-baseline-prod-test\\clip_0014_start_00-31-27_rtmpose_m.json"
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0018_start_00-39-31_rtmpose_m",
+        "clip_name": "clip_0018_start_00-39-31_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "frame_count_timeline": 520,
+        "frame_count_skeleton": 254,
+        "frame_range_min": 154,
+        "frame_range_max": 520,
+        "frame_count_exported": 183,
+        "stored_pose_frame_interval": 1,
+        "picking_frame_count": 15,
+        "annotation_file": "tmpumxn10la_2_2组_2.json",
+        "infer_width": 852.0,
+        "infer_height": 480.0,
+        "infer_size_record_dir": "D:\\work\\workspace\\git-repo\\ShelfPickSense\\data\\data28-merged\\Train\\record_010",
+        "file": "clip_0018_start_00-39-31_rtmpose_m.json",
+        "path": "D:\\work\\workspace\\git-repo\\visual-dps-datacollect\\localdata\\export\\rule-baseline-prod-test\\clip_0018_start_00-39-31_rtmpose_m.json"
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0019_start_00-40-01_rtmpose_m",
+        "clip_name": "clip_0019_start_00-40-01_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "frame_count_timeline": 558,
+        "frame_count_skeleton": 403,
+        "frame_range_min": 1,
+        "frame_range_max": 403,
+        "frame_count_exported": 202,
+        "stored_pose_frame_interval": 1,
+        "picking_frame_count": 49,
+        "annotation_file": "tmpudq3vrk2_2_2组_2.json",
+        "infer_width": 852.0,
+        "infer_height": 480.0,
+        "infer_size_record_dir": "D:\\work\\workspace\\git-repo\\ShelfPickSense\\data\\data28-merged\\Train\\record_011",
+        "file": "clip_0019_start_00-40-01_rtmpose_m.json",
+        "path": "D:\\work\\workspace\\git-repo\\visual-dps-datacollect\\localdata\\export\\rule-baseline-prod-test\\clip_0019_start_00-40-01_rtmpose_m.json"
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0020_start_00-48-44_rtmpose_m",
+        "clip_name": "clip_0020_start_00-48-44_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "frame_count_timeline": 530,
+        "frame_count_skeleton": 530,
+        "frame_range_min": 1,
+        "frame_range_max": 530,
+        "frame_count_exported": 265,
+        "stored_pose_frame_interval": 1,
+        "picking_frame_count": 6,
+        "annotation_file": "tmpnay355wo_2_2组_2.json",
+        "infer_width": 852.0,
+        "infer_height": 480.0,
+        "infer_size_record_dir": "D:\\work\\workspace\\git-repo\\ShelfPickSense\\data\\data28-merged\\Train\\record_012",
+        "file": "clip_0020_start_00-48-44_rtmpose_m.json",
+        "path": "D:\\work\\workspace\\git-repo\\visual-dps-datacollect\\localdata\\export\\rule-baseline-prod-test\\clip_0020_start_00-48-44_rtmpose_m.json"
+      },
+      {
+        "record_id": "rtmpose-m/2-2-2/clip_0025_start_00-50-13_rtmpose_m",
+        "clip_name": "clip_0025_start_00-50-13_rtmpose_m",
+        "camera_slug": "2-2-2",
+        "frame_count_timeline": 766,
+        "frame_count_skeleton": 766,
+        "frame_range_min": 1,
+        "frame_range_max": 766,
+        "frame_count_exported": 383,
+        "stored_pose_frame_interval": 1,
+        "picking_frame_count": 7,
+        "annotation_file": "tmpzlu9jo7j_2_2组_2.json",
+        "infer_width": 852.0,
+        "infer_height": 480.0,
+        "infer_size_record_dir": "D:\\work\\workspace\\git-repo\\ShelfPickSense\\data\\data28-merged\\Train\\record_013",
+        "file": "clip_0025_start_00-50-13_rtmpose_m.json",
+        "path": "D:\\work\\workspace\\git-repo\\visual-dps-datacollect\\localdata\\export\\rule-baseline-prod-test\\clip_0025_start_00-50-13_rtmpose_m.json"
+      },
+      {
+        "record_id": "rtmpose-m/2-3-1/clip_0002_start_00-00-53_rtmpose_m",
+        "clip_name": "clip_0002_start_00-00-53_rtmpose_m",
+        "camera_slug": "2-3-1",
+        "frame_count_timeline": 658,
+        "frame_count_skeleton": 373,
+        "frame_range_min": 118,
+        "frame_range_max": 608,
+        "frame_count_exported": 245,
+        "stored_pose_frame_interval": 1,
+        "picking_frame_count": 26,
+        "annotation_file": "tmpixxlkym6_2_3组_1.json",
+        "infer_width": 852.0,
+        "infer_height": 480.0,
+        "infer_size_record_dir": "D:\\work\\workspace\\git-repo\\ShelfPickSense\\data\\data28-merged\\Train\\record_014",
+        "file": "clip_0002_start_00-00-53_rtmpose_m.json",
+        "path": "D:\\work\\workspace\\git-repo\\visual-dps-datacollect\\localdata\\export\\rule-baseline-prod-test\\clip_0002_start_00-00-53_rtmpose_m.json"
+      },
+      {
+        "record_id": "rtmpose-m/2-3-1/clip_0003_start_00-39-45_rtmpose_m",
+        "clip_name": "clip_0003_start_00-39-45_rtmpose_m",
+        "camera_slug": "2-3-1",
+        "frame_count_timeline": 4890,
+        "frame_count_skeleton": 4754,
+        "frame_range_min": 1,
+        "frame_range_max": 4890,
+        "frame_count_exported": 2445,
+        "stored_pose_frame_interval": 1,
+        "picking_frame_count": 20,
+        "annotation_file": "tmphsgjjvlz_2_3组_1.json",
+        "infer_width": 852.0,
+        "infer_height": 480.0,
+        "infer_size_record_dir": "D:\\work\\workspace\\git-repo\\ShelfPickSense\\data\\data28-merged\\Train\\record_015",
+        "file": "clip_0003_start_00-39-45_rtmpose_m.json",
+        "path": "D:\\work\\workspace\\git-repo\\visual-dps-datacollect\\localdata\\export\\rule-baseline-prod-test\\clip_0003_start_00-39-45_rtmpose_m.json"
+      },
+      {
+        "record_id": "rtmpose-m/2-3-1/clip_0010_start_00-18-36_rtmpose_m",
+        "clip_name": "clip_0010_start_00-18-36_rtmpose_m",
+        "camera_slug": "2-3-1",
+        "frame_count_timeline": 716,
+        "frame_count_skeleton": 716,
+        "frame_range_min": 1,
+        "frame_range_max": 716,
+        "frame_count_exported": 358,
+        "stored_pose_frame_interval": 1,
+        "picking_frame_count": 36,
+        "annotation_file": "tmp6u7_m93k_2_3组_1.json",
+        "infer_width": 852.0,
+        "infer_height": 480.0,
+        "infer_size_record_dir": "D:\\work\\workspace\\git-repo\\ShelfPickSense\\data\\data28-merged\\Train\\record_016",
+        "file": "clip_0010_start_00-18-36_rtmpose_m.json",
+        "path": "D:\\work\\workspace\\git-repo\\visual-dps-datacollect\\localdata\\export\\rule-baseline-prod-test\\clip_0010_start_00-18-36_rtmpose_m.json"
+      },
+      {
+        "record_id": "rtmpose-m/2-3-1/clip_0011_start_00-20-06_rtmpose_m",
+        "clip_name": "clip_0011_start_00-20-06_rtmpose_m",
+        "camera_slug": "2-3-1",
+        "frame_count_timeline": 9548,
+        "frame_count_skeleton": 2743,
+        "frame_range_min": 1,
+        "frame_range_max": 9548,
+        "frame_count_exported": 4774,
+        "stored_pose_frame_interval": 1,
+        "picking_frame_count": 18,
+        "annotation_file": "tmpdat8__l3_2_3组_1.json",
+        "infer_width": 852.0,
+        "infer_height": 480.0,
+        "infer_size_record_dir": "D:\\work\\workspace\\git-repo\\ShelfPickSense\\data\\data28-merged\\Train\\record_017",
+        "file": "clip_0011_start_00-20-06_rtmpose_m.json",
+        "path": "D:\\work\\workspace\\git-repo\\visual-dps-datacollect\\localdata\\export\\rule-baseline-prod-test\\clip_0011_start_00-20-06_rtmpose_m.json"
+      },
+      {
+        "record_id": "rtmpose-m/2-3-1/clip_0023_start_00-49-39_rtmpose_m",
+        "clip_name": "clip_0023_start_00-49-39_rtmpose_m",
+        "camera_slug": "2-3-1",
+        "frame_count_timeline": 598,
+        "frame_count_skeleton": 598,
+        "frame_range_min": 1,
+        "frame_range_max": 598,
+        "frame_count_exported": 299,
+        "stored_pose_frame_interval": 1,
+        "picking_frame_count": 120,
+        "annotation_file": "tmpb7qk3gzm_2_3组_1.json",
+        "infer_width": 852.0,
+        "infer_height": 480.0,
+        "infer_size_record_dir": "D:\\work\\workspace\\git-repo\\ShelfPickSense\\data\\data28-merged\\Train\\record_018",
+        "file": "clip_0023_start_00-49-39_rtmpose_m.json",
+        "path": "D:\\work\\workspace\\git-repo\\visual-dps-datacollect\\localdata\\export\\rule-baseline-prod-test\\clip_0023_start_00-49-39_rtmpose_m.json"
+      },
+      {
+        "record_id": "rtmpose-m/2-4-1/clip_0002_start_00-24-56_rtmpose_m",
+        "clip_name": "clip_0002_start_00-24-56_rtmpose_m",
+        "camera_slug": "2-4-1",
+        "frame_count_timeline": 23504,
+        "frame_count_skeleton": 13812,
+        "frame_range_min": 1,
+        "frame_range_max": 23166,
+        "frame_count_exported": 11583,
+        "stored_pose_frame_interval": 1,
+        "picking_frame_count": 216,
+        "annotation_file": "tmp8secu585_2_4组_1.json",
+        "infer_width": 852.0,
+        "infer_height": 480.0,
+        "infer_size_record_dir": "D:\\work\\workspace\\git-repo\\ShelfPickSense\\data\\data28-merged\\Train\\record_019",
+        "file": "clip_0002_start_00-24-56_rtmpose_m.json",
+        "path": "D:\\work\\workspace\\git-repo\\visual-dps-datacollect\\localdata\\export\\rule-baseline-prod-test\\clip_0002_start_00-24-56_rtmpose_m.json"
+      },
+      {
+        "record_id": "rtmpose-m/2-5-1/clip_0008_start_00-30-49_rtmpose_m",
+        "clip_name": "clip_0008_start_00-30-49_rtmpose_m",
+        "camera_slug": "2-5-1",
+        "frame_count_timeline": 6368,
+        "frame_count_skeleton": 6368,
+        "frame_range_min": 1,
+        "frame_range_max": 6368,
+        "frame_count_exported": 3184,
+        "stored_pose_frame_interval": 1,
+        "picking_frame_count": 163,
+        "annotation_file": "tmppe_g7lgk_2_5组_1.json",
+        "infer_width": 852.0,
+        "infer_height": 480.0,
+        "infer_size_record_dir": "D:\\work\\workspace\\git-repo\\ShelfPickSense\\data\\data28-merged\\Train\\record_020",
+        "file": "clip_0008_start_00-30-49_rtmpose_m.json",
+        "path": "D:\\work\\workspace\\git-repo\\visual-dps-datacollect\\localdata\\export\\rule-baseline-prod-test\\clip_0008_start_00-30-49_rtmpose_m.json"
+      },
+      {
+        "record_id": "rtmpose-m/2-5-1/clip_0009_start_00-37-59_rtmpose_m",
+        "clip_name": "clip_0009_start_00-37-59_rtmpose_m",
+        "camera_slug": "2-5-1",
+        "frame_count_timeline": 15467,
+        "frame_count_skeleton": 8320,
+        "frame_range_min": 1,
+        "frame_range_max": 15467,
+        "frame_count_exported": 7734,
+        "stored_pose_frame_interval": 1,
+        "picking_frame_count": 92,
+        "annotation_file": "tmpjo48kzfv_2_5组_1.json",
+        "infer_width": 852.0,
+        "infer_height": 480.0,
+        "infer_size_record_dir": "D:\\work\\workspace\\git-repo\\ShelfPickSense\\data\\data28-merged\\Train\\record_021",
+        "file": "clip_0009_start_00-37-59_rtmpose_m.json",
+        "path": "D:\\work\\workspace\\git-repo\\visual-dps-datacollect\\localdata\\export\\rule-baseline-prod-test\\clip_0009_start_00-37-59_rtmpose_m.json"
+      },
+      {
+        "record_id": "rtmpose-m/2-5-1/clip_0019_start_00-47-26_rtmpose_m",
+        "clip_name": "clip_0019_start_00-47-26_rtmpose_m",
+        "camera_slug": "2-5-1",
+        "frame_count_timeline": 4650,
+        "frame_count_skeleton": 4650,
+        "frame_range_min": 1,
+        "frame_range_max": 4650,
+        "frame_count_exported": 2325,
+        "stored_pose_frame_interval": 1,
+        "picking_frame_count": 32,
+        "annotation_file": "tmpb4k6bi5w_2_5组_1.json",
+        "infer_width": 852.0,
+        "infer_height": 480.0,
+        "infer_size_record_dir": "D:\\work\\workspace\\git-repo\\ShelfPickSense\\data\\data28-merged\\Train\\record_022",
+        "file": "clip_0019_start_00-47-26_rtmpose_m.json",
+        "path": "D:\\work\\workspace\\git-repo\\visual-dps-datacollect\\localdata\\export\\rule-baseline-prod-test\\clip_0019_start_00-47-26_rtmpose_m.json"
+      },
+      {
+        "record_id": "rtmpose-m/2-5-1/clip_0020_start_00-50-44_rtmpose_m",
+        "clip_name": "clip_0020_start_00-50-44_rtmpose_m",
+        "camera_slug": "2-5-1",
+        "frame_count_timeline": 1688,
+        "frame_count_skeleton": 1660,
+        "frame_range_min": 1,
+        "frame_range_max": 1683,
+        "frame_count_exported": 842,
+        "stored_pose_frame_interval": 1,
+        "picking_frame_count": 62,
+        "annotation_file": "tmp56lj8qxd_2_5组_1.json",
+        "infer_width": 852.0,
+        "infer_height": 480.0,
+        "infer_size_record_dir": "D:\\work\\workspace\\git-repo\\ShelfPickSense\\data\\data28-merged\\Train\\record_023",
+        "file": "clip_0020_start_00-50-44_rtmpose_m.json",
+        "path": "D:\\work\\workspace\\git-repo\\visual-dps-datacollect\\localdata\\export\\rule-baseline-prod-test\\clip_0020_start_00-50-44_rtmpose_m.json"
+      },
+      {
+        "record_id": "rtmpose-m/2-6-1/clip_0005_start_00-07-59_rtmpose_m",
+        "clip_name": "clip_0005_start_00-07-59_rtmpose_m",
+        "camera_slug": "2-6-1",
+        "frame_count_timeline": 5442,
+        "frame_count_skeleton": 4908,
+        "frame_range_min": 1,
+        "frame_range_max": 5241,
+        "frame_count_exported": 2621,
+        "stored_pose_frame_interval": 1,
+        "picking_frame_count": 92,
+        "annotation_file": "93.json",
+        "infer_width": 852.0,
+        "infer_height": 480.0,
+        "infer_size_record_dir": "D:\\work\\workspace\\git-repo\\ShelfPickSense\\data\\data28-merged\\Train\\record_024",
+        "file": "clip_0005_start_00-07-59_rtmpose_m.json",
+        "path": "D:\\work\\workspace\\git-repo\\visual-dps-datacollect\\localdata\\export\\rule-baseline-prod-test\\clip_0005_start_00-07-59_rtmpose_m.json"
+      },
+      {
+        "record_id": "rtmpose-m/2-6-1/clip_0006_start_00-14-11_rtmpose_m",
+        "clip_name": "clip_0006_start_00-14-11_rtmpose_m",
+        "camera_slug": "2-6-1",
+        "frame_count_timeline": 6707,
+        "frame_count_skeleton": 4532,
+        "frame_range_min": 28,
+        "frame_range_max": 6707,
+        "frame_count_exported": 3340,
+        "stored_pose_frame_interval": 1,
+        "picking_frame_count": 78,
+        "annotation_file": "93.json",
+        "infer_width": 852.0,
+        "infer_height": 480.0,
+        "infer_size_record_dir": "D:\\work\\workspace\\git-repo\\ShelfPickSense\\data\\data28-merged\\Train\\record_025",
+        "file": "clip_0006_start_00-14-11_rtmpose_m.json",
+        "path": "D:\\work\\workspace\\git-repo\\visual-dps-datacollect\\localdata\\export\\rule-baseline-prod-test\\clip_0006_start_00-14-11_rtmpose_m.json"
+      },
+      {
+        "record_id": "rtmpose-m/2-6-1/clip_0007_start_00-22-47_rtmpose_m",
+        "clip_name": "clip_0007_start_00-22-47_rtmpose_m",
+        "camera_slug": "2-6-1",
+        "frame_count_timeline": 498,
+        "frame_count_skeleton": 498,
+        "frame_range_min": 1,
+        "frame_range_max": 498,
+        "frame_count_exported": 249,
+        "stored_pose_frame_interval": 1,
+        "picking_frame_count": 8,
+        "annotation_file": "93.json",
+        "infer_width": 852.0,
+        "infer_height": 480.0,
+        "infer_size_record_dir": "D:\\work\\workspace\\git-repo\\ShelfPickSense\\data\\data28-merged\\Train\\record_026",
+        "file": "clip_0007_start_00-22-47_rtmpose_m.json",
+        "path": "D:\\work\\workspace\\git-repo\\visual-dps-datacollect\\localdata\\export\\rule-baseline-prod-test\\clip_0007_start_00-22-47_rtmpose_m.json"
+      },
+      {
+        "record_id": "rtmpose-m/2-6-1/clip_0011_start_00-40-16_rtmpose_m",
+        "clip_name": "clip_0011_start_00-40-16_rtmpose_m",
+        "camera_slug": "2-6-1",
+        "frame_count_timeline": 2263,
+        "frame_count_skeleton": 2142,
+        "frame_range_min": 4,
+        "frame_range_max": 2242,
+        "frame_count_exported": 1119,
+        "stored_pose_frame_interval": 1,
+        "picking_frame_count": 36,
+        "annotation_file": "93.json",
+        "infer_width": 852.0,
+        "infer_height": 480.0,
+        "infer_size_record_dir": "D:\\work\\workspace\\git-repo\\ShelfPickSense\\data\\data28-merged\\Train\\record_027",
+        "file": "clip_0011_start_00-40-16_rtmpose_m.json",
+        "path": "D:\\work\\workspace\\git-repo\\visual-dps-datacollect\\localdata\\export\\rule-baseline-prod-test\\clip_0011_start_00-40-16_rtmpose_m.json"
+      },
+      {
+        "record_id": "rtmpose-m/2-7-2/clip_0013_start_00-42-48_rtmpose_m",
+        "clip_name": "clip_0013_start_00-42-48_rtmpose_m",
+        "camera_slug": "2-7-2",
+        "frame_count_timeline": 270,
+        "frame_count_skeleton": 137,
+        "frame_range_min": 71,
+        "frame_range_max": 207,
+        "frame_count_exported": 69,
+        "stored_pose_frame_interval": 1,
+        "picking_frame_count": 16,
+        "annotation_file": "94.json",
+        "infer_width": 852.0,
+        "infer_height": 480.0,
+        "infer_size_record_dir": "D:\\work\\workspace\\git-repo\\ShelfPickSense\\data\\data28-merged\\Train\\record_028",
+        "file": "clip_0013_start_00-42-48_rtmpose_m.json",
+        "path": "D:\\work\\workspace\\git-repo\\visual-dps-datacollect\\localdata\\export\\rule-baseline-prod-test\\clip_0013_start_00-42-48_rtmpose_m.json"
+      }
+    ],
+    "errors": []
+  },
+  "rules": {
+    "eligible": "仅复核状态为 completed（已复核）的分片参与评估",
+    "excluded": "no_collision 及其它未复核状态不纳入测试、不计入统计",
+    "tag_filter": "指定记录标签时，仅评估同时带有全部标签的 pose 记录",
+    "ground_truth": "verified_true：优先 confirmed_box_tokens，否则 box_tokens",
+    "segment": "连续 verified_true 条目范本货框相同则合并为一段",
+    "prediction": "上传 JSON 字段 rule_alarm_collisions",
+    "success": "段内 [frame_start, frame_end] 出现匹配货框的推测告警",
+    "miss": "段内无匹配推测告警记 1 次漏报",
+    "false_alarm": "不在任一时间与货框范围内的推测告警记 1 次误报",
+    "picking_presence_note": null
+  }
+}
