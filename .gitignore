@@ -88,5 +88,5 @@ desktop.ini
 config.local.json
 config.*.local.json
 
-localdata/data.db
+localdata/
 *.svg
