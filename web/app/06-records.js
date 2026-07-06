@@ -84,21 +84,31 @@ function recordHasAllTags(s, requiredTags) {
   return requiredTags.every((t) => tags.includes(t));
 }
 
-function recordMatchesReviewFilter(s) {
-  const status = String($("#playback-review-status-filter")?.value || "all").trim().toLowerCase();
+function recordMatchesReviewStatus(s, statusFilter) {
+  const status = String(statusFilter ?? "all").trim().toLowerCase();
   const st = String(s.event_review_status || "not_started").trim().toLowerCase();
   if (status === "all" || !status) return true;
   if (status === "reviewed") return st === "completed" || st === "no_collision";
   return st === status;
 }
 
+function recordMatchesVerifiedMode(s, mode) {
+  const verifiedMode = String(mode ?? "all").trim().toLowerCase();
+  const count = Number(s.event_review_verified_count || 0);
+  if (verifiedMode === "all" || !verifiedMode) return true;
+  if (verifiedMode === "yes") return count > 0;
+  if (verifiedMode === "no") return count <= 0;
+  return true;
+}
+
+function recordMatchesReviewFilter(s) {
+  const status = String($("#playback-review-status-filter")?.value || "all").trim().toLowerCase();
+  return recordMatchesReviewStatus(s, status);
+}
+
 function recordMatchesVerifiedFilter(s) {
   const mode = String($("#playback-verified-filter")?.value || "all").trim().toLowerCase();
-  const count = Number(s.event_review_verified_count || 0);
-  if (mode === "all" || !mode) return true;
-  if (mode === "yes") return count > 0;
-  if (mode === "no") return count <= 0;
-  return true;
+  return recordMatchesVerifiedMode(s, mode);
 }
 
 function playbackReviewFilterQuery() {
@@ -163,12 +173,20 @@ async function fetchKnownTags() {
   }
 }
 
+function tagSuggestionName(item) {
+  if (item == null) return "";
+  if (typeof item === "string") return item.trim();
+  return String(item.name || item.tag || "").trim();
+}
+
 function refreshTagSuggestions() {
-  const list = $("#playback-tag-suggestions");
-  if (!list) return;
-  list.innerHTML = playbackKnownTags
-    .map((item) => `<option value="${recordItemEsc(item.name || "")}"></option>`)
+  const html = playbackKnownTags
+    .map((item) => `<option value="${recordItemEsc(tagSuggestionName(item))}"></option>`)
     .join("");
+  const list = $("#playback-tag-suggestions");
+  if (list) list.innerHTML = html;
+  const sandboxList = $("#sandbox-tag-suggestions");
+  if (sandboxList) sandboxList.innerHTML = html;
 }
 
 async function patchRecordTags(recordId, { add = [], remove = [] } = {}) {
@@ -1093,6 +1111,9 @@ async function startVideoPlayback(hintPrefix = "") {
 
 async function openRecordReplay(recordId, displayName = "", jsonFileName = "", expectVideo = false) {
   await prepareEventReviewRecordSwitch();
+  if (!playbackSandboxSessionId && typeof clearPlaybackSandbox === "function") {
+    clearPlaybackSandbox();
+  }
   tabs.forEach((b) => b.classList.toggle("active", b.dataset.tab === "playback"));
   Object.values(panels).forEach((p) => p.classList.remove("active"));
   panels.playback.classList.add("active");
@@ -1146,12 +1167,21 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
     poseData = await poseRes.json();
   }
   await buildFrameIndex(recordId);
-  if (typeof loadPlaybackCollisionVariant === "function") {
+  if (
+    !playbackSandboxSessionId &&
+    typeof loadPlaybackCollisionVariant === "function"
+  ) {
     await loadPlaybackCollisionVariant(recordId);
   }
   await prefetchInitialPlaybackChunks();
-  const annResult = await applyPlaybackRecordAnnotation(recordId);
+  const annResult = playbackSandboxSessionId
+    ? await applyPlaybackSandboxAnnotation(playbackSandboxSessionId)
+    : await applyPlaybackRecordAnnotation(recordId);
   const eventsPromise = loadPlaybackEvents(recordId);
+  if (playbackSandboxSessionId && typeof loadPlaybackSandbox === "function") {
+    await eventsPromise;
+    await loadPlaybackSandbox(playbackSandboxSessionId);
+  }
   if (typeof loadPlaybackWristFeatures === "function") {
     void loadPlaybackWristFeatures(recordId);
   }
@@ -1161,11 +1191,13 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
       ? " · 使用 pose 内嵌标注"
       : "";
   const collisionHint =
-    typeof playbackCollisionVariantHint === "function" && playbackCollisionOverlay
-      ? `${annHint} · ${playbackCollisionVariantHint()}`
-      : annotationBoxes.length && !collisionPersistedAtCollect()
-        ? `${annHint} · 回放时将实时计算碰撞`
-        : annHint;
+    playbackSandboxSessionId && typeof playbackSandboxHint === "function"
+      ? `${annHint} · ${playbackSandboxHint()}`
+      : typeof playbackCollisionVariantHint === "function" && playbackCollisionOverlay
+        ? `${annHint} · ${playbackCollisionVariantHint()}`
+        : annotationBoxes.length && !collisionPersistedAtCollect()
+          ? `${annHint} · 回放时将实时计算碰撞`
+          : annHint;
   $("#playback-video").value = "";
   const label = displayName || recordId;
   const jsonFile = jsonFileName || poseData?.pose_file || `${recordId}/manifest.json`;

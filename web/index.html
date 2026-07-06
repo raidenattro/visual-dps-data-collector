@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>骨架采集与回放</title>
-  <link rel="stylesheet" href="style.css?v=64" />
+  <link rel="stylesheet" href="style.css?v=70" />
 </head>
 <body>
   <header>
@@ -16,6 +16,7 @@
     <button type="button" class="tab active" data-tab="collect">采集</button>
     <button type="button" class="tab" data-tab="annotate">标注</button>
     <button type="button" class="tab" data-tab="accuracy">准确率</button>
+    <button type="button" class="tab" data-tab="sandbox">沙盒</button>
     <button type="button" class="tab" data-tab="playback">回放</button>
   </nav>
 
@@ -362,6 +363,154 @@
       </div>
     </section>
 
+    <section id="panel-sandbox" class="panel sandbox-panel">
+      <header class="sandbox-topbar">
+        <div class="sandbox-topbar-title">
+          <h2>碰撞沙盒</h2>
+          <p class="hint">临时 fork 标注并重算碰撞，<strong>不写正式库</strong>；标真对照仍用源记录。</p>
+        </div>
+        <div class="sandbox-topbar-actions">
+          <span id="sandbox-status" class="hint sandbox-status hidden" role="status" aria-live="polite"></span>
+          <button type="button" id="sandbox-clear-all" class="btn-danger" title="删除 upload/sandbox 下全部 session">
+            清除全部沙盒
+          </button>
+        </div>
+      </header>
+
+      <div class="sandbox-workspace">
+        <!-- 左：Session + 选记录 -->
+        <aside class="sandbox-dock sandbox-dock-left card">
+          <details class="sandbox-dock-section" open>
+            <summary class="sandbox-dock-summary">沙盒 Session</summary>
+            <div id="sandbox-session-list" class="sandbox-session-list"></div>
+          </details>
+          <details class="sandbox-dock-section" open>
+            <summary class="sandbox-dock-summary heading-with-tip">
+              源记录
+              <button type="button" class="field-tip" data-tip="先选机位再点 clip；可按复核状态、标真、标签（逗号 AND）筛选。">?</button>
+            </summary>
+            <div class="playback-records-filters sandbox-records-filters">
+              <div class="playback-records-tier-filter">
+                <select id="sandbox-pose-tier" title="模型层">
+                  <option value="rtmpose-t">RTMPose-T</option>
+                  <option value="rtmpose-s">RTMPose-S</option>
+                  <option value="rtmpose-m" selected>RTMPose-M</option>
+                </select>
+              </div>
+              <div class="playback-records-search-filter">
+                <input type="search" id="sandbox-record-filter" placeholder="搜索名称 / 路径…" autocomplete="off" />
+              </div>
+              <div class="playback-records-review-filter">
+                <select id="sandbox-review-status-filter" title="按人工事件复核状态筛选">
+                  <option value="all" selected>复核状态 · 全部</option>
+                  <option value="completed">已复核</option>
+                  <option value="no_collision">无碰撞</option>
+                  <option value="in_progress">复核中</option>
+                  <option value="not_started">未复核</option>
+                </select>
+              </div>
+              <div class="playback-records-verified-filter">
+                <select id="sandbox-verified-filter" title="按是否标真筛选">
+                  <option value="all" selected>标真 · 全部</option>
+                  <option value="yes">有标真</option>
+                  <option value="no">无标真</option>
+                </select>
+              </div>
+              <div class="playback-records-tag-filter">
+                <input
+                  type="search"
+                  id="sandbox-tag-filter"
+                  placeholder="标签筛选（逗号分隔，需全部匹配）"
+                  list="sandbox-tag-suggestions"
+                  autocomplete="off"
+                />
+                <datalist id="sandbox-tag-suggestions"></datalist>
+              </div>
+              <span id="sandbox-record-count" class="hint playback-records-count sandbox-record-count"></span>
+            </div>
+            <div id="sandbox-record-list" class="sandbox-record-list session-list-wrap"></div>
+            <button type="button" id="sandbox-create" class="primary-btn sandbox-create-btn" disabled>
+              创建沙盒
+            </button>
+          </details>
+        </aside>
+
+        <!-- 中：大画布标注 -->
+        <div class="sandbox-center card">
+          <div class="sandbox-annotate-bar">
+            <div class="sandbox-annotate-bar-left">
+              <label class="sandbox-inline-label">
+                模式
+                <select id="sandbox-annotation-mode">
+                  <option value="visual" selected>可视化</option>
+                  <option value="json">JSON</option>
+                </select>
+              </label>
+              <label class="sandbox-inline-label">行 <input type="number" id="sandbox-annotate-rows" value="4" min="1" max="8" /></label>
+              <label class="sandbox-inline-label">列 <input type="number" id="sandbox-annotate-cols" value="4" min="1" max="8" /></label>
+              <button type="button" id="sandbox-annotate-confirm-grid" class="primary-btn">生成货位</button>
+              <button type="button" id="sandbox-annotate-restart">重置货架</button>
+            </div>
+            <div class="sandbox-annotate-bar-right">
+              <button type="button" id="sandbox-sync-json-from-visual">同步 JSON</button>
+              <button type="button" id="sandbox-save-annotation" class="primary-btn">保存标注</button>
+              <button type="button" id="sandbox-delete-session" class="btn-danger">删 Session</button>
+            </div>
+          </div>
+          <div id="sandbox-annotate-cell-panel" class="annotate-cell-panel sandbox-cell-panel hidden">
+            <span class="hint" id="sandbox-annotate-cell-pos">—</span>
+            <label class="sandbox-inline-label">
+              货位编号
+              <input type="text" id="sandbox-annotate-box-id" placeholder="默认按行列" />
+            </label>
+            <button type="button" id="sandbox-annotate-delete-cell" class="danger-btn">删除货位</button>
+          </div>
+          <div id="sandbox-visual-annotate-wrap" class="sandbox-visual-wrap">
+            <div class="sandbox-canvas-wrap annotate-stage">
+              <canvas id="sandbox-canvas" class="hidden"></canvas>
+              <p id="sandbox-canvas-placeholder" class="sandbox-canvas-placeholder hint">
+                请创建或选择沙盒 Session，画布将加载源记录首帧
+              </p>
+            </div>
+          </div>
+          <div id="sandbox-json-annotate-wrap" class="sandbox-json-wrap hidden">
+            <textarea id="sandbox-annotation-editor" class="sandbox-annotation-editor" spellcheck="false" placeholder="选择沙盒 session 后加载…"></textarea>
+            <button type="button" id="sandbox-format-json">格式化 JSON</button>
+          </div>
+        </div>
+
+        <!-- 右：碰撞参数与运行 -->
+        <aside class="sandbox-dock sandbox-dock-right card">
+          <h3 class="sandbox-heading">碰撞参数</h3>
+          <p class="hint sandbox-dock-hint">仅沙盒重算生效</p>
+          <div class="sandbox-param-grid">
+            <label>alarm_min <input type="number" id="sandbox-alarm-min" value="3" min="1" /></label>
+            <label>cooldown <input type="number" id="sandbox-alarm-cooldown" value="0" min="0" /></label>
+            <label>interval <input type="number" id="sandbox-pose-interval" value="2" min="1" /></label>
+            <label>
+              探针
+              <select id="sandbox-probe-mode">
+                <option value="wrist" selected>wrist</option>
+                <option value="hand_extended">hand_ext</option>
+              </select>
+            </label>
+            <label>
+              α
+              <select id="sandbox-extension-ratio" disabled>
+                <option value="0.2">0.2</option>
+                <option value="0.3" selected>0.3</option>
+                <option value="0.4">0.4</option>
+              </select>
+            </label>
+          </div>
+          <div class="sandbox-run-stack">
+            <button type="button" id="sandbox-recompute" class="primary-btn">重算碰撞</button>
+            <button type="button" id="sandbox-open-playback" class="primary-btn" disabled>打开回放</button>
+          </div>
+        </aside>
+      </div>
+    </section>
+
     <section id="panel-playback" class="panel">
       <div class="playback-layout">
         <aside class="playback-layout-side playback-layout-left">
@@ -447,6 +596,7 @@
         </aside>
 
         <div class="playback-layout-main">
+          <p id="playback-sandbox-banner" class="playback-sandbox-banner hidden" role="status"></p>
           <div class="stage-wrap">
             <video id="playback-video-el" playsinline preload="metadata"></video>
             <canvas id="playback-canvas"></canvas>
@@ -642,7 +792,7 @@
   <script src="collectVideoPreview.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.8.0/math.js"></script>
   <script src="annotateGeometry.js"></script>
-  <script src="annotateVisualMode.js?v=2"></script>
+  <script src="annotateVisualMode.js?v=4"></script>
   <!-- 回放/采集主逻辑（由 app.monolith.js 拆分，按依赖顺序加载） -->
   <script src="app/00-core.js?v=70"></script>
   <script src="app/01-layout-frames.js?v=49"></script>
@@ -650,15 +800,18 @@
   <script src="app/03-tabs.js?v=36"></script>
   <script src="app/04-collision-config.js?v=35"></script>
   <script src="app/05-collect.js?v=42"></script>
-  <script src="app/06-records.js?v=49"></script>
+  <script src="app/06-records.js?v=52"></script>
   <script src="app/07-playback-stage.js?v=69"></script>
-  <script src="app/08-event-review.js?v=72"></script>
+  <script src="app/08-event-review.js?v=73"></script>
   <script src="app/09-playback-events.js?v=74"></script>
   <script src="app/10-render-collision.js?v=77"></script>
   <script src="app/11-playback-controls.js?v=72"></script>
   <script src="app/12-playback-wrist-features.js?v=3"></script>
-  <script src="app/13-playback-collision-variant.js?v=5"></script>
-  <script src="annotate.js?v=17"></script>
+  <script src="app/13-playback-collision-variant.js?v=6"></script>
+  <script src="app/14-playback-sandbox.js?v=1"></script>
+  <script src="annotate.js?v=18"></script>
   <script src="accuracy.js?v=6"></script>
+  <script src="sandbox-annotate.js?v=4"></script>
+  <script src="sandbox.js?v=5"></script>
 </body>
 </html>

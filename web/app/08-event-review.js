@@ -7,6 +7,11 @@ function drainEventReviewSaveQueue() {
   return eventReviewSaveChain;
 }
 
+/** 沙盒回放时标真/复核只读，避免 PATCH 污染源记录 */
+function isPlaybackReviewWriteBlocked() {
+  return typeof playbackSandboxSessionId !== "undefined" && Boolean(playbackSandboxSessionId);
+}
+
 function runSerializedEventReviewSave(task) {
   const run = eventReviewSaveChain.then(() => task());
   eventReviewSaveChain = run.catch(() => {});
@@ -519,6 +524,10 @@ function applyEventReviewResponse(body, seq, forRecordId = currentRecordId, opti
 async function persistEventReviewConfirmedBoxes(ev, confirmedBoxTokens) {
   const recordId = currentRecordId;
   if (!recordId || !ev) return false;
+  if (isPlaybackReviewWriteBlocked()) {
+    setEventReviewSaveStatus("沙盒模式：复核数据只读，不会写入正式库", "error");
+    return false;
+  }
   const tokens = normalizeBoxTokenList(confirmedBoxTokens);
   const eventPayload = eventToReviewPayload(ev);
   delete eventPayload.confirmed_box_tokens;
@@ -632,6 +641,10 @@ async function selectConfirmedBoxForEvent(ev, token) {
 async function persistEventReviewToggle(ev, wantVerified) {
   const recordId = currentRecordId;
   if (!recordId || !ev) return false;
+  if (isPlaybackReviewWriteBlocked()) {
+    setEventReviewSaveStatus("沙盒模式：标真只读，不会写入正式库", "error");
+    return false;
+  }
   const eventPayload = eventToReviewPayload(ev);
   const eventTotal = playbackEvents.length;
   const seq = ++eventReviewSaveSeq;
@@ -670,6 +683,10 @@ async function persistEventReviewToggle(ev, wantVerified) {
 async function persistEventReviewVerifiedList(verified_true, statusMessage = "保存中…") {
   const recordId = currentRecordId;
   if (!recordId) return false;
+  if (isPlaybackReviewWriteBlocked()) {
+    setEventReviewSaveStatus("沙盒模式：标真只读，不会写入正式库", "error");
+    return false;
+  }
   const eventTotal = playbackEvents.length;
   const seq = ++eventReviewSaveSeq;
   return runSerializedEventReviewSave(async () => {
@@ -705,6 +722,10 @@ async function persistEventReviewVerifiedList(verified_true, statusMessage = "�
 async function persistEventReviewBulkAll(markAll, statusMessage) {
   const recordId = currentRecordId;
   if (!recordId) return false;
+  if (isPlaybackReviewWriteBlocked()) {
+    setEventReviewSaveStatus("沙盒模式：标真只读，不会写入正式库", "error");
+    return false;
+  }
   const eventTotal = playbackEvents.length;
   const seq = ++eventReviewSaveSeq;
   const doneMessage = markAll ? `已全部标真 · 共 ${eventTotal} 条` : "已取消全部标真";
@@ -809,6 +830,10 @@ async function markEventReviewCompleted() {
   const recordId = currentRecordId;
   if (!recordId) {
     setEventReviewSaveStatus("请从记录列表打开回放后再完成复核", "error");
+    return;
+  }
+  if (isPlaybackReviewWriteBlocked()) {
+    setEventReviewSaveStatus("沙盒模式：复核状态只读，不会写入正式库", "error");
     return;
   }
   const verified_true = buildVerifiedTruePayload();

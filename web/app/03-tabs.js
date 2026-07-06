@@ -2,8 +2,12 @@
 tabs.forEach((btn) => {
   btn.addEventListener("click", () => {
     const leavingPlayback = panels.playback.classList.contains("active") && btn.dataset.tab !== "playback";
+    const leavingSandbox = panels.sandbox?.classList.contains("active") && btn.dataset.tab !== "sandbox";
     if (leavingPlayback) {
       suspendPlaybackOnTabLeave();
+    }
+    if (leavingSandbox && typeof unmountSandboxVisualAnnotate === "function") {
+      unmountSandboxVisualAnnotate();
     }
     tabs.forEach((b) => b.classList.toggle("active", b === btn));
     Object.values(panels).forEach((p) => p.classList.remove("active"));
@@ -13,9 +17,13 @@ tabs.forEach((btn) => {
     }
     if (btn.dataset.tab === "annotate") {
       if (typeof window.initAnnotatePanel === "function") window.initAnnotatePanel();
+      if (typeof window.rebindAnnotateVisualCanvas === "function") window.rebindAnnotateVisualCanvas();
     }
     if (btn.dataset.tab === "accuracy") {
       if (typeof window.initAccuracyPanel === "function") window.initAccuracyPanel();
+    }
+    if (btn.dataset.tab === "sandbox") {
+      if (typeof window.initSandboxPanel === "function") window.initSandboxPanel();
     }
     if (btn.dataset.tab === "playback") {
       void loadRecords({ quiet: playbackRecordsByTier.has(playbackPoseTier || "rtmpose-t") });

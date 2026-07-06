@@ -197,7 +197,10 @@ async function loadPlaybackEvents(recordId = null) {
     if (isEventVerified(ev)) applyAutoConfirmedBoxOnVerify(ev);
   });
   snapshotPlaybackEventsBaseline();
-  if (typeof syncPlaybackEventsFromCollisionVariant === "function") {
+  if (
+    typeof syncPlaybackEventsFromCollisionVariant === "function" &&
+    !(typeof playbackSandboxSessionId !== "undefined" && playbackSandboxSessionId)
+  ) {
     syncPlaybackEventsFromCollisionVariant();
   } else {
     rebuildPlaybackEventsFrameIndex();

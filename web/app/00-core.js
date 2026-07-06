@@ -12,6 +12,7 @@ const panels = {
   collect: $("#panel-collect"),
   annotate: $("#panel-annotate"),
   accuracy: $("#panel-accuracy"),
+  sandbox: $("#panel-sandbox"),
   playback: $("#panel-playback"),
 };
 

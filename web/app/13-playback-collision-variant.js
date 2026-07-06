@@ -59,6 +59,7 @@ function resetPlaybackCollisionOverlay() {
 }
 
 function playbackVariantEventsLabel(variantKey) {
+  if (String(variantKey || "").startsWith("sandbox:")) return "沙盒重算";
   if (variantKey === "wrist") return "sidecar/wrist";
   if (variantKey === "hand_ext_0.20") return "sidecar/α0.2";
   if (variantKey === "hand_ext_0.30") return "sidecar/α0.3";
@@ -132,6 +133,15 @@ function syncPlaybackEventsFromCollisionVariant() {
 }
 
 function getPlaybackCollisionOverlayForFrame(frame) {
+  if (typeof playbackSandboxOverlay !== "undefined" && playbackSandboxOverlay && frame) {
+    const sfi = Number(frame.source_frame_idx) || Number(frame.frame_idx) || 0;
+    const fi = Number(frame.frame_idx) || 0;
+    return (
+      playbackSandboxOverlay.get(`s:${sfi}`) ||
+      playbackSandboxOverlay.get(`f:${fi}`) ||
+      null
+    );
+  }
   if (!playbackCollisionOverlay || !frame) return null;
   const sfi = Number(frame.source_frame_idx) || Number(frame.frame_idx) || 0;
   const fi = Number(frame.frame_idx) || 0;
@@ -143,6 +153,9 @@ function getPlaybackCollisionOverlayForFrame(frame) {
 }
 
 function playbackCollisionVariantHint() {
+  if (typeof playbackSandboxSessionId !== "undefined" && playbackSandboxSessionId) {
+    return typeof playbackSandboxHint === "function" ? playbackSandboxHint() : "沙盒碰撞";
+  }
   const key = resolvePlaybackCollisionVariantKey();
   if (key === "wrist") return "碰撞：手腕 baseline";
   const alpha = $("#playback-hand-probe-alpha")?.value || "0.3";
