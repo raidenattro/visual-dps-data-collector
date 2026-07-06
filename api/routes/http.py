@@ -74,6 +74,7 @@ from api.inference_eval_service import (
     evaluate_upload_directory,
     evaluate_uploaded_files,
 )
+from api.eval_run_store import load_eval_clip, load_eval_run, list_eval_runs
 from api.annotate_service import (
     build_annotate_context,
     first_frame_video_for_camera,
@@ -456,6 +457,28 @@ def post_accuracy_evaluate_upload_path(body: dict[str, Any] = Body(...)) -> dict
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/api/accuracy/eval-runs")
+def get_accuracy_eval_runs(limit: int = 50) -> dict[str, Any]:
+    """历史评估 run 列表。"""
+    return {"runs": list_eval_runs(limit=max(1, min(int(limit), 200)))}
+
+
+@router.get("/api/accuracy/eval-runs/{eval_id}")
+def get_accuracy_eval_run(eval_id: str) -> dict[str, Any]:
+    try:
+        return load_eval_run(eval_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.get("/api/accuracy/eval-runs/{eval_id}/clips/{record_id:path}")
+def get_accuracy_eval_clip(eval_id: str, record_id: str) -> dict[str, Any]:
+    try:
+        return load_eval_clip(eval_id, record_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
 
 
 def _parse_tags_query(raw: str) -> list[str]:

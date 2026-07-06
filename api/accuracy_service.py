@@ -142,6 +142,20 @@ def _extract_alarms(timeline: list[dict[str, Any]]) -> list[tuple[int, str]]:
     return out
 
 
+def _count_timeline_collisions(timeline: list[dict[str, Any]]) -> int:
+    """从 timeline 统计碰撞条目数（与告警提取规则一致）。"""
+    count = 0
+    for row in timeline:
+        fi = int(row.get("frame_idx") or 0)
+        if fi <= 0:
+            continue
+        for raw in row.get("collisions") or []:
+            token = canonical_box_token(str(raw).strip())
+            if token:
+                count += 1
+    return count
+
+
 def _segment_detected(segment: GroundTruthSegment, alarms: list[tuple[int, str]]) -> bool:
     gt_tokens = list(segment.gt_tokens)
     for frame, token in alarms:
@@ -374,7 +388,17 @@ def evaluate_single_clip(
 
     alarms = _extract_alarms(timeline)
     metrics = evaluate_segments(segments, alarms)
-    missed_segments = [s for s in metrics["segment_details"] if not s.get("detected")]
+    from api.eval_diagnostics import build_clip_diagnostics
+
+    tier_label = normalize_pose_tier(pose_tier)
+    diagnostics = build_clip_diagnostics(
+        segments,
+        alarms,
+        metrics,
+        source_label=f"{tier_label} · timeline 告警",
+        collision_count=_count_timeline_collisions(timeline),
+        verified_count=len(verified),
+    )
 
     return {
         "review_key": review_key,
@@ -383,9 +407,11 @@ def evaluate_single_clip(
         "status": "ok",
         **{k: metrics[k] for k in ("gt_segments", "detected", "missed", "false_alarms", "recall", "miss_rate")},
         "alarm_count": len(alarms),
+        "collision_count": _count_timeline_collisions(timeline),
         "verified_entry_count": len(verified),
-        "missed_segments": missed_segments[:10],
-        "false_alarm_samples": metrics["false_alarm_samples"],
+        "diagnostics": diagnostics,
+        "missed_segments": diagnostics["missed_segments"],
+        "false_alarm_samples": diagnostics["false_alarms"],
     }
 
 
@@ -478,7 +504,8 @@ def evaluate_camera_batch(
             else None
         )
 
-    return {
+    batch_result = {
+        "source": "local_timeline",
         "pose_tier": tier,
         "camera_label": camera_label,
         "camera_slug": slug,
@@ -495,6 +522,12 @@ def evaluate_camera_batch(
             "false_alarm": "不在任一段时间与货框范围内的告警记 1 次误报",
         },
     }
+    from api.eval_run_store import save_eval_run
+
+    eval_id = save_eval_run(batch_result, eval_mode="local_timeline", paths=paths)
+    batch_result["eval_id"] = eval_id
+    summary["eval_id"] = eval_id
+    return batch_result
 
 
 def resolve_annotation_for_accuracy_record(

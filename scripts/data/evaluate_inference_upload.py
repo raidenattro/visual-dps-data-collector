@@ -121,10 +121,13 @@ def main() -> int:
     )
 
     s = result.get("summary") or {}
+    eval_id = result.get("eval_id") or s.get("eval_id") or ""
     print(
         f"评估完成: {s.get('evaluated', 0)}/{s.get('clip_count', 0)} 片, "
         f"recall={_pct(s.get('recall'))}, FP={s.get('false_alarms', 0)}"
     )
+    if eval_id:
+        print(f"评估落盘: localdata/eval_runs/{eval_id}")
 
     md = _render_markdown(result, dir_path=dir_path)
     out_path = Path(args.out)

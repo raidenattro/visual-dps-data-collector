@@ -29,6 +29,8 @@ from api.accuracy_service import (
     evaluate_segments,
     parse_accuracy_tag_filter,
 )
+from api.eval_diagnostics import build_clip_diagnostics
+from api.eval_run_store import save_eval_run
 
 MANIFEST_FILE = "_manifest.json"
 
@@ -81,6 +83,20 @@ def _box_tokens_from_picking_frame(fr: dict[str, Any]) -> list[str]:
         if tokens:
             break
     return tokens
+
+
+def count_rule_collisions_from_frames(frames: list[dict[str, Any]]) -> int:
+    """统计上传推测 JSON 中 rule_collisions 条目数。"""
+    count = 0
+    for fr in frames:
+        fi = int(fr.get("frame_idx") or 0)
+        if fi <= 0:
+            continue
+        for raw in fr.get("rule_collisions") or []:
+            token = canonical_box_token(str(raw).strip())
+            if token:
+                count += 1
+    return count
 
 
 def extract_picking_alarms_from_frames(
@@ -257,6 +273,14 @@ def evaluate_uploaded_clip(
 
     alarms = extract_picking_alarms_from_frames(clip.frames)
     metrics = evaluate_segments(segments, alarms)
+    diagnostics = build_clip_diagnostics(
+        segments,
+        alarms,
+        metrics,
+        source_label="上传推测 · is_picking",
+        collision_count=count_rule_collisions_from_frames(clip.frames),
+        verified_count=len(verified),
+    )
     picking_frame_count = len({
         int(fr.get("frame_idx") or 0)
         for fr in clip.frames
@@ -264,7 +288,6 @@ def evaluate_uploaded_clip(
     })
 
     _, slug, clip_name = parse_record_path_segments(record_id)
-    missed_segments = [s for s in metrics["segment_details"] if not s.get("detected")]
 
     return {
         **base,
@@ -280,11 +303,13 @@ def evaluate_uploaded_clip(
         "recall": metrics["recall"],
         "miss_rate": metrics["miss_rate"],
         "alarm_count": len(alarms),
+        "collision_count": count_rule_collisions_from_frames(clip.frames),
         "picking_frame_count": picking_frame_count,
         "verified_entry_count": len(verified),
         "precision_proxy": _precision_proxy(metrics["detected"], metrics["false_alarms"]),
-        "missed_segments": missed_segments[:10],
-        "false_alarm_samples": metrics["false_alarm_samples"][:10],
+        "diagnostics": diagnostics,
+        "missed_segments": diagnostics["missed_segments"],
+        "false_alarm_samples": diagnostics["false_alarms"],
     }
 
 
@@ -345,7 +370,7 @@ def evaluate_upload_batch(
     if tag_filter:
         summary["tag_filter"] = tag_filter
 
-    return {
+    batch_result = {
         "source": "upload",
         "upload_label": upload_label,
         "summary": summary,
@@ -364,6 +389,15 @@ def evaluate_upload_batch(
             "false_alarm": "is_picking=true 但不在标真段时间+货框范围内记 1 次误报",
         },
     }
+    eval_id = save_eval_run(
+        batch_result,
+        eval_mode="upload",
+        paths=paths,
+        extra_manifest={"upload_manifest": manifest} if manifest else None,
+    )
+    batch_result["eval_id"] = eval_id
+    summary["eval_id"] = eval_id
+    return batch_result
 
 
 def evaluate_upload_directory(
