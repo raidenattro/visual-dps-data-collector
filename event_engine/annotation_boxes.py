@@ -114,7 +114,7 @@ def build_scaled_boxes(
             continue
         new_box = dict(box)
         new_box["video_polygon"] = mapped_pts
-        new_box["orig_contour"] = np.int32(mapped_pts).reshape((-1, 1, 2))
+        new_box["orig_contour"] = np.asarray(mapped_pts, dtype=np.float32).reshape((-1, 1, 2))
         scaled.append(new_box)
     return scaled
 

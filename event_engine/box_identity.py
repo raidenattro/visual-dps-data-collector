@@ -3,6 +3,19 @@
 from __future__ import annotations
 
 
+def shelf_box_collision_token(box: dict) -> str:
+    """infer-collision / box_human_det 风格 token：{shelf_code}:{box_id} 或 Box_{box_id}。"""
+    if not isinstance(box, dict):
+        return ""
+    shelf = str(box.get("shelf_code", "") or "").strip()
+    box_id = str(box.get("box_id", "") or box.get("id", "") or "").strip()
+    if not box_id:
+        return ""
+    if shelf:
+        return f"{shelf}:{box_id}"
+    return f"Box_{box_id}"
+
+
 def box_collision_token(box: dict) -> str:
     """碰撞/告警落盘 token：仅使用 box_id，格式 Box_{box_id}。"""
     if not isinstance(box, dict):

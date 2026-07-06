@@ -6,6 +6,7 @@ from typing import Any
 
 from event_engine.box_identity import canonical_box_token
 from event_engine.collision import CollisionProcessor
+from event_engine.collision_infer import InferCollisionProcessor
 from event_engine.wrist_hits import DEFAULT_EXTENSION_RATIO, ProbeMode
 
 
@@ -92,6 +93,72 @@ def simulate_alarms_from_frames(
             if token:
                 out.append((fi, token))
     return out
+
+
+def simulate_frame_events_infer_collision(
+    frames: list[dict[str, Any]],
+    boxes: list[dict[str, Any]],
+    *,
+    pose_frame_interval: int = 1,
+    alarm_min_consecutive_frames: int = 3,
+    alarm_cooldown_frames: int = 0,
+    video_fps: float = 15.0,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """与 ShelfPickSense infer-collision 对齐：帧范围、跳帧、缺失帧补空、box_human_det 碰撞逻辑。
+
+    帧索引使用 skeleton.parquet 的 frame_idx（非 source_frame_idx）。
+    返回 (events, stats)，stats 含 min_frame / max_frame / skeleton_frame_count。
+    """
+    frames_by_idx: dict[int, dict[str, Any]] = {}
+    for fr in frames:
+        if not isinstance(fr, dict):
+            continue
+        if not (fr.get("persons") or []):
+            continue
+        idx = int(fr.get("frame_idx") or 0)
+        if idx <= 0:
+            continue
+        frames_by_idx[idx] = fr
+
+    if not frames_by_idx:
+        return [], {"min_frame": 0, "max_frame": 0, "skeleton_frame_count": 0}
+
+    min_frame = min(frames_by_idx)
+    max_frame = max(frames_by_idx)
+    interval = max(1, int(pose_frame_interval))
+
+    processor = InferCollisionProcessor(
+        boxes,
+        alarm_min_consecutive_frames=max(1, int(alarm_min_consecutive_frames)),
+        alarm_cooldown_frames=max(0, int(alarm_cooldown_frames)),
+        video_fps=video_fps,
+    )
+
+    out: list[dict[str, Any]] = []
+    for frame_idx in range(min_frame, max_frame + 1):
+        if (frame_idx - 1) % interval != 0:
+            continue
+        fr = frames_by_idx.get(frame_idx)
+        # 与 ShelfPickSense infer-collision 一致：缺帧不调用 processor，状态机不推进
+        if fr is not None:
+            event = processor.process({"frame_idx": frame_idx, "persons": fr.get("persons") or []})
+            collisions = sorted({str(t).strip() for t in (event.get("collisions") or []) if str(t).strip()})
+            alarms = sorted({str(t).strip() for t in (event.get("alarm_collisions") or []) if str(t).strip()})
+        else:
+            collisions = []
+            alarms = []
+        out.append({
+            "frame_idx": frame_idx,
+            "collisions": collisions,
+            "alarm_collisions": alarms,
+        })
+
+    stats = {
+        "min_frame": min_frame,
+        "max_frame": max_frame,
+        "skeleton_frame_count": len(frames_by_idx),
+    }
+    return out, stats
 
 
 def simulate_frame_events_from_frames(
