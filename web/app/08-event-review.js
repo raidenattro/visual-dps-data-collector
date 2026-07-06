@@ -319,21 +319,34 @@ function getActiveEvent() {
 function refreshEventCountLabel() {
   if (!eventCountLabel) return;
   if (!playbackEvents.length) return;
-  const alarmN = playbackEvents.filter((e) => e.event_type === "alarm").length;
-  const collN = playbackEvents.filter((e) => e.event_type === "collision").length;
-  const verifiedN = countVerifiedEvents();
+  let alarmN = playbackEvents.filter((e) => e.event_type === "alarm").length;
+  let collN = playbackEvents.filter((e) => e.event_type === "collision").length;
+  let verifiedN = countVerifiedEvents();
   const list = filteredPlaybackEvents();
   const rtHint = playbackEventsFromRealtime ? " · 回放实时计算" : "";
   const filterHint = list.length !== playbackEvents.length ? ` · 队列 ${list.length}` : "";
   let accuracyHint = "";
-  if (typeof countPlaybackMissEvents === "function") {
+  let sourceHint = "";
+
+  const evalCounts =
+    typeof getPlaybackAccuracyEvalCounts === "function" ? getPlaybackAccuracyEvalCounts() : null;
+  if (evalCounts) {
+    alarmN = evalCounts.alarms ?? alarmN;
+    collN = evalCounts.collisions ?? collN;
+    if (evalCounts.verified > 0) verifiedN = evalCounts.verified;
+    accuracyHint = ` · 漏报段 ${evalCounts.missed_segments ?? 0} · 误报 ${evalCounts.false_alarms ?? 0}`;
+    if (evalCounts.sourceLabel) {
+      sourceHint = ` · 来源：${evalCounts.sourceLabel}`;
+    }
+  } else if (typeof countPlaybackMissEvents === "function") {
     const missN = countPlaybackMissEvents();
     const falseN = countPlaybackFalseAlarmEvents();
     if (missN > 0 || falseN > 0) {
       accuracyHint = ` · 漏报段 ${missN} · 误报 ${falseN}`;
     }
   }
-  eventCountLabel.textContent = `告警 ${alarmN} · 碰撞 ${collN} · 标真 ${verifiedN}${accuracyHint}${rtHint}${filterHint}`;
+
+  eventCountLabel.textContent = `告警 ${alarmN} · 碰撞 ${collN} · 标真 ${verifiedN}${accuracyHint}${sourceHint}${rtHint}${filterHint}`;
 }
 
 function syncVerifiedKeysFromEvents(events, reviewPayload = null) {

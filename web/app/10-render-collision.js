@@ -173,11 +173,99 @@ function addTokenKeysToSet(token, set) {
 }
 
 let playbackAccuracyOverlayCache = null;
+let externalPlaybackAccuracyOverlay = null;
 
 const MAX_SEEK_ACCURACY_DOTS = 120;
 
+function normalizeExternalPlaybackOverlay(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const segments = (raw.segments || []).map((seg) => ({
+    frame_start: Number(seg.frame_start) || 0,
+    frame_end: Number(seg.frame_end) || 0,
+    tokens: Array.isArray(seg.tokens)
+      ? seg.tokens.map((t) => String(t).trim()).filter(Boolean)
+      : canonicalizeBoxTokenList(seg.gt_tokens),
+    detected: Boolean(seg.detected),
+  }));
+  const allAlarms = [];
+  (raw.alarms || []).forEach((row) => {
+    if (!Array.isArray(row) || row.length < 2) return;
+    const fi = parseInt(row[0], 10) || 0;
+    const token = String(row[1] || "").trim();
+    if (fi > 0) allAlarms.push([fi, token]);
+  });
+  if (!segments.length && !allAlarms.length) return null;
+
+  const countsRaw = raw.counts && typeof raw.counts === "object" ? raw.counts : {};
+  let falseAlarms = Number(countsRaw.false_alarms);
+  if (!Number.isFinite(falseAlarms)) {
+    falseAlarms = 0;
+    allAlarms.forEach(([frame, token]) => {
+      const fi = Number(frame) || 0;
+      const covered = segments.some(
+        (seg) =>
+          fi >= seg.frame_start &&
+          fi <= seg.frame_end &&
+          tokenMatchesAnyList(token, seg.tokens)
+      );
+      if (!covered) falseAlarms += 1;
+    });
+  }
+  const missedSegments = Number(countsRaw.missed_segments);
+  const counts = {
+    alarms: Number.isFinite(Number(countsRaw.alarms)) ? Number(countsRaw.alarms) : allAlarms.length,
+    collisions: Number.isFinite(Number(countsRaw.collisions)) ? Number(countsRaw.collisions) : 0,
+    verified: Number.isFinite(Number(countsRaw.verified)) ? Number(countsRaw.verified) : 0,
+    missed_segments: Number.isFinite(missedSegments)
+      ? missedSegments
+      : segments.filter((seg) => !seg.detected).length,
+    false_alarms: falseAlarms,
+  };
+
+  return {
+    segments,
+    allAlarms,
+    source_label: String(raw.source_label || "").trim(),
+    counts,
+  };
+}
+
+function setExternalPlaybackAccuracyOverlay(overlay) {
+  externalPlaybackAccuracyOverlay = overlay ? normalizeExternalPlaybackOverlay(overlay) : null;
+  playbackAccuracyOverlayCache = externalPlaybackAccuracyOverlay;
+  if (typeof renderAccuracySeekMarkers === "function") renderAccuracySeekMarkers();
+  if (typeof refreshEventCountLabel === "function") refreshEventCountLabel();
+}
+
+function clearExternalPlaybackAccuracyOverlay() {
+  externalPlaybackAccuracyOverlay = null;
+  invalidatePlaybackAccuracyOverlay();
+  if (typeof refreshEventCountLabel === "function") refreshEventCountLabel();
+}
+
+window.setExternalPlaybackAccuracyOverlay = setExternalPlaybackAccuracyOverlay;
+window.clearExternalPlaybackAccuracyOverlay = clearExternalPlaybackAccuracyOverlay;
+
+/** 准确率评估跳转时 overlay 携带的来源统计（与评估结果一致） */
+function getPlaybackAccuracyEvalCounts() {
+  if (!externalPlaybackAccuracyOverlay?.counts) return null;
+  return {
+    sourceLabel: externalPlaybackAccuracyOverlay.source_label || "",
+    alarms: externalPlaybackAccuracyOverlay.counts.alarms ?? 0,
+    collisions: externalPlaybackAccuracyOverlay.counts.collisions ?? 0,
+    verified: externalPlaybackAccuracyOverlay.counts.verified ?? 0,
+    missed_segments: externalPlaybackAccuracyOverlay.counts.missed_segments ?? 0,
+    false_alarms: externalPlaybackAccuracyOverlay.counts.false_alarms ?? 0,
+  };
+}
+
+window.getPlaybackAccuracyEvalCounts = getPlaybackAccuracyEvalCounts;
+
 function invalidatePlaybackAccuracyOverlay() {
-  playbackAccuracyOverlayCache = null;
+  playbackAccuracyOverlayCache = externalPlaybackAccuracyOverlay || null;
+  if (!playbackAccuracyOverlayCache && typeof buildPlaybackAccuracyOverlayData === "function") {
+    playbackAccuracyOverlayCache = null;
+  }
   if (typeof renderAccuracySeekMarkers === "function") renderAccuracySeekMarkers();
 }
 
@@ -224,6 +312,9 @@ function buildPlaybackAccuracyOverlay() {
 }
 
 function getPlaybackAccuracyOverlay() {
+  if (externalPlaybackAccuracyOverlay) {
+    return externalPlaybackAccuracyOverlay;
+  }
   if (!playbackAccuracyOverlayCache) {
     playbackAccuracyOverlayCache = buildPlaybackAccuracyOverlayData();
   }
@@ -420,6 +511,9 @@ function isPlaybackEventMiss(ev) {
 }
 
 function countPlaybackFalseAlarmEvents() {
+  if (externalPlaybackAccuracyOverlay?.counts) {
+    return externalPlaybackAccuracyOverlay.counts.false_alarms ?? 0;
+  }
   return (playbackEvents || []).filter((ev) => isPlaybackEventFalseAlarm(ev)).length;
 }
 

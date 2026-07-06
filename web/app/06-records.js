@@ -832,14 +832,52 @@ async function ensurePlaybackRecordInList(recordId, tier = playbackPoseTier) {
 }
 
 /**
+ * 准确率诊断跳转：加载回放后 seek 到指定帧并展示评估 overlay。
+ */
+let pendingPlaybackAccuracyNav = null;
+
+function setPendingPlaybackAccuracyNav(nav) {
+  pendingPlaybackAccuracyNav = nav && typeof nav === "object" ? { ...nav } : null;
+}
+
+async function applyPendingPlaybackAccuracyNav() {
+  const pending = pendingPlaybackAccuracyNav;
+  pendingPlaybackAccuracyNav = null;
+  if (!pending) return;
+
+  if (pending.accuracyOverlay && typeof setExternalPlaybackAccuracyOverlay === "function") {
+    setExternalPlaybackAccuracyOverlay(pending.accuracyOverlay);
+  } else if (typeof clearExternalPlaybackAccuracyOverlay === "function") {
+    clearExternalPlaybackAccuracyOverlay();
+  }
+
+  const seekFrame = parseInt(pending.seekFrameIdx, 10) || 0;
+  if (seekFrame > 0 && typeof seekToTimestamp === "function" && Array.isArray(frameByTime)) {
+    const row = frameByTime.find((r) => Number(r.frameIdx) === seekFrame);
+    if (row && Number.isFinite(row.t)) {
+      await seekToTimestamp(row.t, seekFrame, { skipEventSync: false });
+    }
+  }
+
+  if (typeof renderAccuracySeekMarkers === "function") renderAccuracySeekMarkers();
+  if (typeof redrawCurrentFrame === "function") redrawCurrentFrame();
+  if (typeof refreshEventCountLabel === "function") refreshEventCountLabel();
+}
+
+window.setPendingPlaybackAccuracyNav = setPendingPlaybackAccuracyNav;
+window.applyPendingPlaybackAccuracyNav = applyPendingPlaybackAccuracyNav;
+
+/**
  * 从准确率等模块跳转到回放：切换模型层、下钻机位并高亮记录。
- * autoPlay=true 时自动加载并回放。
+ * autoPlay=true 时自动加载并回放；可指定 seekFrameIdx 与 accuracyOverlay。
  */
 async function navigateToPlaybackRecord({
   recordId = "",
   poseTier = "",
   cameraSlug = "",
   autoPlay = false,
+  seekFrameIdx = null,
+  accuracyOverlay = null,
 } = {}) {
   const rid = String(recordId || "").trim();
   if (!rid) return false;
@@ -883,8 +921,13 @@ async function navigateToPlaybackRecord({
 
   if (typeof restorePlaybackPanelUi === "function") restorePlaybackPanelUi();
 
+  if (seekFrameIdx != null || accuracyOverlay) {
+    setPendingPlaybackAccuracyNav({ seekFrameIdx, accuracyOverlay });
+  }
+
   if (autoPlay && found && typeof startPlaybackFromSelectedRecord === "function") {
     await startPlaybackFromSelectedRecord();
+    await applyPendingPlaybackAccuracyNav();
   }
 
   return found;
@@ -1093,6 +1136,9 @@ async function startVideoPlayback(hintPrefix = "") {
 
 async function openRecordReplay(recordId, displayName = "", jsonFileName = "", expectVideo = false) {
   await prepareEventReviewRecordSwitch();
+  if (!pendingPlaybackAccuracyNav && typeof clearExternalPlaybackAccuracyOverlay === "function") {
+    clearExternalPlaybackAccuracyOverlay();
+  }
   tabs.forEach((b) => b.classList.toggle("active", b.dataset.tab === "playback"));
   Object.values(panels).forEach((p) => p.classList.remove("active"));
   panels.playback.classList.add("active");
@@ -1184,6 +1230,7 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
     if (!playbackEvents.length) {
       await startVideoPlayback("");
     }
+    await applyPendingPlaybackAccuracyNav();
     return;
   }
 
@@ -1193,4 +1240,5 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
     setPlaybackInfo(`${baseHint} · 无配套视频，可上传或仅播放骨骼。`);
   }
   redrawCurrentFrame();
+  await applyPendingPlaybackAccuracyNav();
 }
