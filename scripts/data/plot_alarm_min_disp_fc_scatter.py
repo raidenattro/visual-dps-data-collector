@@ -27,22 +27,23 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from event_engine.cv2_shim import ensure_cv2_point_polygon_test
+
+ensure_cv2_point_polygon_test()
+
 from scripts.data.report_paths import DOCS_JSON_DIR, DOCS_VIEW_DIR, resolve_docs_json
 
-# 触发 evaluate_combo1 内 cv2 shim
-import scripts.data.evaluate_combo1_segment_filter  # noqa: F401
-
 from config_loader import parse_record_path_segments, resolve_config_path
-from scripts.data.analyze_wrist_feature_discrimination import (
+from scripts.data.eval_dataset import (
     DEFAULT_CAMERAS,
     DEFAULT_REVIEW_STATUS,
     DEFAULT_TAGS,
     DEFAULT_TIER,
-    _collect_record_ids,
-    _parse_csv_list,
-    _parse_tags,
-    _seg_overlaps_false_alarm,
-    _seg_overlaps_gt,
+    collect_record_ids,
+    parse_csv_list,
+    parse_tags,
+    seg_overlaps_false_alarm,
+    seg_overlaps_gt,
 )
 from scripts.data.evaluate_combo1_segment_filter import (
     ComboRule,
@@ -139,7 +140,7 @@ def _classify_segment(
             if gt_detected.get(_gt_key(gt), False):
                 return CATEGORY_TP
         return CATEGORY_FN
-    if _seg_overlaps_false_alarm(seg, false_alarm_by_frame):
+    if seg_overlaps_false_alarm(seg, false_alarm_by_frame):
         return CATEGORY_FP
     return None
 
@@ -547,9 +548,9 @@ def main() -> int:
     args = parser.parse_args()
 
     resolve_config_path(None)
-    tags = _parse_tags(args.tags)
-    cameras = _parse_csv_list(args.cameras)
-    record_ids = _collect_record_ids(
+    tags = parse_tags(args.tags)
+    cameras = parse_csv_list(args.cameras)
+    record_ids = collect_record_ids(
         tier=args.tier,
         cameras=set(cameras),
         tags=tags,

@@ -24,48 +24,9 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from event_engine.cv2_shim import ensure_cv2_point_polygon_test
 
-def _ensure_cv2_point_polygon_test() -> None:
-    existing = sys.modules.get("cv2")
-    if existing is not None and hasattr(existing, "pointPolygonTest"):
-        return
-
-    def _ray_point_in_contour(x: float, y: float, contour) -> bool:
-        try:
-            import numpy as np
-
-            arr = np.asarray(contour, dtype=float)
-            if arr.ndim == 3:
-                arr = arr.reshape(-1, 2)
-            elif arr.ndim == 2 and arr.shape[1] != 2:
-                arr = arr.reshape(-1, 2)
-            poly = [(float(px), float(py)) for px, py in arr]
-        except Exception:
-            poly = []
-            for pt in contour or []:
-                if isinstance(pt, (list, tuple)) and len(pt) >= 2:
-                    poly.append((float(pt[0]), float(pt[1])))
-        if len(poly) < 3:
-            return False
-        inside = False
-        n = len(poly)
-        for i in range(n):
-            x1, y1 = poly[i]
-            x2, y2 = poly[(i + 1) % n]
-            if ((y1 > y) != (y2 > y)) and (x < (x2 - x1) * (y - y1) / (y2 - y1 + 1e-12) + x1):
-                inside = not inside
-        return inside
-
-    class _Cv2Shim:
-        @staticmethod
-        def pointPolygonTest(contour, pt, measure_dist):  # noqa: N802
-            x, y = float(pt[0]), float(pt[1])
-            return 1.0 if _ray_point_in_contour(x, y, contour) else -1.0
-
-    sys.modules["cv2"] = _Cv2Shim()
-
-
-_ensure_cv2_point_polygon_test()
+ensure_cv2_point_polygon_test()
 
 from config_loader import parse_record_path_segments, resolve_app_paths, resolve_config_path
 from event_engine.annotation_boxes import load_scaled_boxes
@@ -83,14 +44,14 @@ from api.accuracy_service import (
     resolve_annotation_for_accuracy_record,
 )
 from api.record_service import locate_record_by_id
-from scripts.data.analyze_wrist_feature_discrimination import (
+from scripts.data.eval_dataset import (
     DEFAULT_CAMERAS,
     DEFAULT_REVIEW_STATUS,
     DEFAULT_TAGS,
     DEFAULT_TIER,
-    _collect_record_ids,
-    _parse_csv_list,
-    _parse_tags,
+    collect_record_ids,
+    parse_csv_list,
+    parse_tags,
 )
 from scripts.data.report_paths import DOCS_JSON_DIR, resolve_docs_json
 
@@ -418,9 +379,9 @@ def main() -> int:
     args = parser.parse_args()
 
     resolve_config_path(None)
-    tags = _parse_tags(args.tags)
-    cameras = _parse_csv_list(args.cameras)
-    record_ids = _collect_record_ids(
+    tags = parse_tags(args.tags)
+    cameras = parse_csv_list(args.cameras)
+    record_ids = collect_record_ids(
         tier=args.tier,
         cameras=set(cameras),
         tags=tags,

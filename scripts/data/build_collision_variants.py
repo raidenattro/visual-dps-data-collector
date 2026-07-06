@@ -23,14 +23,14 @@ if str(ROOT) not in sys.path:
 from config_loader import resolve_config_path
 from api.collision_variants_service import build_collision_variants_for_record
 from api.record_service import locate_record_by_id
-from scripts.data.analyze_wrist_feature_discrimination import (
+from scripts.data.eval_dataset import (
     DEFAULT_CAMERAS,
     DEFAULT_REVIEW_STATUS,
     DEFAULT_TAGS,
     DEFAULT_TIER,
-    _collect_record_ids,
-    _parse_csv_list,
-    _parse_tags,
+    collect_record_ids,
+    parse_csv_list,
+    parse_tags,
 )
 
 
@@ -52,13 +52,13 @@ def main() -> int:
     args = parser.parse_args()
 
     resolve_config_path(None)
-    tags = _parse_tags(args.tags)
-    cameras = _parse_csv_list(args.cameras)
+    tags = parse_tags(args.tags)
+    cameras = parse_csv_list(args.cameras)
 
     if args.record.strip():
         record_ids = [args.record.strip()]
     else:
-        record_ids = _collect_record_ids(
+        record_ids = collect_record_ids(
             tier=args.tier,
             cameras=set(cameras),
             tags=tags,

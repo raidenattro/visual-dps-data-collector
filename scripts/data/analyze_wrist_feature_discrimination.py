@@ -31,27 +31,33 @@ if str(ROOT) not in sys.path:
 from config_loader import parse_record_path_segments, resolve_app_paths, resolve_config_path
 from event_engine.box_identity import token_matches_any
 from pose_store import load_event_review, load_timeline
-from record_index_store import list_record_summaries, maybe_sync_record_summaries
-from record_tag_store import normalize_tag_name, record_ids_with_all_tags
 
 from api.accuracy_service import GroundTruthSegment, build_ground_truth_segments
 from api.record_service import locate_record_by_id
 from api.wrist_features_service import extract_wrist_features_for_record
+from scripts.data.eval_dataset import (
+    DEFAULT_CAMERAS,
+    DEFAULT_REVIEW_STATUS,
+    DEFAULT_TAGS,
+    DEFAULT_TIER,
+    build_false_alarm_by_frame,
+    collect_record_ids,
+    parse_csv_list,
+    parse_tags,
+    ranges_overlap,
+    seg_overlaps_false_alarm,
+    seg_overlaps_gt,
+)
 from scripts.data.report_paths import DOCS_JSON_DIR, resolve_docs_json
 
-DEFAULT_CAMERAS = (
-    "1-1-1",
-    "1-2-1",
-    "2-2-2",
-    "2-3-1",
-    "2-4-1",
-    "2-5-1",
-    "2-6-1",
-    "2-7-2",
-)
-DEFAULT_TAGS = ("单人", "无遮挡")
-DEFAULT_TIER = "rtmpose-m"
-DEFAULT_REVIEW_STATUS = "completed"
+# 兼容旧私有名（本文件内部仍可使用）
+_parse_csv_list = parse_csv_list
+_parse_tags = parse_tags
+_collect_record_ids = collect_record_ids
+_ranges_overlap = ranges_overlap
+_seg_overlaps_gt = seg_overlaps_gt
+_seg_overlaps_false_alarm = seg_overlaps_false_alarm
+_build_false_alarm_by_frame = build_false_alarm_by_frame
 
 
 def _pct(xs: list[float], p: float) -> float | None:
@@ -79,61 +85,6 @@ def _stats(xs: list[float]) -> dict[str, Any]:
     }
 
 
-def _parse_csv_list(raw: str) -> list[str]:
-    return [p.strip() for p in str(raw or "").split(",") if p.strip()]
-
-
-def _parse_tags(raw: str) -> list[str]:
-    out: list[str] = []
-    for part in _parse_csv_list(raw):
-        name = normalize_tag_name(part)
-        if name not in out:
-            out.append(name)
-    return out
-
-
-def _collect_record_ids(
-    *,
-    tier: str,
-    cameras: set[str],
-    tags: list[str],
-    review_status: str | None = DEFAULT_REVIEW_STATUS,
-    has_verified: bool | None = True,
-    sync_index: bool = True,
-) -> list[str]:
-    """与回放列表筛选一致：标签 + 机位 + 复核状态 + 有标真（record_index）。"""
-    paths = resolve_app_paths()
-    if sync_index:
-        maybe_sync_record_summaries(paths, tier or None, force=False, offset=0)
-
-    allowed = record_ids_with_all_tags(tags) if tags else None
-    review_filter = str(review_status or "").strip().lower() or None
-
-    items = list_record_summaries(
-        pose_tier=tier or None,
-        allowed_ids=allowed,
-        review_status=review_filter,
-        has_verified=has_verified,
-    )
-
-    out: list[str] = []
-    seen: set[str] = set()
-    for item in items:
-        rid = str(item.get("record_id") or "").strip()
-        if not rid or rid in seen:
-            continue
-        slug = str(item.get("camera_slug") or "").strip()
-        if not slug:
-            _, slug, _ = parse_record_path_segments(rid)
-        if cameras and slug not in cameras:
-            continue
-        if not locate_record_by_id(rid):
-            continue
-        seen.add(rid)
-        out.append(rid)
-    return sorted(out)
-
-
 def _load_ground_truth_segments(locator) -> tuple[list[GroundTruthSegment], dict[str, Any]]:
     """加载人工复核标真并合并为 ground truth 时间段（与准确率评估一致）。"""
     review = load_event_review(locator)
@@ -141,67 +92,9 @@ def _load_ground_truth_segments(locator) -> tuple[list[GroundTruthSegment], dict
     return build_ground_truth_segments(verified), review
 
 
-def _ranges_overlap(a0: int, a1: int, b0: int, b1: int) -> bool:
-    return a0 <= b1 and b0 <= a1
-
-
-def _seg_overlaps_gt(seg: dict[str, Any], gt_segments: list[GroundTruthSegment]) -> bool:
-    """手腕碰撞段是否与某条人工标真段在时间与范本货框上重叠。"""
-    a = int(seg.get("frame_enter") or 0)
-    b = int(seg.get("frame_exit") or 0)
-    tok = str(seg.get("box_token") or "").strip()
-    if not tok or not gt_segments:
-        return False
-    for gt in gt_segments:
-        if not _ranges_overlap(a, b, gt.frame_start, gt.frame_end):
-            continue
-        if token_matches_any(tok, list(gt.gt_tokens)):
-            return True
-    return False
-
-
 def _frame_in_gt(fi: int, gt_segments: list[GroundTruthSegment]) -> bool:
     for gt in gt_segments:
         if gt.frame_start <= fi <= gt.frame_end:
-            return True
-    return False
-
-
-def _build_false_alarm_by_frame(
-    timeline: list[dict[str, Any]],
-    gt_segments: list[GroundTruthSegment],
-) -> dict[int, list[str]]:
-    """误报告警帧：timeline alarm_collisions 未被任何标真段（时间+范本货框）覆盖。"""
-    by_frame: dict[int, list[str]] = {}
-    for row in timeline:
-        fi = int(row.get("frame_idx") or 0)
-        for raw in row.get("alarm_collisions") or []:
-            token = str(raw).strip()
-            if not token:
-                continue
-            covered = any(
-                gt.frame_start <= fi <= gt.frame_end and token_matches_any(token, list(gt.gt_tokens))
-                for gt in gt_segments
-            )
-            if not covered:
-                by_frame.setdefault(fi, []).append(token)
-    return by_frame
-
-
-def _seg_overlaps_false_alarm(
-    seg: dict[str, Any],
-    false_alarm_by_frame: dict[int, list[str]],
-) -> bool:
-    """手腕碰撞段是否与误报告警在帧范围 + 货位 token 上重叠。"""
-    if not false_alarm_by_frame:
-        return False
-    a = int(seg.get("frame_enter") or 0)
-    b = int(seg.get("frame_exit") or 0)
-    tok = str(seg.get("box_token") or "").strip()
-    if not tok:
-        return False
-    for fi in range(a, b + 1):
-        if token_matches_any(tok, false_alarm_by_frame.get(fi, ())):
             return True
     return False
 

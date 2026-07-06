@@ -26,18 +26,19 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-# 触发 evaluate_combo1 内 cv2 shim
-import scripts.data.evaluate_combo1_segment_filter  # noqa: F401
+from event_engine.cv2_shim import ensure_cv2_point_polygon_test
+
+ensure_cv2_point_polygon_test()
 
 from config_loader import resolve_config_path
-from scripts.data.analyze_wrist_feature_discrimination import (
+from scripts.data.eval_dataset import (
     DEFAULT_CAMERAS,
     DEFAULT_REVIEW_STATUS,
     DEFAULT_TAGS,
     DEFAULT_TIER,
-    _collect_record_ids,
-    _parse_csv_list,
-    _parse_tags,
+    collect_record_ids,
+    parse_csv_list,
+    parse_tags,
 )
 from scripts.data.evaluate_combo1_segment_filter import ComboRule
 from scripts.data.report_paths import DOCS_JSON_DIR, resolve_docs_json
@@ -453,9 +454,9 @@ def main() -> int:
     args = parser.parse_args()
 
     resolve_config_path(None)
-    tags = _parse_tags(args.tags)
-    cameras = _parse_csv_list(args.cameras)
-    record_ids = _collect_record_ids(
+    tags = parse_tags(args.tags)
+    cameras = parse_csv_list(args.cameras)
+    record_ids = collect_record_ids(
         tier=args.tier,
         cameras=set(cameras),
         tags=tags,
