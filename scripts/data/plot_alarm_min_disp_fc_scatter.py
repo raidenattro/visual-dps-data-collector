@@ -7,9 +7,9 @@
 
 用法（项目根目录）:
   python scripts/data/plot_alarm_min_disp_fc_scatter.py
-  python scripts/data/plot_alarm_min_disp_fc_scatter.py --out docs/alarm-min5-disp-fc-scatter-rtmpose-m
+  python scripts/data/plot_alarm_min_disp_fc_scatter.py --out docs/alarm-min/alarm-min5-disp-fc-scatter-rtmpose-m
 
-SVG 输出至 docs/view/；Markdown 输出至 docs/；JSON 输出至 docs/json/。
+SVG 输出至 docs/view/；Markdown 输出至 docs/alarm-min/；JSON 输出至 docs/json/。
 """
 
 from __future__ import annotations
@@ -430,7 +430,7 @@ def _render_markdown(
 ) -> str:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     counts = {cat: sum(1 for p in points if p.category == cat) for cat in CATEGORY_COLORS}
-    svg_name = f"view/{Path(base_stem).name}.svg"
+    svg_name = f"../view/{Path(base_stem).name}.svg"
 
     def stats_for(cat: str, key: str) -> str:
         vals = [getattr(p, key) for p in points if p.category == cat]
@@ -535,7 +535,7 @@ def main() -> int:
     parser.add_argument("--cooldown", type=int, default=6)
     parser.add_argument(
         "--out",
-        default=str(ROOT / "docs" / "alarm-min5-disp-fc-scatter-rtmpose-m"),
+        default=str(ROOT / "docs" / "alarm-min" / "alarm-min5-disp-fc-scatter-rtmpose-m"),
         help="Markdown 输出路径前缀（不含扩展名）；SVG 写入 docs/view/；JSON 写入 docs/json/",
     )
     parser.add_argument(

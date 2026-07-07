@@ -13,11 +13,11 @@
 用法（项目根目录）:
   python scripts/data/evaluate_combo1_segment_filter.py
   python scripts/data/evaluate_combo1_segment_filter.py --combo-id 2 --max-disp-per-frame 3.0 \\
-    --out docs/combo2-segment-filter-rtmpose-m.md
+    --out docs/segment-filter/combo2-segment-filter-rtmpose-m.md
   python scripts/data/evaluate_combo1_segment_filter.py --combo-id 3 \\
-    --out docs/combo3-segment-filter-rtmpose-m.md
+    --out docs/segment-filter/combo3-segment-filter-rtmpose-m.md
   python scripts/data/evaluate_combo1_segment_filter.py --combo-id 4 \\
-    --out docs/combo4-segment-filter-rtmpose-m.md
+    --out docs/segment-filter/combo4-segment-filter-rtmpose-m.md
 """
 
 from __future__ import annotations
@@ -630,7 +630,7 @@ def main() -> int:
     parser.add_argument(
         "--out",
         default="",
-        help="默认 combo1/2/3 → docs/comboN-segment-filter-rtmpose-m.md",
+        help="默认 combo1/2/3 → docs/segment-filter/comboN-segment-filter-rtmpose-m.md",
     )
     parser.add_argument("--json-out", default="", help="JSON 输出路径（默认 docs/json/{报告名}.json）")
     parser.add_argument("--dry-run", action="store_true")
@@ -638,7 +638,7 @@ def main() -> int:
 
     combo_rule = combo_rule_from_args(args)
     if not args.out:
-        args.out = str(ROOT / "docs" / f"combo{combo_rule.combo_id}-segment-filter-rtmpose-m.md")
+        args.out = str(ROOT / "docs" / "segment-filter" / f"combo{combo_rule.combo_id}-segment-filter-rtmpose-m.md")
 
     combo1_rule = ComboRule(
         1, COMBO1_MIN_FRAMES, COMBO1_MIN_DURATION, COMBO1_MAX_DISP_PER_FRAME, None

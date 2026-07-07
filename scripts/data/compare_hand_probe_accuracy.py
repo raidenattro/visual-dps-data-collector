@@ -8,7 +8,7 @@
   python scripts/data/compare_hand_probe_accuracy.py
   python scripts/data/compare_hand_probe_accuracy.py \\
     --pose-frame-interval 2 --alarm-min 3 --cooldown 0 --extension-ratio 0.4 \\
-    --out docs/hand-probe-ab-prod-params-rtmpose-m.md
+    --out docs/hand-probe/hand-probe-ab-prod-params-rtmpose-m.md
 """
 
 from __future__ import annotations
@@ -372,7 +372,7 @@ def main() -> int:
     parser.add_argument("--extension-ratio", type=float, default=0.4)
     parser.add_argument(
         "--out",
-        default=str(ROOT / "docs" / "hand-probe-ab-prod-params-rtmpose-m.md"),
+        default=str(ROOT / "docs" / "hand-probe" / "hand-probe-ab-prod-params-rtmpose-m.md"),
     )
     parser.add_argument("--json-out", default="")
     parser.add_argument("--dry-run", action="store_true")

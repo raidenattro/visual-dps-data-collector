@@ -447,6 +447,6 @@ flowchart LR
 
 ## 8. 参考文档
 
-- 复核数据迁移：`docs/migrate-event-review.md`
+- 复核数据迁移：`docs/guides/migrate-event-review.md`
 - 回放脚本模块拆分：`web/app/README.md`
 - 项目总览与配置：`README.md`

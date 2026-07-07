@@ -9,7 +9,7 @@
   python scripts/data/analyze_wrist_feature_discrimination.py
   python scripts/data/analyze_wrist_feature_discrimination.py --dry-run
   python scripts/data/analyze_wrist_feature_discrimination.py --skip-extract
-  python scripts/data/analyze_wrist_feature_discrimination.py --out docs/wrist-features-discrimination-rtmpose-m.md
+  python scripts/data/analyze_wrist_feature_discrimination.py --out docs/features/wrist-features-discrimination-rtmpose-m.md
 """
 
 from __future__ import annotations
@@ -787,7 +787,7 @@ def main() -> int:
     parser.add_argument("--skip-existing", action="store_true", help="提取时跳过已有特征文件")
     parser.add_argument(
         "--out",
-        default=str(ROOT / "docs" / "wrist-features-discrimination-rtmpose-m.md"),
+        default=str(ROOT / "docs" / "features" / "wrist-features-discrimination-rtmpose-m.md"),
         help="Markdown 报告输出路径",
     )
     parser.add_argument("--json-out", default="", help="JSON 输出路径（默认 docs/json/{报告名}.json）")

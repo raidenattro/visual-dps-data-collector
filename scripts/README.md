@@ -46,7 +46,7 @@ python scripts/data/merge_staging_batches.py --consolidate-after
 | 模块 | 用途 |
 |------|------|
 | `data/eval_dataset.py` | 优质 28 条样本筛选（标签/机位/复核）、段重叠判定 |
-| `data/report_paths.py` | `docs/` / `docs/json/` 报告路径约定 |
+| `data/report_paths.py` | `docs/` 目录与 `docs/json/` 报告路径约定（见 [docs/README.md](../docs/README.md)） |
 | `event_engine/cv2_shim.py` | cv2.pointPolygonTest 兜底 |
 
 ### 日常脚本
@@ -131,10 +131,10 @@ python scripts/data/analyze_wrist_feature_discrimination.py --skip-extract
 
 # 自定义输出（JSON 默认 docs/json/{报告名}.json）
 python scripts/data/analyze_wrist_feature_discrimination.py \
-  --out docs/wrist-features-discrimination-rtmpose-m.md
+  --out docs/features/wrist-features-discrimination-rtmpose-m.md
 ```
 
-报告示例：[docs/wrist-features-discrimination-rtmpose-m.md](../docs/wrist-features-discrimination-rtmpose-m.md)
+报告示例：[docs/features/wrist-features-discrimination-rtmpose-m.md](../docs/features/wrist-features-discrimination-rtmpose-m.md)
 
 读取示例（Python）：
 

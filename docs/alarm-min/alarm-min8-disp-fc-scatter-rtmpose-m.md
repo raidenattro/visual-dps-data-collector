@@ -35,7 +35,7 @@
 
 ## 散点图
 
-![displacement × disp/fc](view/alarm-min8-disp-fc-scatter-rtmpose-m.svg)
+![displacement × disp/fc](../view/alarm-min8-disp-fc-scatter-rtmpose-m.svg)
 
 参考虚线：`disp/fc = 2.5`（combo4 单条件阈值）。
 

@@ -9,7 +9,7 @@
   python scripts/data/compare_alarm_threshold_accuracy.py --dry-run
   python scripts/data/compare_alarm_threshold_accuracy.py \\
     --baseline-min 5 --experiment-min 22 --cooldown 6 \\
-    --out docs/alarm-min-22-accuracy-comparison-rtmpose-m.md
+    --out docs/alarm-min/alarm-min-22-accuracy-comparison-rtmpose-m.md
 """
 
 from __future__ import annotations
@@ -425,7 +425,7 @@ def main() -> int:
     parser.add_argument("--pose-frame-interval", type=int, default=1)
     parser.add_argument(
         "--out",
-        default=str(ROOT / "docs" / "alarm-min-22-accuracy-comparison-rtmpose-m.md"),
+        default=str(ROOT / "docs" / "alarm-min" / "alarm-min-22-accuracy-comparison-rtmpose-m.md"),
     )
     parser.add_argument("--json-out", default="", help="JSON 输出路径（默认 docs/json/{报告名}.json）")
     parser.add_argument("--dry-run", action="store_true")
