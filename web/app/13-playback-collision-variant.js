@@ -2,6 +2,14 @@
 
 const PLAYBACK_PROBE_STORAGE_KEY = "datacollect_playback_collision_probe";
 
+/** select value → sidecar variant key */
+const PLAYBACK_HAND_EXT_VARIANT_BY_ALPHA = {
+  "0.1": "hand_ext_0.10",
+  "0.2": "hand_ext_0.20",
+  "0.3": "hand_ext_0.30",
+  "0.4": "hand_ext_0.40",
+};
+
 let playbackCollisionOverlay = null;
 let playbackCollisionVariantMeta = null;
 /** 当前变体完整 timeline 行（用于重建事件列表） */
@@ -46,10 +54,8 @@ function applyPlaybackProbePrefsToForm() {
 function resolvePlaybackCollisionVariantKey() {
   const useHand = Boolean($("#playback-use-hand-probe")?.checked);
   if (!useHand) return "wrist";
-  const alpha = parseFloat($("#playback-hand-probe-alpha")?.value || "0.3");
-  if (alpha <= 0.25) return "hand_ext_0.20";
-  if (alpha <= 0.35) return "hand_ext_0.30";
-  return "hand_ext_0.40";
+  const alpha = String($("#playback-hand-probe-alpha")?.value || "0.3");
+  return PLAYBACK_HAND_EXT_VARIANT_BY_ALPHA[alpha] || "hand_ext_0.30";
 }
 
 function resetPlaybackCollisionOverlay() {
@@ -61,6 +67,7 @@ function resetPlaybackCollisionOverlay() {
 function playbackVariantEventsLabel(variantKey) {
   if (String(variantKey || "").startsWith("sandbox:")) return "沙盒重算";
   if (variantKey === "wrist") return "sidecar/wrist";
+  if (variantKey === "hand_ext_0.10") return "sidecar/α0.1";
   if (variantKey === "hand_ext_0.20") return "sidecar/α0.2";
   if (variantKey === "hand_ext_0.30") return "sidecar/α0.3";
   if (variantKey === "hand_ext_0.40") return "sidecar/α0.4";

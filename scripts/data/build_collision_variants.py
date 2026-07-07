@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""批量生成碰撞变体 sidecar（wrist + hand_extended α=0.2/0.3/0.4）。
+"""批量生成碰撞变体 sidecar（wrist + hand_extended α=0.1/0.2/0.3/0.4）。
 
 用法（项目根目录）:
   python scripts/data/build_collision_variants.py --dry-run

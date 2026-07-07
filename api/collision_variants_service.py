@@ -27,12 +27,14 @@ from config_loader import resolve_app_paths
 
 COLLISION_VARIANTS_SCHEMA = 1
 TIMELINE_COLLISION_WRIST = "timeline_collision_wrist.parquet"
+TIMELINE_COLLISION_HAND_EXT_010 = "timeline_collision_hand_ext_0.10.parquet"
 TIMELINE_COLLISION_HAND_EXT_020 = "timeline_collision_hand_ext_0.20.parquet"
 TIMELINE_COLLISION_HAND_EXT_030 = "timeline_collision_hand_ext_0.30.parquet"
 TIMELINE_COLLISION_HAND_EXT_040 = "timeline_collision_hand_ext_0.40.parquet"
 
 VARIANT_DEFS: tuple[tuple[str, ProbeMode, float | None, str], ...] = (
     ("wrist", "wrist", None, TIMELINE_COLLISION_WRIST),
+    ("hand_ext_0.10", "hand_extended", 0.1, TIMELINE_COLLISION_HAND_EXT_010),
     ("hand_ext_0.20", "hand_extended", 0.2, TIMELINE_COLLISION_HAND_EXT_020),
     ("hand_ext_0.30", "hand_extended", 0.3, TIMELINE_COLLISION_HAND_EXT_030),
     ("hand_ext_0.40", "hand_extended", 0.4, TIMELINE_COLLISION_HAND_EXT_040),
