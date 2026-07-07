@@ -50,6 +50,7 @@ from pose_store import (
     load_event_review,
     load_events,
     load_frames_range,
+    load_timeline_index,
     load_pose_document,
     load_pose_header,
     load_timeline,
@@ -101,6 +102,8 @@ from api.record_service import (
     record_summary_for_list,
     resolve_annotation_path_for_record,
     resolve_annotation_path_for_source,
+    playback_video_path_for_record,
+    playback_video_prepare_status,
     video_path_for_record,
     video_path_for_video_stem,
 )
@@ -589,9 +592,17 @@ def patch_record_tags_api(
     return {"record_id": rid, "tags": tags}
 
 
+@router.get("/api/records/{record_id:path}/video/preview/status")
+def get_record_video_preview_status(record_id: str) -> dict[str, Any]:
+    return playback_video_prepare_status(record_id)
+
+
 @router.get("/api/records/{record_id:path}/video")
-def get_record_video(record_id: str) -> FileResponse:
-    path = video_path_for_record(record_id)
+def get_record_video(record_id: str, original: bool = False) -> FileResponse:
+    if original:
+        path = video_path_for_record(record_id)
+    else:
+        path = playback_video_path_for_record(record_id)
     if not path or not path.is_file():
         raise HTTPException(404, "配套视频不存在")
     media = VIDEO_MIME.get(path.suffix.lower(), "application/octet-stream")
@@ -1325,8 +1336,12 @@ def get_record_timeline(
     record_id: str,
     variant: str = "",
     include_events: bool = False,
+    light: bool = False,
 ) -> JSONResponse:
-    """轻量时间轴（frame_idx / timestamp）；variant 指定碰撞变体 sidecar。"""
+    """轻量时间轴（frame_idx / timestamp）；variant 指定碰撞变体 sidecar。
+
+    light=1 时仅返回 frame_idx / source_frame_idx / timestamp_sec（体积更小）。
+    """
     variant_key = str(variant or "").strip()
     locator = locate_record_by_id(record_id)
     if not locator:
@@ -1340,6 +1355,8 @@ def get_record_timeline(
                 variant_key,
                 include_events=bool(include_events),
             )
+        elif light:
+            timeline = load_timeline_index(locator)
         else:
             timeline = load_timeline(locator, include_events=bool(include_events))
     except FileNotFoundError as exc:
@@ -1350,6 +1367,7 @@ def get_record_timeline(
         {
             "record_id": record_id,
             "variant": variant_key or None,
+            "light": bool(light),
             "count": len(timeline),
             "timeline": timeline,
         }

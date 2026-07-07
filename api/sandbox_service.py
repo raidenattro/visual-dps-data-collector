@@ -223,6 +223,8 @@ def get_sandbox_session(session_id: str) -> dict[str, Any]:
     summary = _session_summary(meta, session_dir)
     summary["has_annotation"] = (session_dir / ANNOTATION_FILE).is_file()
     summary["has_timeline"] = (session_dir / TIMELINE_FILE).is_file()
+    summary["annotation_edited"] = bool(meta.get("annotation_edited"))
+    summary["annotation_info"] = meta.get("annotation") if isinstance(meta.get("annotation"), dict) else {}
     return summary
 
 

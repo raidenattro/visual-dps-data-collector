@@ -53,6 +53,13 @@ from pose_store import (
 
 from api.naming import display_name_from_pose_file
 from api.reflection_service import REFLECTION_OK, load_reflection_or_http, normalize_corner_label
+from video_transcode import (
+    default_playback_transcode_height,
+    ensure_preview_transcode_async,
+    read_video_height,
+    resolve_playback_serve_path,
+    transcode_preview_video,
+)
 from record_tag_store import get_tags_map
 
 def json_archive_dir() -> Path:
@@ -320,13 +327,37 @@ def video_path_for_video_stem(video_stem: str) -> Path | None:
     return None
 
 
+def playback_video_path_for_record(record_id: str) -> Path | None:
+    """回放用视频路径：仅返回有效预览，否则原片。"""
+    path = video_path_for_record(record_id)
+    if not path or not path.is_file():
+        return None
+    return resolve_playback_serve_path(path)
+
+
+def playback_video_prepare_status(record_id: str) -> dict[str, Any]:
+    """启动或查询预览转码进度。"""
+    path = video_path_for_record(record_id)
+    if not path or not path.is_file():
+        return {
+            "status": "missing",
+            "progress": 0,
+            "needs_transcode": False,
+            "source_height": 0,
+            "preview_height": 0,
+            "message": "配套视频不存在",
+            "error": "",
+        }
+    return ensure_preview_transcode_async(path)
+
+
 def persist_record_video(
     src: Path,
     pose_path: Path,
     *,
     camera_slug: str | None = None,
 ) -> Path:
-    """复制配套视频到 localdata/video；绝不移动或删除源路径上的文件。"""
+    """保存配套视频到 localdata/video；源分辨率过高时按配置转码为预览高度。"""
     src = Path(src)
     if not src.is_file():
         raise FileNotFoundError(f"源视频不存在: {src}")
@@ -338,6 +369,14 @@ def persist_record_video(
         raise ValueError(f"源与目标相同，拒绝操作: {src}")
     if dest.is_file():
         dest.unlink()
+
+    th = default_playback_transcode_height()
+    src_h = read_video_height(src)
+    if th > 0 and src_h > th and transcode_preview_video(src, dest, th):
+        if not src.is_file():
+            raise RuntimeError(f"源视频在转码后丢失（不应发生）: {src}")
+        return dest
+
     shutil.copy2(src, dest)
     if not src.is_file():
         raise RuntimeError(f"源视频在复制后丢失（不应发生）: {src}")
