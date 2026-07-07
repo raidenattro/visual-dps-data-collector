@@ -1277,6 +1277,14 @@ function patchEventReviewVerifiedUi() {
   if (typeof redrawCurrentFrame === "function") redrawCurrentFrame();
 }
 
+/** 仅切换表格高亮行（播放中避免重建数千行 DOM） */
+function updateEventReviewTableActiveRow() {
+  if (!eventJumpList) return;
+  eventJumpList.querySelectorAll(".event-review-row").forEach((row) => {
+    row.classList.toggle("active", row.dataset.eventKey === activeEventKey);
+  });
+}
+
 function renderEventReviewTable(list = null) {
   if (!eventJumpList) return;
   const rows = list ?? filteredPlaybackEvents();
@@ -1454,13 +1462,51 @@ async function beginEventReview() {
   else updateReviewDock();
 }
 
+/** 进度条事件标记上限（高密度记录采样显示，避免数千 DOM 拖慢主线程） */
+const MAX_SEEK_EVENT_DOTS = 120;
+
+/** 均匀采样事件列表，始终保留当前选中与已标真条目 */
+function sampleSeekMarkerEvents(events, maxDots = MAX_SEEK_EVENT_DOTS) {
+  const list = Array.isArray(events) ? events : [];
+  if (list.length <= maxDots) return list;
+
+  const mustIdx = new Set();
+  list.forEach((ev, i) => {
+    const key = eventRowKey(ev);
+    if (key === activeEventKey || isEventVerified(ev)) mustIdx.add(i);
+  });
+
+  if (mustIdx.size >= maxDots) {
+    return [...mustIdx]
+      .sort((a, b) => a - b)
+      .slice(0, maxDots)
+      .map((i) => list[i]);
+  }
+
+  const remaining = maxDots - mustIdx.size;
+  const candidates = list.map((ev, i) => ({ ev, i })).filter(({ i }) => !mustIdx.has(i));
+  const picked = new Set(mustIdx);
+  const step = candidates.length / remaining;
+  for (let j = 0; j < remaining; j += 1) {
+    picked.add(candidates[Math.floor(j * step)].i);
+  }
+  return [...picked]
+    .sort((a, b) => a - b)
+    .map((i) => list[i]);
+}
+
 function renderEventMarkers() {
   if (!eventMarkersEl) return;
   eventMarkersEl.innerHTML = "";
   const dur = getPlaybackDurationSec();
   if (!dur || !playbackEvents.length) return;
 
-  filteredPlaybackEvents().forEach((ev) => {
+  const markers = sampleSeekMarkerEvents(filteredPlaybackEvents());
+  const total = filteredPlaybackEvents().length;
+  const sampledNote =
+    markers.length < total ? `（进度条采样 ${markers.length}/${total}）` : "";
+
+  markers.forEach((ev) => {
     const key = eventRowKey(ev);
     const pct = Math.min(100, Math.max(0, (ev.timestamp_sec / dur) * 100));
     const dot = document.createElement("button");
@@ -1471,7 +1517,7 @@ function renderEventMarkers() {
     dot.dataset.eventKey = key;
     dot.style.left = `${pct}%`;
     const verifiedNote = isEventVerified(ev) ? " · 已标真" : "";
-    dot.title = `${ev.event_type === "alarm" ? "告警" : "碰撞"} ${formatTime(ev.timestamp_sec)} · ${formatEventTokens(ev.box_tokens)}${verifiedNote}`;
+    dot.title = `${ev.event_type === "alarm" ? "告警" : "碰撞"} ${formatTime(ev.timestamp_sec)} · ${formatEventTokens(ev.box_tokens)}${verifiedNote}${sampledNote}`;
     dot.addEventListener("click", (e) => {
       e.stopPropagation();
       seekToEvent(ev);

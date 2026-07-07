@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>骨架采集与回放</title>
-  <link rel="stylesheet" href="style.css?v=70" />
+  <link rel="stylesheet" href="style.css?v=71" />
 </head>
 <body>
   <header>
@@ -598,6 +598,10 @@
         <div class="playback-layout-main">
           <p id="playback-sandbox-banner" class="playback-sandbox-banner hidden" role="status"></p>
           <div class="stage-wrap">
+            <div id="playback-stage-loading" class="playback-stage-loading hidden" role="status" aria-live="polite">
+              <div class="playback-stage-loading-spinner" aria-hidden="true"></div>
+              <p id="playback-stage-loading-text" class="playback-stage-loading-text">加载中…</p>
+            </div>
             <video id="playback-video-el" playsinline preload="metadata"></video>
             <canvas id="playback-canvas"></canvas>
           </div>
@@ -794,21 +798,21 @@
   <script src="annotateGeometry.js"></script>
   <script src="annotateVisualMode.js?v=4"></script>
   <!-- 回放/采集主逻辑（由 app.monolith.js 拆分，按依赖顺序加载） -->
-  <script src="app/00-core.js?v=70"></script>
-  <script src="app/01-layout-frames.js?v=49"></script>
+  <script src="app/00-core.js?v=73"></script>
+  <script src="app/01-layout-frames.js?v=54"></script>
   <script src="app/02-playback-selection.js?v=34"></script>
   <script src="app/03-tabs.js?v=36"></script>
   <script src="app/04-collision-config.js?v=35"></script>
   <script src="app/05-collect.js?v=42"></script>
-  <script src="app/06-records.js?v=52"></script>
-  <script src="app/07-playback-stage.js?v=69"></script>
-  <script src="app/08-event-review.js?v=73"></script>
-  <script src="app/09-playback-events.js?v=74"></script>
-  <script src="app/10-render-collision.js?v=77"></script>
-  <script src="app/11-playback-controls.js?v=72"></script>
+  <script src="app/06-records.js?v=59"></script>
+  <script src="app/07-playback-stage.js?v=71"></script>
+  <script src="app/08-event-review.js?v=75"></script>
+  <script src="app/09-playback-events.js?v=78"></script>
+  <script src="app/10-render-collision.js?v=87"></script>
+  <script src="app/11-playback-controls.js?v=75"></script>
   <script src="app/12-playback-wrist-features.js?v=3"></script>
   <script src="app/13-playback-collision-variant.js?v=6"></script>
-  <script src="app/14-playback-sandbox.js?v=1"></script>
+  <script src="app/14-playback-sandbox.js?v=3"></script>
   <script src="annotate.js?v=18"></script>
   <script src="accuracy.js?v=6"></script>
   <script src="sandbox-annotate.js?v=4"></script>

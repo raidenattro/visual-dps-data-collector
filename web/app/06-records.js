@@ -944,7 +944,7 @@ function initPlaybackRecordFilter() {
       playbackCameraListPinned = false;
       syncPlaybackAnnotationSourceOptionLabel();
       await loadRecords({ quiet: playbackRecordsByTier.has(playbackPoseTier) });
-      if (currentRecordId && playbackAnnotationSource === "tier") {
+      if (currentRecordId && playbackAnnotationSource === "tier" && !playbackSandboxSessionId) {
         const annResult = await applyPlaybackRecordAnnotation(currentRecordId);
         redrawCurrentFrame();
         if (annResult.ok) {
@@ -1041,6 +1041,16 @@ async function applyPlaybackRecordAnnotation(recordId) {
 
 async function onPlaybackAnnotationSourceChanged() {
   if (!currentRecordId) return;
+  if (playbackSandboxSessionId && typeof applyPlaybackSandboxAnnotation === "function") {
+    const result = await applyPlaybackSandboxAnnotation(playbackSandboxSessionId);
+    redrawCurrentFrame();
+    setPlaybackInfo(
+      result.ok
+        ? `沙盒回放使用：${result.label}`
+        : `沙盒标注加载失败，${annotationBoxes.length ? "使用 pose 内嵌货框" : "无货框"}`
+    );
+    return;
+  }
   const result = await applyPlaybackRecordAnnotation(currentRecordId);
   if (typeof loadPlaybackEvents === "function") {
     await loadPlaybackEvents(currentRecordId);
@@ -1060,8 +1070,10 @@ async function onPlaybackAnnotationSourceChanged() {
   }
 }
 
-async function loadSavedRecordVideo(recordId) {
-  const url = recordApiUrl(recordId, "/video");
+async function loadSavedRecordVideo(recordId, opts = {}) {
+  const useOriginal = opts.original === true;
+  const base = recordApiUrl(recordId, "/video");
+  const url = useOriginal ? `${base}?original=1` : base;
 
   if (playbackVideoObjectUrl) {
     URL.revokeObjectURL(playbackVideoObjectUrl);
@@ -1072,17 +1084,17 @@ async function loadSavedRecordVideo(recordId) {
   videoEl.load();
 
   return new Promise((resolve) => {
+    const finish = (ok) => {
+      videoEl.removeEventListener("loadedmetadata", onReady);
+      videoEl.removeEventListener("error", onErr);
+      resolve(ok);
+    };
     const onReady = () => {
-      videoEl.removeEventListener("loadedmetadata", onReady);
-      videoEl.removeEventListener("error", onErr);
-      resolve(true);
+      const ok = videoEl.videoWidth > 0 && videoEl.videoHeight > 0 && !videoEl.error;
+      finish(ok);
     };
-    const onErr = () => {
-      videoEl.removeEventListener("loadedmetadata", onReady);
-      videoEl.removeEventListener("error", onErr);
-      resolve(false);
-    };
-    if (videoEl.readyState >= 1) {
+    const onErr = () => finish(false);
+    if (videoEl.readyState >= 1 && videoEl.videoWidth > 0 && videoEl.videoHeight > 0 && !videoEl.error) {
       resolve(true);
       return;
     }
@@ -1091,15 +1103,79 @@ async function loadSavedRecordVideo(recordId) {
   });
 }
 
+/** 等待预览视频转码完成后再加载（带进度与遮罩） */
+async function prepareAndLoadRecordVideo(recordId, displayName = "") {
+  const label = displayName || recordId;
+  const statusUrl = recordApiUrl(recordId, "/video/preview/status");
+  const startedAt = Date.now();
+  let usedOriginal = false;
+
+  const formatWaitSec = () => Math.max(0, Math.round((Date.now() - startedAt) / 1000));
+  const result = (loaded) => ({ loaded: !!loaded, usedOriginal });
+
+  showStageLoading(`【${label}】正在检查视频…`);
+  setPlaybackInfo(`【${label}】正在检查视频…`);
+
+  let body = await fetch(statusUrl).then((r) => (r.ok ? r.json() : null));
+  if (!body) {
+    hideStageLoading();
+    setPlaybackInfo(`【${label}】视频状态查询失败`);
+    return result(false);
+  }
+
+  while (body.status === "transcoding") {
+    const pct = Number(body.progress) || 0;
+    const srcH = Number(body.source_height) || 0;
+    const prevH = Number(body.preview_height) || 480;
+    const waitSec = formatWaitSec();
+    const msg =
+      srcH > prevH
+        ? `【${label}】正在生成 ${prevH}p 预览视频（原片 ${srcH}p）${pct}%… 已等待 ${waitSec}s`
+        : `【${label}】正在准备视频 ${pct}%… 已等待 ${waitSec}s`;
+    updateStageLoading(msg);
+    setPlaybackInfo(msg);
+    await new Promise((r) => setTimeout(r, 600));
+    body = await fetch(statusUrl).then((r) => (r.ok ? r.json() : body));
+  }
+
+  if (body.status === "missing") {
+    hideStageLoading();
+    return result(false);
+  }
+
+  if (body.status === "error") {
+    const errMsg = body.error || body.message || "预览转码失败";
+    updateStageLoading(`【${label}】${errMsg}，正在加载原视频…`);
+    setPlaybackInfo(`【${label}】${errMsg}，正在加载原视频…`);
+    usedOriginal = true;
+    const loadedOriginal = await loadSavedRecordVideo(recordId, { original: true });
+    hideStageLoading();
+    return result(loadedOriginal);
+  }
+
+  const waitSec = formatWaitSec();
+  const readyMsg =
+    body.needs_transcode && Number(body.source_height) > Number(body.preview_height)
+      ? `【${label}】预览视频已就绪（${body.preview_height}p），正在加载…`
+      : `【${label}】正在加载视频…`;
+  updateStageLoading(waitSec > 2 ? `${readyMsg}（总耗时 ${waitSec}s）` : readyMsg);
+  setPlaybackInfo(readyMsg);
+
+  let loaded = await loadSavedRecordVideo(recordId);
+  if (!loaded) {
+    updateStageLoading(`【${label}】预览视频无法播放，正在加载原视频…`);
+    setPlaybackInfo(`【${label}】预览视频无法播放，正在加载原视频…`);
+    usedOriginal = true;
+    loaded = await loadSavedRecordVideo(recordId, { original: true });
+  }
+  hideStageLoading();
+  return result(loaded);
+}
+
 async function startVideoPlayback(hintPrefix = "") {
   try {
     readPlaybackSpeedFromSelect();
     await videoEl.play();
-    cancelAnimationFrame(rafId);
-    tickPoseFrameIdx = -1;
-    lastEventSyncFrameIdx = -1;
-    resetPlaybackCollisionTracker();
-    tick();
     if (hintPrefix) setPlaybackInfo(`${hintPrefix}正在播放…`);
     return true;
   } catch (err) {
@@ -1174,6 +1250,14 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
     await loadPlaybackCollisionVariant(recordId);
   }
   await prefetchInitialPlaybackChunks();
+  setPlaybackInfo(`【${displayName || recordId}】加载全部骨架…`);
+  showStageLoading(`【${displayName || recordId}】加载全部骨架…`);
+  await prefetchAllPlaybackChunksInBackground(recordId, (pct) => {
+    const msg = `【${displayName || recordId}】加载骨架 ${pct}%…`;
+    setPlaybackInfo(msg);
+    if (pct < 100) updateStageLoading(msg);
+    else hideStageLoading();
+  });
   const annResult = playbackSandboxSessionId
     ? await applyPlaybackSandboxAnnotation(playbackSandboxSessionId)
     : await applyPlaybackRecordAnnotation(recordId);
@@ -1181,15 +1265,19 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
   if (playbackSandboxSessionId && typeof loadPlaybackSandbox === "function") {
     await eventsPromise;
     await loadPlaybackSandbox(playbackSandboxSessionId);
+    updatePlaybackSandboxBanner();
   }
   if (typeof loadPlaybackWristFeatures === "function") {
     void loadPlaybackWristFeatures(recordId);
   }
-  const annHint = annResult.ok
-    ? ` · 标注：${annResult.label}`
-    : annResult.fromPose
-      ? " · 使用 pose 内嵌标注"
-      : "";
+  const annHint =
+    playbackSandboxSessionId && annResult.ok
+      ? ` · 标注：${annResult.label}`
+      : annResult.ok
+        ? ` · 标注：${annResult.label}`
+        : annResult.fromPose
+          ? " · 使用 pose 内嵌标注"
+          : "";
   const collisionHint =
     playbackSandboxSessionId && typeof playbackSandboxHint === "function"
       ? `${annHint} · ${playbackSandboxHint()}`
@@ -1204,15 +1292,24 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
   const storageHint = (poseData?.schema || 1) >= 2 ? " · Parquet" : "";
   const baseHint = `【${label}】${jsonFile}（${poseData.frame_count ?? 0} 帧${storageHint}）`;
 
-  const videoLoaded = await loadSavedRecordVideo(recordId);
+  const videoResult = await prepareAndLoadRecordVideo(recordId, displayName || recordId);
+  const videoLoaded = !!videoResult.loaded;
+  const usedOriginalVideo = !!videoResult.usedOriginal;
   await eventsPromise;
   if (playbackEvents.length) {
-    await beginEventReview();
+    void beginEventReview();
   }
   if (videoLoaded) {
     const { frameW, frameH } = getVideoFrameSize();
     const f0 = frameByTime[0];
-    let hint = `${baseHint}${collisionHint} · 已加载配套视频 ${frameW}×${frameH}。`;
+    let hint = `${baseHint}${collisionHint} · 已加载配套视频 ${frameW}×${frameH}`;
+    if (playbackSkeletonReady) hint += " · 骨架已就绪";
+    hint += "。";
+    if (usedOriginalVideo) {
+      hint += " 预览转码不可用，已使用原片（可能略卡）。";
+    } else if (frameW > 720) {
+      hint += " 播放中显示碰撞黄/告警红高亮，暂停后可查看完整标注与复核信息。";
+    }
     if (f0 && (f0.w !== frameW || f0.h !== frameH)) {
       hint += ` JSON 推理 ${f0.w}×${f0.h}，将自动对齐。`;
     }
@@ -1225,7 +1322,7 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
   }
 
   if (expectVideo) {
-    setPlaybackInfo(`${baseHint} · 未找到已保存视频（可能采集时关闭了保存）。可上传替换或仅播放骨骼。`);
+    setPlaybackInfo(`${baseHint} · 视频加载失败（预览转码异常或文件损坏）。可上传替换或仅播放骨骼。`);
   } else {
     setPlaybackInfo(`${baseHint} · 无配套视频，可上传或仅播放骨骼。`);
   }

@@ -13,8 +13,25 @@ const eventCountLabel = $("#event-count-label");
 const eventsPanel = $("#playback-events-panel");
 const playbackSpeedSelect = $("#playback-speed");
 const stageWrap = document.querySelector(".playback-layout-main .stage-wrap");
+const stageLoadingEl = $("#playback-stage-loading");
+const stageLoadingTextEl = $("#playback-stage-loading-text");
 /** 当前播放倍速（1 = 原速） */
 let playbackSpeed = 1;
+
+function showStageLoading(text = "加载中…") {
+  if (!stageLoadingEl) return;
+  if (stageLoadingTextEl) stageLoadingTextEl.textContent = text;
+  stageLoadingEl.classList.remove("hidden");
+}
+
+function updateStageLoading(text) {
+  if (stageLoadingTextEl) stageLoadingTextEl.textContent = text;
+  if (stageLoadingEl) stageLoadingEl.classList.remove("hidden");
+}
+
+function hideStageLoading() {
+  stageLoadingEl?.classList.add("hidden");
+}
 
 function applyPlaybackSpeed() {
   if (!videoEl) return;
@@ -36,6 +53,7 @@ function bindStageLayoutWatch() {
 
   let layoutTimer = null;
   const onLayoutChange = () => {
+    if (playbackRenderLoopActive && videoEl && !videoEl.paused) return;
     if (layoutTimer) clearTimeout(layoutTimer);
     layoutTimer = setTimeout(() => {
       layoutTimer = null;

@@ -197,15 +197,19 @@ async function loadPlaybackEvents(recordId = null) {
     if (isEventVerified(ev)) applyAutoConfirmedBoxOnVerify(ev);
   });
   snapshotPlaybackEventsBaseline();
+  let variantSynced = false;
   if (
     typeof syncPlaybackEventsFromCollisionVariant === "function" &&
     !(typeof playbackSandboxSessionId !== "undefined" && playbackSandboxSessionId)
   ) {
-    syncPlaybackEventsFromCollisionVariant();
-  } else {
+    variantSynced = Boolean(syncPlaybackEventsFromCollisionVariant());
+  }
+  if (!variantSynced) {
     rebuildPlaybackEventsFrameIndex();
     renderEventReviewList();
-    invalidatePlaybackAccuracyOverlay();
+    if (typeof invalidatePlaybackAccuracyOverlay === "function") {
+      invalidatePlaybackAccuracyOverlay();
+    }
   }
 }
 
@@ -244,7 +248,7 @@ function eventsForPlaybackLink() {
   return filtered.length ? filtered : playbackEvents;
 }
 
-/** 当前播放位置对应事件：同帧优先，否则取时间最近 */
+/** 当前播放位置对应事件：同帧优先，否则取时间最近（二分查找） */
 function findEventForPlaybackPosition(timeSec, frameIdx = null) {
   const pool = eventsForPlaybackLink();
   if (!pool.length) return null;
@@ -256,9 +260,20 @@ function findEventForPlaybackPosition(timeSec, frameIdx = null) {
     }
   }
   const t = Math.max(0, Number(timeSec) || 0);
-  let best = pool[0];
+  let lo = 0;
+  let hi = pool.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if ((Number(pool[mid].timestamp_sec) || 0) < t) lo = mid + 1;
+    else hi = mid;
+  }
+  const candidates = [];
+  if (lo > 0) candidates.push(pool[lo - 1]);
+  if (lo < pool.length) candidates.push(pool[lo]);
+  let best = candidates[0] || pool[0];
   let bestDist = Math.abs((Number(best.timestamp_sec) || 0) - t);
-  for (const ev of pool) {
+  for (let i = 1; i < candidates.length; i += 1) {
+    const ev = candidates[i];
     const d = Math.abs((Number(ev.timestamp_sec) || 0) - t);
     if (
       d < bestDist ||
@@ -299,10 +314,13 @@ function syncActiveEventFromPlaybackPosition(opts = {}) {
     reviewBackKey = null;
   }
   updateReviewDock();
-  if ($("#event-review-list-details")?.open) renderEventReviewTable();
+  if ($("#event-review-list-details")?.open) {
+    if (typeof updateEventReviewTableActiveRow === "function") {
+      updateEventReviewTableActiveRow();
+    }
+  }
   updateEventMarkerActiveState();
   if (typeof updateStageBoxPickMode === "function") updateStageBoxPickMode();
-  if (typeof redrawCurrentFrame === "function") redrawCurrentFrame();
 }
 
 function updateEventMarkerActiveState() {
@@ -313,8 +331,10 @@ function updateEventMarkerActiveState() {
 }
 
 async function seekToTimestamp(timeSec, frameIdx = null, opts = {}) {
+  renderGeneration++;
   lastRenderedFrameIdx = -1;
   tickPoseFrameIdx = -1;
+  tickVideoFrameIdx = -1;
   lastEventSyncFrameIdx = -1;
   resetPlaybackCollisionTracker();
   const t = Math.max(0, Number(timeSec) || 0);

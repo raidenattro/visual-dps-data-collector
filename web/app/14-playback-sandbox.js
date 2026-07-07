@@ -41,17 +41,43 @@ async function applyPlaybackSandboxAnnotation(sessionId) {
   const sid = String(sessionId || "").trim();
   if (!sid) return { ok: false, label: "", fromPose: false };
   try {
-    const res = await fetch(`/api/sandbox/sessions/${encodeURIComponent(sid)}/annotation.json`);
-    if (!res.ok) {
+    const [annRes, metaRes] = await Promise.all([
+      fetch(`/api/sandbox/sessions/${encodeURIComponent(sid)}/annotation.json`),
+      fetch(`/api/sandbox/sessions/${encodeURIComponent(sid)}`),
+    ]);
+    if (!annRes.ok) {
       syncAnnotationBoxesFromPose();
-      return { ok: false, label: "沙盒标注", fromPose: annotationBoxes.length > 0 };
+      return {
+        ok: false,
+        label: "沙盒标注",
+        fromPose: annotationBoxes.length > 0,
+        error: `HTTP ${annRes.status}`,
+      };
     }
-    const data = await res.json();
+    const data = await annRes.json();
     loadAnnotationBoxesFromData(data);
-    return { ok: true, label: `沙盒 annotation（${annotationBoxes.length} 框）`, sandbox: true };
-  } catch {
+    const meta = metaRes.ok ? await metaRes.json() : {};
+    const edited = Boolean(meta.annotation_edited);
+    const srcAnn = meta.annotation_info?.source_annotation || meta.annotation?.source_annotation || "";
+    if (typeof updatePlaybackAnnotationSourceUiForSandbox === "function") {
+      updatePlaybackAnnotationSourceUiForSandbox(annotationBoxes.length, edited);
+    }
+    const editNote = edited ? "已保存编辑" : "创建时复制的源标注（未点保存则与源记录相同）";
+    const srcNote = srcAnn ? ` · 源自 ${srcAnn}` : "";
+    return {
+      ok: true,
+      label: `沙盒标注（${annotationBoxes.length} 框 · ${editNote}${srcNote}）`,
+      sandbox: true,
+      annotationEdited: edited,
+    };
+  } catch (err) {
     syncAnnotationBoxesFromPose();
-    return { ok: false, label: "沙盒标注", fromPose: annotationBoxes.length > 0 };
+    return {
+      ok: false,
+      label: "沙盒标注",
+      fromPose: annotationBoxes.length > 0,
+      error: err?.message || String(err),
+    };
   }
 }
 
@@ -149,10 +175,43 @@ function updatePlaybackSandboxBanner() {
   if (!playbackSandboxSessionId) {
     el.classList.add("hidden");
     el.textContent = "";
+    if (typeof updatePlaybackAnnotationSourceUiForSandbox === "function") {
+      updatePlaybackAnnotationSourceUiForSandbox(null);
+    }
     return;
   }
-  el.textContent = `🧪 沙盒模式 · 未写入正式数据 · ${playbackSandboxHint()}`;
+  const boxNote = annotationBoxes?.length ? ` · 沙盒标注 ${annotationBoxes.length} 框` : "";
+  el.textContent = `🧪 沙盒模式 · 未写入正式数据${boxNote} · ${playbackSandboxHint()}`;
   el.classList.remove("hidden");
+}
+
+/** 回放页标注来源：沙盒模式下锁定为沙盒标注 */
+function updatePlaybackAnnotationSourceUiForSandbox(boxCount = null, edited = null) {
+  const annSrcSel = $("#playback-annotation-source");
+  if (!annSrcSel) return;
+  const sandboxActive = Boolean(playbackSandboxSessionId);
+  annSrcSel.disabled = sandboxActive;
+  annSrcSel.title = sandboxActive
+    ? "沙盒回放：货框来自 localdata/upload/sandbox/{session}/annotation.json"
+    : "回放货框叠加来源：母本或当前所选模型层标注目录";
+  if (sandboxActive) {
+    let opt = annSrcSel.querySelector('option[value="sandbox"]');
+    if (!opt) {
+      opt = document.createElement("option");
+      opt.value = "sandbox";
+      annSrcSel.insertBefore(opt, annSrcSel.firstChild);
+    }
+    const n = boxCount != null ? boxCount : annotationBoxes?.length || 0;
+    const editTag = edited === true ? "已保存" : edited === false ? "未保存编辑" : "";
+    opt.textContent = editTag ? `沙盒标注（${n} 框 · ${editTag}）` : `沙盒标注（${n} 框）`;
+    annSrcSel.value = "sandbox";
+    return;
+  }
+  const sandboxOpt = annSrcSel.querySelector('option[value="sandbox"]');
+  if (sandboxOpt) sandboxOpt.remove();
+  if (annSrcSel.value === "sandbox") {
+    annSrcSel.value = "tier";
+  }
 }
 
 /** 供 sandbox 页跳转回放 */
