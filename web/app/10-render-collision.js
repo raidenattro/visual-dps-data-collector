@@ -764,6 +764,43 @@ async function loadAnnotationBoxesFromFile(file) {
   loadAnnotationBoxesFromData(data);
 }
 
+/** 将 timeline 行写入 frameByTime（v2 分包回放索引用） */
+function applyTimelineRowsToFrameIndex(rows, inferW, inferH) {
+  frameByTime = [];
+  (rows || []).forEach((row) => {
+    const fi = Number(row.frame_idx) || 0;
+    if (!fi) return;
+    frameByTime.push({
+      t: Number(row.timestamp_sec) || 0,
+      frameIdx: fi,
+      w: Number(row.infer_width) || inferW,
+      h: Number(row.infer_height) || inferH,
+    });
+  });
+  frameByTime.sort((a, b) => a.t - b.t);
+}
+
+/** frame_interval=1 时由 manifest 本地合成时间轴，避免拉取全量 timeline JSON */
+function buildSyntheticFrameIndexFromManifest() {
+  const total = Number(poseData?.frame_count) || 0;
+  const fps = Number(poseData?.fps) || 15;
+  const interval = Math.max(1, Number(poseData?.frame_interval) || 1);
+  if (!total || interval !== 1) return false;
+
+  const inferW = poseData.infer_width || 640;
+  const inferH = poseData.infer_height || 480;
+  frameByTime = [];
+  for (let i = 1; i <= total; i += 1) {
+    frameByTime.push({
+      t: (i - 1) / fps,
+      frameIdx: i,
+      w: inferW,
+      h: inferH,
+    });
+  }
+  return frameByTime.length > 0;
+}
+
 function buildFrameIndex(recordId = null) {
   frameByTime = [];
   resetFrameFetchState();
@@ -772,20 +809,18 @@ function buildFrameIndex(recordId = null) {
   if (!poseData) return Promise.resolve();
 
   if ((poseData.schema || 1) >= 2 && recordId) {
-    return fetch(recordApiUrl(recordId, "/timeline"))
+    const inferW = poseData.infer_width || 640;
+    const inferH = poseData.infer_height || 480;
+
+    if (buildSyntheticFrameIndexFromManifest()) {
+      if (typeof renderAccuracySeekMarkers === "function") renderAccuracySeekMarkers();
+      return Promise.resolve();
+    }
+
+    return fetch(`${recordApiUrl(recordId, "/timeline")}?light=1`)
       .then((res) => (res.ok ? res.json() : { timeline: [] }))
       .then((body) => {
-        const inferW = poseData.infer_width || 640;
-        const inferH = poseData.infer_height || 480;
-        (body.timeline || []).forEach((row) => {
-          frameByTime.push({
-            t: row.timestamp_sec ?? 0,
-            frameIdx: row.frame_idx,
-            w: row.infer_width || inferW,
-            h: row.infer_height || inferH,
-          });
-        });
-        frameByTime.sort((a, b) => a.t - b.t);
+        applyTimelineRowsToFrameIndex(body.timeline || [], inferW, inferH);
         if (typeof renderAccuracySeekMarkers === "function") renderAccuracySeekMarkers();
       });
   }
@@ -806,6 +841,8 @@ function buildFrameIndex(recordId = null) {
   });
   frameByTime.sort((a, b) => a.t - b.t);
   if (typeof renderAccuracySeekMarkers === "function") renderAccuracySeekMarkers();
+  playbackSkeletonReady =
+    frameCache.size >= (Number(poseData?.frame_count) || frameByTime.length || 0);
   return Promise.resolve();
 }
 
@@ -825,17 +862,28 @@ function findFrameAt(timeSec) {
   return frameByTime[Math.max(0, hi)];
 }
 
-function syncCanvasSize() {
+function syncCanvasSize(opts = {}) {
+  const force = opts.force === true;
+  if (!force && playbackRenderLoopActive && frozenPlaybackCanvasCss) {
+    return frozenPlaybackCanvasCss;
+  }
   const wrap = stageWrap || document.querySelector(".stage-wrap");
   if (!wrap) return { cw: 1, ch: 1 };
+  if (!force && canvas._layoutCssW > 0 && canvas._layoutCssH > 0) {
+    return { cw: canvas._layoutCssW, ch: canvas._layoutCssH };
+  }
   const rect = wrap.getBoundingClientRect();
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = playbackRenderLoopActive ? 1 : window.devicePixelRatio || 1;
   const cssW = Math.max(1, Math.floor(rect.width));
   const cssH = Math.max(1, Math.floor(rect.height));
+  canvas._layoutCssW = cssW;
+  canvas._layoutCssH = cssH;
   canvas.width = Math.floor(cssW * dpr);
   canvas.height = Math.floor(cssH * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  return { cw: cssW, ch: cssH };
+  const out = { cw: cssW, ch: cssH };
+  if (playbackRenderLoopActive) frozenPlaybackCanvasCss = out;
+  return out;
 }
 
 /** 回放/复核时标真范本货框高亮（含连续标真片段覆盖的帧范围） */
@@ -913,10 +961,13 @@ function updateStageBoxPickMode() {
 let annotationDisplayCacheKey = "";
 /** @type {{ token: string, displayPts: number[][] }[]} */
 let annotationDisplayCache = [];
+/** 播放时预烘焙的静态货框层（避免每帧重绘 30+ 个框） */
+let playbackStaticLayerCanvas = null;
 
 function invalidateAnnotationDisplayCache() {
   annotationDisplayCacheKey = "";
   annotationDisplayCache = [];
+  playbackStaticLayerCanvas = null;
 }
 
 /** 货框显示多边形（layout/标注不变时可复用，避免每帧重算坐标） */
@@ -926,7 +977,10 @@ function getAnnotationDisplayCache() {
   if (!pl?.resolvePolygonFramePoints || !pl?.mapPointToDisplay) return [];
 
   const { frameW, frameH } = getVideoFrameSize();
-  const layout = getDisplayLayout();
+  const layout =
+    frozenPlaybackLayout && playbackRenderLoopActive
+      ? frozenPlaybackLayout
+      : getDisplayLayout();
   const annSize = getEffectiveAnnotationSize();
   const layoutKey =
     typeof displayLayoutCacheKey === "function" ? displayLayoutCacheKey() : "";
@@ -996,6 +1050,60 @@ function drawDetBboxes(frame, inferW, inferH) {
   ctx.restore();
 }
 
+function collisionSetsForPlaybackFrame(frame, inferW, inferH) {
+  if (frameUsesStoredCollisions(frame)) {
+    return {
+      collisionSet: new Set(frame.collisions || []),
+      alarmSet: new Set(frame.alarm_collisions || []),
+    };
+  }
+  // 播放热路径不实时算碰撞（避免每帧跑 CollisionProcessor）
+  return { collisionSet: new Set(), alarmSet: new Set() };
+}
+
+/** 播放轻量模式：仅绘制当前帧碰撞/告警货框 */
+function drawAnnotationBoxesCollisionOnly(frame, inferW, inferH, collisionSets) {
+  if (!annotationBoxes.length || !collisionSets) return;
+  const { collisionSet, alarmSet } = collisionSets;
+  if (!collisionSet.size && !alarmSet.size) return;
+
+  getAnnotationDisplayCache().forEach(({ token, displayPts }) => {
+    const isAlarm = tokenInCollisionSet(token, alarmSet);
+    const isHit = tokenInCollisionSet(token, collisionSet);
+    if (!isAlarm && !isHit) return;
+
+    ctx.beginPath();
+    displayPts.forEach(([dx, dy], i) => {
+      if (i === 0) ctx.moveTo(dx, dy);
+      else ctx.lineTo(dx, dy);
+    });
+    ctx.closePath();
+    ctx.setLineDash([]);
+    ctx.lineWidth = isAlarm ? 2.5 : 2;
+    ctx.strokeStyle = isAlarm ? "rgba(255, 71, 87, 0.95)" : "rgba(255, 209, 102, 0.95)";
+    ctx.stroke();
+  });
+}
+
+/** 播放时静态货框（淡绿描边，不算碰撞） */
+function drawAnnotationBoxesStatic() {
+  if (!annotationBoxes.length) return;
+  const cache = getAnnotationDisplayCache();
+  if (!cache.length) return;
+  ctx.setLineDash([]);
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = "rgba(0, 255, 0, 0.35)";
+  cache.forEach(({ displayPts }) => {
+    ctx.beginPath();
+    displayPts.forEach(([dx, dy], i) => {
+      if (i === 0) ctx.moveTo(dx, dy);
+      else ctx.lineTo(dx, dy);
+    });
+    ctx.closePath();
+    ctx.stroke();
+  });
+}
+
 function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null, reviewCtx = null) {
   if (!annotationBoxes.length) return;
 
@@ -1059,6 +1167,90 @@ function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null, review
   });
 }
 
+/** 由视频时间直接换算帧号（与 manifest fps 对齐，O(1)） */
+function frameIdxAtVideoTime(timeSec) {
+  const fps = Number(poseData?.fps) || 25;
+  const total = Number(poseData?.frame_count) || frameByTime.length || 0;
+  if (!total) return 0;
+  const idx = Math.floor(Math.max(0, Number(timeSec) || 0) * fps) + 1;
+  return Math.min(total, Math.max(1, idx));
+}
+
+function playbackInferSize() {
+  return {
+    w: poseData?.infer_width || frameByTime[0]?.w || 852,
+    h: poseData?.infer_height || frameByTime[0]?.h || 480,
+  };
+}
+
+/** 播放开始时预烘焙静态货框到离屏 canvas */
+function bakePlaybackStaticLayer() {
+  playbackStaticLayerCanvas = null;
+  if (!annotationBoxes.length || !frozenPlaybackLayout) return null;
+  const cache = getAnnotationDisplayCache();
+  if (!cache.length) return null;
+  const { cw, ch } = frozenPlaybackCanvasCss || syncCanvasSize({ force: true });
+  const layer = document.createElement("canvas");
+  layer.width = cw;
+  layer.height = ch;
+  const sctx = layer.getContext("2d");
+  if (!sctx) return null;
+  sctx.setLineDash([]);
+  sctx.lineWidth = 1.5;
+  sctx.strokeStyle = "rgba(0, 255, 0, 0.35)";
+  cache.forEach(({ displayPts }) => {
+    sctx.beginPath();
+    displayPts.forEach(([dx, dy], i) => {
+      if (i === 0) sctx.moveTo(dx, dy);
+      else sctx.lineTo(dx, dy);
+    });
+    sctx.closePath();
+    sctx.stroke();
+  });
+  playbackStaticLayerCanvas = layer;
+  return layer;
+}
+
+/** 播放专用：静态货框 + 碰撞黄/告警红 + 骨架连线 */
+function drawSkeletonPlaybackOnly(frame, inferW, inferH) {
+  const { cw, ch } = syncCanvasSize();
+  ctx.clearRect(0, 0, cw, ch);
+  if (playbackStaticLayerCanvas) {
+    ctx.drawImage(playbackStaticLayerCanvas, 0, 0, cw, ch);
+  } else {
+    drawAnnotationBoxesStatic();
+  }
+  if (frame && annotationBoxes.length) {
+    const collisionSets = collisionSetsForPlaybackFrame(frame, inferW, inferH);
+    drawAnnotationBoxesCollisionOnly(frame, inferW, inferH, collisionSets);
+  }
+  if (!frame?.persons?.length) return;
+
+  const layout = frozenPlaybackLayout || getDisplayLayout();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "rgba(34, 211, 238, 0.9)";
+  ctx.beginPath();
+  frame.persons.forEach((person) => {
+    const kpts = person.keypoints || [];
+    COCO_LINES.forEach(([a, b]) => {
+      const pa = kpts[a];
+      const pb = kpts[b];
+      if (!pa || !pb || pa[2] < SCORE_MIN || pb[2] < SCORE_MIN) return;
+      const [x1, y1] = mapInferToDisplay(pa[0], pa[1], inferW, inferH, layout);
+      const [x2, y2] = mapInferToDisplay(pb[0], pb[1], inferW, inferH, layout);
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+    });
+  });
+  ctx.stroke();
+}
+
+function clearFrozenPlaybackLayout() {
+  frozenPlaybackLayout = null;
+  frozenPlaybackCanvasCss = null;
+  playbackStaticLayerCanvas = null;
+}
+
 function drawSkeleton(frame, inferW, inferH, collisionSets = null) {
   const { cw, ch } = syncCanvasSize();
   ctx.clearRect(0, 0, cw, ch);
@@ -1098,8 +1290,11 @@ function drawSkeleton(frame, inferW, inferH, collisionSets = null) {
 }
 
 function redrawCurrentFrame() {
+  if (playbackRenderLoopActive && videoEl && !videoEl.paused) return;
+  renderGeneration++;
   lastRenderedFrameIdx = -1;
   tickPoseFrameIdx = -1;
+  tickVideoFrameIdx = -1;
   lastEventSyncFrameIdx = -1;
   if (videoEl.src && videoEl.readyState >= 1) {
     void renderAtTime(videoEl.currentTime);
@@ -1132,20 +1327,31 @@ async function renderFrameEntry(hit, renderGen) {
 }
 
 async function renderAtTimeCore(timeSec) {
-  const gen = ++renderGeneration;
   const hit = findFrameAt(timeSec);
   if (!hit) {
-    if (gen !== renderGeneration) return;
     lastRenderedFrameIdx = -1;
     const { cw, ch } = syncCanvasSize();
     ctx.clearRect(0, 0, cw, ch);
     return;
   }
-  if ((poseData?.schema || 1) >= 2 && hit.frameIdx != null) {
-    await ensureFrameChunkLoaded(hit.frameIdx);
+
+  if ((poseData?.schema || 1) >= 2 && hit.frameIdx != null && !hit.frame) {
+    maybePrefetchByChunkProgress(hit.frameIdx);
+    prefetchLookaheadFromFrame(hit.frameIdx);
+
+    if (!frameCache.has(hit.frameIdx)) {
+      const nearest = findNearestCachedFrameEntry(hit.frameIdx);
+      if (nearest && nearest.frameIdx !== lastRenderedFrameIdx) {
+        await renderFrameEntry(nearest);
+      }
+      const { from, to } = chunkRangeForFrame(hit.frameIdx);
+      await prefetchFrameChunk(from, to);
+    }
   }
-  if (gen !== renderGeneration) return;
-  await renderFrameEntry(hit, gen);
+
+  if (hit.frame || frameCache.has(hit.frameIdx)) {
+    await renderFrameEntry(hit);
+  }
 }
 
 async function renderAtTime(timeSec) {
@@ -1167,28 +1373,107 @@ async function renderAtTime(timeSec) {
   }
 }
 
-function tick() {
-  let syncFrameIdx = null;
-  if (videoEl.readyState >= 2) {
-    const hit = findFrameAt(videoEl.currentTime);
-    const nextIdx = hit?.frameIdx ?? -1;
-    if (nextIdx >= 0 && nextIdx !== tickPoseFrameIdx) {
-      void renderAtTime(videoEl.currentTime);
+/** 播放热路径：全量缓存就绪后仅同步绘制 */
+function syncRenderPlaybackFrame(timeSec) {
+  const targetIdx = frameIdxAtVideoTime(timeSec);
+  if (!targetIdx) return;
+
+  const frame = frameCache.get(targetIdx);
+  if (!frame) {
+    if (!playbackSkeletonReady) {
+      const nearest = findNearestCachedFrameEntry(targetIdx);
+      if (!nearest) return;
+      const nearFrame = frameCache.get(nearest.frameIdx);
+      if (!nearFrame || nearest.frameIdx === lastRenderedFrameIdx) return;
+      lastRenderedFrameIdx = nearest.frameIdx;
+      tickPoseFrameIdx = nearest.frameIdx;
+      const { w, h } = playbackInferSize();
+      drawSkeletonPlaybackOnly(nearFrame, w, h);
     }
-    syncFrameIdx = nextIdx >= 0 ? nextIdx : null;
+    return;
   }
-  if (videoEl.duration && Number.isFinite(videoEl.duration)) {
-    seekBar.value = String((videoEl.currentTime / videoEl.duration) * 1000);
-    timeLabel.textContent = formatTime(videoEl.currentTime);
+
+  if (targetIdx === lastRenderedFrameIdx) return;
+
+  lastRenderedFrameIdx = targetIdx;
+  tickPoseFrameIdx = targetIdx;
+  const { w, h } = playbackInferSize();
+  drawSkeletonPlaybackOnly(frame, w, h);
+}
+
+let videoFrameCallbackHandle = null;
+let playbackRenderLoopActive = false;
+
+function cancelPlaybackRenderLoop() {
+  playbackRenderLoopActive = false;
+  if (videoFrameCallbackHandle != null && typeof videoEl?.cancelVideoFrameCallback === "function") {
+    videoEl.cancelVideoFrameCallback(videoFrameCallbackHandle);
+    videoFrameCallbackHandle = null;
   }
-  if (syncFrameIdx != null && syncFrameIdx !== lastEventSyncFrameIdx) {
-    lastEventSyncFrameIdx = syncFrameIdx;
-    syncActiveEventFromPlaybackPosition({
-      timeSec: videoEl.currentTime,
-      frameIdx: syncFrameIdx,
-    });
+  if (rafId) {
+    cancelAnimationFrame(rafId);
+    rafId = null;
   }
-  rafId = requestAnimationFrame(tick);
+  clearFrozenPlaybackLayout();
+}
+
+/** 唯一入口：避免 play 事件与底部按钮重复启动多条渲染循环 */
+function ensurePlaybackRenderLoop() {
+  if (!videoEl?.src || videoEl.paused || videoEl.ended) return;
+  cancelPlaybackRenderLoop();
+  frozenPlaybackLayout = getDisplayLayout();
+  frozenPlaybackCanvasCss = syncCanvasSize({ force: true });
+  getAnnotationDisplayCache();
+  bakePlaybackStaticLayer();
+  playbackRenderLoopActive = true;
+  tickVideoFrameIdx = -1;
+  lastEventSyncFrameIdx = -1;
+  lastPlaybackUiSyncMs = 0;
+  resetPlaybackCollisionTracker();
+  playbackRenderLoop();
+}
+
+function playbackRenderLoop() {
+  if (!playbackRenderLoopActive || videoEl.paused || videoEl.ended) {
+    playbackRenderLoopActive = false;
+    clearFrozenPlaybackLayout();
+    return;
+  }
+
+  if (videoEl.readyState >= 2) {
+    const timeSec = videoEl.currentTime;
+    const nextIdx = frameIdxAtVideoTime(timeSec);
+    if (nextIdx > 0 && nextIdx !== tickVideoFrameIdx) {
+      tickVideoFrameIdx = nextIdx;
+      syncRenderPlaybackFrame(timeSec);
+    }
+  }
+
+  const now = performance.now();
+  if (now - lastPlaybackUiSyncMs >= 120) {
+    lastPlaybackUiSyncMs = now;
+    if (videoEl.duration && Number.isFinite(videoEl.duration)) {
+      seekBar.value = String((videoEl.currentTime / videoEl.duration) * 1000);
+      timeLabel.textContent = formatTime(videoEl.currentTime);
+    }
+  }
+
+  if (!videoEl.paused && videoEl.readyState >= 2) {
+    if (typeof videoEl.requestVideoFrameCallback === "function") {
+      videoFrameCallbackHandle = videoEl.requestVideoFrameCallback(() => {
+        playbackRenderLoop();
+      });
+    } else {
+      rafId = requestAnimationFrame(playbackRenderLoop);
+    }
+  } else {
+    playbackRenderLoopActive = false;
+    clearFrozenPlaybackLayout();
+  }
+}
+
+function tick() {
+  ensurePlaybackRenderLoop();
 }
 
 function formatTime(sec) {
@@ -1209,8 +1494,7 @@ function stopPlayback() {
   videoEl.pause();
   clearInterval(jsonOnlyTimer);
   jsonOnlyTimer = null;
-  cancelAnimationFrame(rafId);
-  rafId = null;
+  cancelPlaybackRenderLoop();
 }
 
 function finishPlaybackSession() {

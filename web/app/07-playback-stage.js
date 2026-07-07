@@ -29,6 +29,41 @@ function readPlaybackSpeedFromSelect() {
   applyPlaybackSpeed();
 }
 
+/** 舞台加载遮罩（别名，供 records 模块调用） */
+function showStageLoading(text) {
+  showPlaybackStageLoading(text);
+}
+
+function hideStageLoading() {
+  hidePlaybackStageLoading();
+}
+
+function updateStageLoading(text) {
+  updatePlaybackStageLoading(text);
+}
+
+/** 舞台加载遮罩 */
+function showPlaybackStageLoading(text = "加载中…") {
+  const el = document.getElementById("playback-stage-loading");
+  if (!el) return;
+  const textEl = el.querySelector(".playback-stage-loading-text");
+  if (textEl) textEl.textContent = text;
+  el.classList.remove("hidden");
+}
+
+function hidePlaybackStageLoading() {
+  const el = document.getElementById("playback-stage-loading");
+  if (el) el.classList.add("hidden");
+}
+
+function updatePlaybackStageLoading(text) {
+  const el = document.getElementById("playback-stage-loading");
+  if (!el) return;
+  const textEl = el.querySelector(".playback-stage-loading-text");
+  if (textEl) textEl.textContent = text;
+  el.classList.remove("hidden");
+}
+
 /** 舞台尺寸变化时重算 canvas 并强制重绘（避免退出全屏/窗口缩放后骨架卡住） */
 function bindStageLayoutWatch() {
   if (!stageWrap || stageWrap.dataset.layoutWatch) return;
@@ -36,13 +71,14 @@ function bindStageLayoutWatch() {
 
   let layoutTimer = null;
   const onLayoutChange = () => {
+    if (typeof playbackRenderLoopActive !== "undefined" && playbackRenderLoopActive) return;
     if (layoutTimer) clearTimeout(layoutTimer);
     layoutTimer = setTimeout(() => {
       layoutTimer = null;
       if (typeof invalidateDisplayLayoutCache === "function") {
         invalidateDisplayLayoutCache();
       }
-      syncCanvasSize();
+      syncCanvasSize({ force: true });
       redrawCurrentFrame();
     }, 50);
   };

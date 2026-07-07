@@ -116,11 +116,9 @@ async function startPlaybackTransport() {
       setPlaybackInfo(`播放失败: ${err.message}（可点击视频控件或检查格式）`);
       return;
     }
-    cancelAnimationFrame(rafId);
-    tickPoseFrameIdx = -1;
-    lastEventSyncFrameIdx = -1;
-    resetPlaybackCollisionTracker();
-    tick();
+    if (typeof ensurePlaybackRenderLoop === "function") {
+      ensurePlaybackRenderLoop();
+    }
     return;
   }
   if (poseData) {
@@ -164,9 +162,32 @@ videoEl.addEventListener("ended", () => {
 
 videoEl.addEventListener("loadedmetadata", () => {
   readPlaybackSpeedFromSelect();
-  syncCanvasSize();
-  redrawCurrentFrame();
+  syncCanvasSize({ force: true });
+  if (!playbackRenderLoopActive) redrawCurrentFrame();
   renderEventMarkers();
+});
+
+/** 视频开始播放时启动唯一一条骨架渲染循环（底部按钮与 play 事件共用） */
+videoEl.addEventListener("play", () => {
+  readPlaybackSpeedFromSelect();
+  if (typeof ensurePlaybackRenderLoop === "function") ensurePlaybackRenderLoop();
+});
+
+videoEl.addEventListener("pause", () => {
+  if (typeof cancelPlaybackRenderLoop === "function") cancelPlaybackRenderLoop();
+  lastRenderedFrameIdx = -1;
+  tickVideoFrameIdx = -1;
+  if (typeof syncActiveEventFromPlaybackPosition === "function") {
+    syncActiveEventFromPlaybackPosition({
+      timeSec: videoEl.currentTime,
+      frameIdx: typeof frameIdxAtVideoTime === "function" ? frameIdxAtVideoTime(videoEl.currentTime) : null,
+    });
+  }
+  if (typeof redrawCurrentFrame === "function") redrawCurrentFrame();
+  if (videoEl.duration && Number.isFinite(videoEl.duration)) {
+    seekBar.value = String((videoEl.currentTime / videoEl.duration) * 1000);
+    timeLabel.textContent = formatTime(videoEl.currentTime);
+  }
 });
 
 eventFilterSelect?.addEventListener("change", () => {
@@ -258,12 +279,14 @@ function initEventReviewControls() {
 }
 
 videoEl.addEventListener("seeked", () => {
+  if (playbackRenderLoopActive && !videoEl.paused) return;
   const pinnedEventNav = playbackEventLinkExact && activeEventKey;
   if (!pinnedEventNav) {
     playbackEventLinkExact = false;
   }
   lastRenderedFrameIdx = -1;
   tickPoseFrameIdx = -1;
+  tickVideoFrameIdx = -1;
   lastEventSyncFrameIdx = -1;
   resetPlaybackCollisionTracker();
   void renderAtTime(videoEl.currentTime).then(() => {

@@ -60,6 +60,10 @@ function displayLayoutCacheKey() {
 function invalidateDisplayLayoutCache() {
   cachedDisplayLayout = null;
   cachedDisplayLayoutKey = "";
+  if (canvas) {
+    canvas._layoutCssW = 0;
+    canvas._layoutCssH = 0;
+  }
   if (typeof invalidateAnnotationDisplayCache === "function") {
     invalidateAnnotationDisplayCache();
   }
@@ -71,8 +75,57 @@ function resetFrameFetchState() {
   prefetchPromises.clear();
   lastRenderedFrameIdx = -1;
   tickPoseFrameIdx = -1;
+  tickVideoFrameIdx = -1;
   lastEventSyncFrameIdx = -1;
+  playbackSkeletonReady = false;
+  playbackPrefetchRecordId = "";
+  playbackFullPrefetchPromise = null;
   renderGeneration++;
+  if (typeof invalidateVerifiedSegmentsCache === "function") {
+    invalidateVerifiedSegmentsCache();
+  }
+}
+
+/** 缓存中不大于 targetIdx 的最近帧（缺失时临时显示，避免骨架冻结） */
+function findNearestCachedFrameEntry(targetIdx) {
+  const target = Math.max(1, Number(targetIdx) || 0);
+  if (!target || !frameByTime.length) return null;
+  if (frameCache.has(target)) {
+    return frameByTime.find((e) => e.frameIdx === target) || null;
+  }
+  let lo = 0;
+  let hi = frameByTime.length - 1;
+  let bestPos = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const fi = Number(frameByTime[mid].frameIdx) || 0;
+    if (fi <= target) {
+      bestPos = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  for (let i = bestPos; i >= 0; i -= 1) {
+    const entry = frameByTime[i];
+    if (frameCache.has(entry.frameIdx)) return entry;
+  }
+  for (let i = bestPos + 1; i < frameByTime.length; i += 1) {
+    const entry = frameByTime[i];
+    if (frameCache.has(entry.frameIdx)) return entry;
+  }
+  return null;
+}
+
+/** 按播放位置前瞻预取（tick 内调用，不阻塞绘制） */
+function prefetchLookaheadFromFrame(frameIdx) {
+  const idx = Math.max(1, Number(frameIdx) || 0);
+  if (!idx || !currentRecordId || playbackSkeletonReady) return;
+  const fps = Number(poseData?.fps) || 25;
+  const rate = Number.isFinite(playbackSpeed) && playbackSpeed > 0 ? playbackSpeed : 1;
+  const lookaheadFrames = Math.ceil(fps * FRAME_CHUNK_PREFETCH_LOOKAHEAD_SEC * rate);
+  prefetchAheadFromFrame(idx);
+  prefetchAheadFromFrame(Math.min(idx + lookaheadFrames, Number(poseData?.frame_count) || idx));
 }
 
 async function prefetchFrameChunk(from, to) {
@@ -118,6 +171,48 @@ async function prefetchFrameChunksParallel(from, count = 1) {
 /** 打开记录后预取前几块，减少开播后跨块等待 */
 async function prefetchInitialPlaybackChunks() {
   await prefetchFrameChunksParallel(1, FRAME_CHUNK_PREFETCH_INITIAL);
+}
+
+let playbackPrefetchRecordId = "";
+let playbackFullPrefetchPromise = null;
+
+/** 后台拉取全记录骨架分块，播放时只读内存缓存 */
+async function prefetchAllPlaybackChunksInBackground(recordId = currentRecordId, onProgress = null) {
+  const rid = String(recordId || "").trim();
+  const total = Number(poseData?.frame_count) || 0;
+  if (!rid || !total || (poseData?.schema || 1) < 2) {
+    playbackSkeletonReady = total > 0 && frameCache.size >= total;
+    if (onProgress) onProgress(playbackSkeletonReady ? 100 : 0);
+    return;
+  }
+
+  if (playbackFullPrefetchPromise && playbackPrefetchRecordId === rid) {
+    if (playbackSkeletonReady && onProgress) onProgress(100);
+    return playbackFullPrefetchPromise;
+  }
+
+  playbackPrefetchRecordId = rid;
+  playbackSkeletonReady = false;
+  const BATCH = 3;
+  const ranges = [];
+  for (let from = 1; from <= total; from += FRAME_CHUNK_SIZE) {
+    ranges.push({ from, to: Math.min(from + FRAME_CHUNK_SIZE - 1, total) });
+  }
+
+  playbackFullPrefetchPromise = (async () => {
+    const totalChunks = ranges.length;
+    let done = 0;
+    for (let i = 0; i < ranges.length; i += BATCH) {
+      if (playbackPrefetchRecordId !== rid) return;
+      await Promise.all(ranges.slice(i, i + BATCH).map((r) => prefetchFrameChunk(r.from, r.to)));
+      done += Math.min(BATCH, ranges.length - i);
+      if (onProgress) onProgress(Math.round((done / totalChunks) * 100));
+    }
+    playbackSkeletonReady = frameCache.size >= total;
+    if (onProgress) onProgress(100);
+  })();
+
+  return playbackFullPrefetchPromise;
 }
 
 function prefetchAheadFromFrame(frameIdx) {
@@ -172,6 +267,9 @@ async function ensureFrameChunkLoaded(frameIdx) {
 }
 
 function getDisplayLayout() {
+  if (frozenPlaybackLayout && typeof playbackRenderLoopActive !== "undefined" && playbackRenderLoopActive) {
+    return frozenPlaybackLayout;
+  }
   const key = displayLayoutCacheKey();
   if (cachedDisplayLayout && key === cachedDisplayLayoutKey) {
     return cachedDisplayLayout;

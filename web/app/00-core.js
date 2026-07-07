@@ -45,13 +45,15 @@ let eventReviewSaveSeq = 0;
 /** 标真并下一条后，上一条优先回到此事件（已标真事件不在「未标真」队列中） */
 let reviewBackKey = null;
 let currentEventReviewStatus = "not_started";
-const FRAME_CHUNK_SIZE = 120;
+const FRAME_CHUNK_SIZE = 200;
 /** 打开记录时并行预取的分块数 */
-const FRAME_CHUNK_PREFETCH_INITIAL = 4;
+const FRAME_CHUNK_PREFETCH_INITIAL = 8;
 /** 播放中提前预取的下一块数量 */
-const FRAME_CHUNK_PREFETCH_AHEAD = 2;
+const FRAME_CHUNK_PREFETCH_AHEAD = 3;
 /** 块内进度超过该比例时触发下一块预取 */
 const FRAME_CHUNK_PREFETCH_PROGRESS = 0.5;
+/** 播放前瞻预取时长（秒） */
+const FRAME_CHUNK_PREFETCH_LOOKAHEAD_SEC = 2;
 const COLLISION_CFG_STORAGE_KEY = "datacollect_collision_cfg";
 const DET_BBOX_STORAGE_KEY = "datacollect_playback_show_det_bbox";
 /** 回放叠加 RTMDet 人体框（person.bbox） */
@@ -69,6 +71,16 @@ let lastEventSyncFrameIdx = -1;
 let rafId = null;
 let playbackId = null;
 let playbackVideoObjectUrl = null;
+/** 全部分块已入 frameCache，播放时不再请求网络 */
+let playbackSkeletonReady = false;
+/** 播放期间冻结的布局（避免每帧 getBoundingClientRect） */
+let frozenPlaybackLayout = null;
+/** 播放期间冻结的 canvas CSS 尺寸 */
+let frozenPlaybackCanvasCss = null;
+/** 播放 UI 节流时间戳 */
+let lastPlaybackUiSyncMs = 0;
+/** 播放循环当前视频帧号（与 tickPoseFrameIdx 区分） */
+let tickVideoFrameIdx = -1;
 
 /** 从碰撞 token 提取货位 box_id（Box_3098、MAP_19:3098 → 3098） */
 function parseBoxIdFromToken(token) {
