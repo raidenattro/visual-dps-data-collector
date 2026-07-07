@@ -548,6 +548,36 @@ def load_pose_document(locator: RecordLocator, *, include_frames: bool = True) -
     return doc
 
 
+def load_timeline_index(locator: RecordLocator) -> list[dict[str, Any]]:
+    """极轻时间轴索引（仅 frame_idx / source_frame_idx / timestamp_sec，供回放进度定位）。"""
+    if locator.storage == STORAGE_V1_JSON:
+        data = load_manifest(locator)
+        rows: list[dict[str, Any]] = []
+        for fr in data.get("frames") or []:
+            if not isinstance(fr, dict):
+                continue
+            rows.append(
+                {
+                    "frame_idx": int(fr.get("frame_idx") or 0),
+                    "source_frame_idx": int(
+                        fr.get("source_frame_idx") or fr.get("frame_idx") or 0
+                    ),
+                    "timestamp_sec": float(fr.get("timestamp_sec") or 0.0),
+                }
+            )
+        return rows
+
+    pa, pq = _require_pyarrow()
+    path = locator.path / TIMELINE_FILE
+    if not path.is_file():
+        return []
+    table = pq.read_table(
+        path,
+        columns=["frame_idx", "source_frame_idx", "timestamp_sec"],
+    )
+    return table.to_pylist()
+
+
 def load_timeline(locator: RecordLocator, *, include_events: bool = False) -> list[dict[str, Any]]:
     """轻量时间轴（回放索引用；可选含 collisions / alarm_collisions）。"""
     if locator.storage == STORAGE_V1_JSON:

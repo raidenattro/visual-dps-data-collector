@@ -52,6 +52,7 @@ from pose_store import (
     load_frames_range,
     load_pose_document,
     load_pose_header,
+    load_timeline_index,
     load_timeline,
     REVIEW_STATUS_NO_COLLISION,
     ensure_no_collision_review_completed,
@@ -106,6 +107,8 @@ from api.record_service import (
     record_summary_for_list,
     resolve_annotation_path_for_record,
     resolve_annotation_path_for_source,
+    playback_video_path_for_record,
+    playback_video_prepare_status,
     video_path_for_record,
     video_path_for_video_stem,
 )
@@ -669,9 +672,17 @@ def patch_record_tags_api(
     return {"record_id": rid, "tags": tags}
 
 
+@router.get("/api/records/{record_id:path}/video/preview/status")
+def get_record_video_preview_status(record_id: str) -> dict[str, Any]:
+    return playback_video_prepare_status(record_id)
+
+
 @router.get("/api/records/{record_id:path}/video")
-def get_record_video(record_id: str) -> FileResponse:
-    path = video_path_for_record(record_id)
+def get_record_video(record_id: str, original: bool = False) -> FileResponse:
+    if original:
+        path = video_path_for_record(record_id)
+    else:
+        path = playback_video_path_for_record(record_id)
     if not path or not path.is_file():
         raise HTTPException(404, "配套视频不存在")
     media = VIDEO_MIME.get(path.suffix.lower(), "application/octet-stream")
@@ -1372,13 +1383,28 @@ def _patch_record_event_review_locked(
 
 
 @router.get("/api/records/{record_id:path}/timeline")
-def get_record_timeline(record_id: str) -> JSONResponse:
-    """轻量时间轴（frame_idx / timestamp），供回放索引。"""
+def get_record_timeline(record_id: str, light: bool = False) -> JSONResponse:
+    """轻量时间轴（frame_idx / timestamp），供回放索引。light=1 仅索引列。"""
     locator = locate_record_by_id(record_id)
     if not locator:
         raise HTTPException(404, "记录不存在")
     try:
-        timeline = load_timeline(locator)
+        if light:
+            timeline = load_timeline_index(locator)
+            infer_w = 0
+            infer_h = 0
+            try:
+                header = load_pose_header(locator)
+                infer_w = int(header.get("infer_width") or 0)
+                infer_h = int(header.get("infer_height") or 0)
+            except (OSError, RuntimeError, TypeError, ValueError):
+                pass
+            if infer_w > 0 and infer_h > 0:
+                for row in timeline:
+                    row.setdefault("infer_width", infer_w)
+                    row.setdefault("infer_height", infer_h)
+        else:
+            timeline = load_timeline(locator)
     except RuntimeError as exc:
         raise HTTPException(500, str(exc)) from exc
     return JSONResponse({"record_id": record_id, "count": len(timeline), "timeline": timeline})
