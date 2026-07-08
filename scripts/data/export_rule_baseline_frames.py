@@ -14,6 +14,10 @@ is_picking = 本帧是否有 rule 告警；picking_prob / predicted_box_tokens �
   python scripts/data/export_rule_baseline_frames.py \\
     --out-dir localdata/export/rule-baseline-prod \\
     --pose-frame-interval 2 --alarm-min 3 --cooldown 0
+  python scripts/data/export_rule_baseline_frames.py \\
+    --out-dir localdata/export/rule-hand-ext-alpha010-prod-test \\
+    --probe-mode hand_extended --extension-ratio 0.1 \\
+    --pose-frame-interval 2 --alarm-min 3 --cooldown 0
 """
 
 from __future__ import annotations
@@ -41,6 +45,7 @@ from event_engine.collision_sim import (
     stored_pose_frame_interval,
 )
 from event_engine.shelf_picksense_align import build_collision_boxes, resolve_infer_frame_size
+from event_engine.wrist_hits import DEFAULT_EXTENSION_RATIO, ProbeMode
 from pose_store import load_all_frames, load_manifest
 
 from api.accuracy_service import resolve_annotation_for_accuracy_record
@@ -108,6 +113,8 @@ def export_record_frames(
     pose_frame_interval: int,
     alarm_min: int,
     alarm_cooldown: int,
+    probe_mode: ProbeMode = "wrist",
+    extension_ratio: float = DEFAULT_EXTENSION_RATIO,
     infer_size_record_dir: Path | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     paths = resolve_app_paths()
@@ -145,6 +152,8 @@ def export_record_frames(
         alarm_min_consecutive_frames=alarm_min,
         alarm_cooldown_frames=alarm_cooldown,
         video_fps=fps,
+        probe_mode=probe_mode,
+        extension_ratio=extension_ratio,
     )
     if skel_stats["skeleton_frame_count"] <= 0:
         raise ValueError(f"无骨架帧（skeleton 无 person）: {record_id}")
@@ -183,6 +192,8 @@ def export_record_frames(
         "infer_width": infer_w,
         "infer_height": infer_h,
         "infer_size_record_dir": str(size_dir.resolve()),
+        "probe_mode": probe_mode,
+        "extension_ratio": extension_ratio if probe_mode == "hand_extended" else None,
     }
     return rows, meta
 
@@ -217,6 +228,18 @@ def main() -> int:
     parser.add_argument("--pose-frame-interval", type=int, default=2)
     parser.add_argument("--alarm-min", type=int, default=3)
     parser.add_argument("--cooldown", type=int, default=0)
+    parser.add_argument(
+        "--probe-mode",
+        choices=("wrist", "hand_extended"),
+        default="wrist",
+        help="碰撞探针：wrist（默认 infer-collision 手腕）或 hand_extended（手臂延长）",
+    )
+    parser.add_argument(
+        "--extension-ratio",
+        type=float,
+        default=DEFAULT_EXTENSION_RATIO,
+        help="hand_extended 探针延长系数 α（仅 probe-mode=hand_extended 时生效）",
+    )
     parser.add_argument(
         "--out-dir",
         default=str(ROOT / "localdata" / "export" / "rule-baseline-prod"),
@@ -255,10 +278,20 @@ def main() -> int:
         print("未找到匹配记录", file=sys.stderr)
         return 1
 
+    probe_mode: ProbeMode = args.probe_mode
+    extension_ratio = float(args.extension_ratio)
+    collision_engine = "box_human_det_infer"
+    baseline_type = "rule_production_config"
+    if probe_mode == "hand_extended":
+        collision_engine = "collision_processor_hand_extended"
+        baseline_type = f"rule_hand_extended_alpha{extension_ratio:g}"
+
     params = {
-        "baseline_type": "rule_production_config",
+        "baseline_type": baseline_type,
         "pose_tier": args.tier,
-        "collision_engine": "box_human_det_infer",
+        "collision_engine": collision_engine,
+        "probe_mode": probe_mode,
+        "extension_ratio": extension_ratio if probe_mode == "hand_extended" else None,
         "pose_frame_interval": int(args.pose_frame_interval),
         "alarm_min_consecutive_frames": int(args.alarm_min),
         "alarm_cooldown_frames": int(args.cooldown),
@@ -302,6 +335,8 @@ def main() -> int:
                 pose_frame_interval=args.pose_frame_interval,
                 alarm_min=args.alarm_min,
                 alarm_cooldown=args.cooldown,
+                probe_mode=probe_mode,
+                extension_ratio=extension_ratio,
                 infer_size_record_dir=per_infer_dir,
             )
             clip_name = meta["clip_name"]

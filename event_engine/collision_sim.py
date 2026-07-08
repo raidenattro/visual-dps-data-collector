@@ -103,9 +103,14 @@ def simulate_frame_events_infer_collision(
     alarm_min_consecutive_frames: int = 3,
     alarm_cooldown_frames: int = 0,
     video_fps: float = 15.0,
+    probe_mode: ProbeMode = "wrist",
+    extension_ratio: float = DEFAULT_EXTENSION_RATIO,
+    fallback_to_wrist: bool = True,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
-    """与 ShelfPickSense infer-collision 对齐：帧范围、跳帧、缺失帧补空、box_human_det 碰撞逻辑。
+    """与 ShelfPickSense infer-collision 对齐：帧范围、跳帧、缺失帧补空。
 
+    默认 probe_mode=wrist 时使用 InferCollisionProcessor（box_human_det 手腕逻辑）；
+    hand_extended 时使用 CollisionProcessor（手臂延长探针）。
     帧索引使用 skeleton.parquet 的 frame_idx（非 source_frame_idx）。
     返回 (events, stats)，stats 含 min_frame / max_frame / skeleton_frame_count。
     """
@@ -127,12 +132,23 @@ def simulate_frame_events_infer_collision(
     max_frame = max(frames_by_idx)
     interval = max(1, int(pose_frame_interval))
 
-    processor = InferCollisionProcessor(
-        boxes,
-        alarm_min_consecutive_frames=max(1, int(alarm_min_consecutive_frames)),
-        alarm_cooldown_frames=max(0, int(alarm_cooldown_frames)),
-        video_fps=video_fps,
-    )
+    if probe_mode == "hand_extended":
+        processor: InferCollisionProcessor | CollisionProcessor = CollisionProcessor(
+            boxes,
+            alarm_min_consecutive_frames=max(1, int(alarm_min_consecutive_frames)),
+            alarm_cooldown_frames=max(0, int(alarm_cooldown_frames)),
+            video_fps=video_fps,
+            probe_mode=probe_mode,
+            extension_ratio=extension_ratio,
+            fallback_to_wrist=fallback_to_wrist,
+        )
+    else:
+        processor = InferCollisionProcessor(
+            boxes,
+            alarm_min_consecutive_frames=max(1, int(alarm_min_consecutive_frames)),
+            alarm_cooldown_frames=max(0, int(alarm_cooldown_frames)),
+            video_fps=video_fps,
+        )
 
     out: list[dict[str, Any]] = []
     for frame_idx in range(min_frame, max_frame + 1):
@@ -142,8 +158,20 @@ def simulate_frame_events_infer_collision(
         # 与 ShelfPickSense infer-collision 一致：缺帧不调用 processor，状态机不推进
         if fr is not None:
             event = processor.process({"frame_idx": frame_idx, "persons": fr.get("persons") or []})
-            collisions = sorted({str(t).strip() for t in (event.get("collisions") or []) if str(t).strip()})
-            alarms = sorted({str(t).strip() for t in (event.get("alarm_collisions") or []) if str(t).strip()})
+            if probe_mode == "hand_extended":
+                collisions = [
+                    canonical_box_token(str(t).strip())
+                    for t in (event.get("collisions") or [])
+                    if canonical_box_token(str(t).strip())
+                ]
+                alarms = [
+                    canonical_box_token(str(t).strip())
+                    for t in (event.get("alarm_collisions") or [])
+                    if canonical_box_token(str(t).strip())
+                ]
+            else:
+                collisions = sorted({str(t).strip() for t in (event.get("collisions") or []) if str(t).strip()})
+                alarms = sorted({str(t).strip() for t in (event.get("alarm_collisions") or []) if str(t).strip()})
         else:
             collisions = []
             alarms = []
