@@ -217,7 +217,6 @@ eventFilterSelect?.addEventListener("change", () => {
     renderEventReviewTable(list);
   }
   refreshEventCountLabel();
-  updateReviewDock();
   const first = list[0];
   if (first) {
     void seekToEvent(first);

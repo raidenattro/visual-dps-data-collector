@@ -174,8 +174,14 @@ function addTokenKeysToSet(token, set) {
 
 let playbackAccuracyOverlayCache = null;
 let externalPlaybackAccuracyOverlay = null;
+/** 漏报/误报 GT 段缓存（避免筛选/渲染时反复全量比对告警列表） */
+let accuracyGroundTruthSegmentsCache = null;
 
 const MAX_SEEK_ACCURACY_DOTS = 120;
+
+function invalidateAccuracyGroundTruthSegmentsCache() {
+  accuracyGroundTruthSegmentsCache = null;
+}
 
 /** 将评估 overlay 的 [[frame, token], ...] 建成按帧索引 */
 function buildEvalOverlayFrameIndex(alarms, collisions) {
@@ -275,6 +281,7 @@ function normalizeExternalPlaybackOverlay(raw) {
 
 function setExternalPlaybackAccuracyOverlay(overlay) {
   externalPlaybackAccuracyOverlay = overlay ? normalizeExternalPlaybackOverlay(overlay) : null;
+  invalidateAccuracyGroundTruthSegmentsCache();
   playbackAccuracyOverlayCache = externalPlaybackAccuracyOverlay;
   if (typeof renderAccuracySeekMarkers === "function") renderAccuracySeekMarkers();
   if (typeof refreshEventCountLabel === "function") refreshEventCountLabel();
@@ -306,15 +313,12 @@ function getPlaybackAccuracyEvalCounts() {
 window.getPlaybackAccuracyEvalCounts = getPlaybackAccuracyEvalCounts;
 
 function invalidatePlaybackAccuracyOverlay() {
+  invalidateAccuracyGroundTruthSegmentsCache();
   playbackAccuracyOverlayCache = externalPlaybackAccuracyOverlay || null;
   if (!playbackAccuracyOverlayCache && typeof buildPlaybackAccuracyOverlayData === "function") {
     playbackAccuracyOverlayCache = null;
   }
   if (typeof renderAccuracySeekMarkers === "function") renderAccuracySeekMarkers();
-  if (externalPlaybackAccuracyOverlay) {
-    if (typeof refreshEventCountLabel === "function") refreshEventCountLabel();
-    if (typeof redrawCurrentFrame === "function") redrawCurrentFrame();
-  }
 }
 
 function collectPlaybackAlarmIndex() {
@@ -344,7 +348,7 @@ function accuracySegmentKey(seg) {
 }
 
 /** 漏报/误报对比用 GT 段：优先 event_review 标真段，detected 状态来自评估 overlay */
-function getAccuracyGroundTruthSegments() {
+function computeAccuracyGroundTruthSegments() {
   const reviewSegs = buildVerifiedGroundTruthSegments();
   if (!reviewSegs.length) {
     return externalPlaybackAccuracyOverlay?.segments?.length
@@ -362,12 +366,20 @@ function getAccuracyGroundTruthSegments() {
   externalPlaybackAccuracyOverlay.segments.forEach((seg) => {
     detectedByKey.set(accuracySegmentKey(seg), Boolean(seg.detected));
   });
+  const evalAlarms = externalPlaybackAccuracyOverlay.allAlarms || [];
   return reviewSegs.map((seg) => ({
     ...seg,
     detected: detectedByKey.has(accuracySegmentKey(seg))
       ? detectedByKey.get(accuracySegmentKey(seg))
-      : segmentHasMatchingAlarm(seg, externalPlaybackAccuracyOverlay.allAlarms || []),
+      : segmentHasMatchingAlarm(seg, evalAlarms),
   }));
+}
+
+function getAccuracyGroundTruthSegments() {
+  if (!accuracyGroundTruthSegmentsCache) {
+    accuracyGroundTruthSegmentsCache = computeAccuracyGroundTruthSegments();
+  }
+  return accuracyGroundTruthSegmentsCache;
 }
 
 /** 与准确率 evaluate_segments 一致：标真范本段 + 全记录告警索引 */
@@ -557,15 +569,16 @@ function isPlaybackEventInMissSegment(ev) {
   const inMissSeg = overlay.segments.some((seg) => {
     if (seg.detected) return false;
     if (fi < seg.frame_start || fi > seg.frame_end) return false;
-    if (externalPlaybackAccuracyOverlay) {
+    if (ev._accuracy_miss_placeholder) {
       return (
-        fi === seg.frame_start ||
-        tokens.some((t) => tokenMatchesAnyList(t, seg.tokens))
+        fi === seg.frame_start && tokens.some((t) => tokenMatchesAnyList(t, seg.tokens))
       );
     }
     return tokens.some((t) => tokenMatchesAnyList(t, seg.tokens));
   });
   if (!inMissSeg) return false;
+
+  if (ev._accuracy_miss_placeholder) return true;
 
   // 上传推测评估跳转：漏报段内事件不要求已标真
   if (externalPlaybackAccuracyOverlay) return true;
@@ -627,6 +640,51 @@ function buildFalseAlarmQueueEvents() {
       frame_idx: fi,
       timestamp_sec: row?.t ?? (fi - 1) / (Number(poseData?.fps) || 25),
       box_tokens: [tok],
+    });
+  });
+
+  items.sort(
+    (a, b) =>
+      (Number(a.timestamp_sec) || 0) - (Number(b.timestamp_sec) || 0) ||
+      (parseInt(a.frame_idx, 10) || 0) - (parseInt(b.frame_idx, 10) || 0)
+  );
+  return items;
+}
+
+/** 从评估漏报段构建导航队列（每段一条，与误报队列一致，避免扫全量时间线事件） */
+function buildMissSegmentQueueEvents() {
+  const segments = getAccuracyGroundTruthSegments().filter((seg) => !seg.detected);
+  if (!segments.length) return [];
+
+  const items = [];
+  const seen = new Set();
+
+  segments.forEach((seg) => {
+    const fi = Number(seg.frame_start) || 0;
+    if (fi <= 0) return;
+    const tokenKey = canonicalizeBoxTokenList(seg.tokens || []).join(",");
+    const dedupeKey = `${fi}\0${tokenKey}`;
+    if (seen.has(dedupeKey)) return;
+    seen.add(dedupeKey);
+
+    const existing = (playbackEvents || []).find((e) => {
+      if ((parseInt(e.frame_idx, 10) || 0) !== fi) return false;
+      if (typeof isEventVerified === "function" && !isEventVerified(e)) return false;
+      const tokens = eventGroundTruthTokens(e);
+      return tokens.some((t) => tokenMatchesAnyList(t, seg.tokens));
+    });
+    if (existing) {
+      items.push(existing);
+      return;
+    }
+
+    const row = frameByTime?.find((r) => Number(r.frameIdx) === fi);
+    items.push({
+      event_type: "alarm",
+      frame_idx: fi,
+      timestamp_sec: row?.t ?? (fi - 1) / (Number(poseData?.fps) || 25),
+      box_tokens: seg.tokens || [],
+      _accuracy_miss_placeholder: true,
     });
   });
 

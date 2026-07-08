@@ -828,6 +828,14 @@ function filteredPlaybackEvents() {
     return playbackEvents.filter((e) => e.event_type === mode);
   }
   if (mode === "miss") {
+    if (
+      typeof externalPlaybackAccuracyOverlay !== "undefined" &&
+      externalPlaybackAccuracyOverlay &&
+      typeof buildMissSegmentQueueEvents === "function"
+    ) {
+      const fromOverlay = buildMissSegmentQueueEvents();
+      if (fromOverlay.length) return fromOverlay;
+    }
     const matched =
       typeof isPlaybackEventInMissSegment === "function"
         ? playbackEvents.filter((e) => isPlaybackEventInMissSegment(e))
@@ -835,15 +843,11 @@ function filteredPlaybackEvents() {
           ? playbackEvents.filter((e) => isPlaybackEventMiss(e))
           : [];
     if (matched.length) return matched;
-    // 上传评估：无时间线事件命中时，按漏报段起点生成可导航占位事件
-    const overlay =
-      typeof externalPlaybackAccuracyOverlay !== "undefined"
-        ? externalPlaybackAccuracyOverlay
-        : null;
+    // 无时间线事件命中时，按漏报段起点生成可导航占位事件
     const missSegments =
       typeof getAccuracyGroundTruthSegments === "function"
         ? getAccuracyGroundTruthSegments().filter((seg) => !seg.detected)
-        : overlay?.segments?.filter((seg) => !seg.detected) || [];
+        : [];
     if (missSegments.length) {
       return missSegments
         .map((seg) => {
