@@ -169,19 +169,37 @@ videoEl.addEventListener("loadedmetadata", () => {
 
 /** 视频开始播放时启动唯一一条骨架渲染循环（底部按钮与 play 事件共用） */
 videoEl.addEventListener("play", () => {
+  if (typeof clearPlaybackAuthorityFrameIdx === "function") clearPlaybackAuthorityFrameIdx();
   readPlaybackSpeedFromSelect();
   if (typeof ensurePlaybackRenderLoop === "function") ensurePlaybackRenderLoop();
 });
 
 videoEl.addEventListener("pause", () => {
   if (typeof cancelPlaybackRenderLoop === "function") cancelPlaybackRenderLoop();
-  lastRenderedFrameIdx = -1;
+  // 逐帧/按 frame_idx 精确 seek 时，不在 pause 回调里按 currentTime 重绘
+  const explicitFi =
+    typeof getExplicitSeekFrameIdx === "function" ? getExplicitSeekFrameIdx() : null;
+  const authorityFi =
+    typeof getPlaybackAuthorityFrameIdx === "function" ? getPlaybackAuthorityFrameIdx() : null;
+  if (explicitFi || authorityFi || playbackEventLinkExact) {
+    if (videoEl.duration && Number.isFinite(videoEl.duration)) {
+      seekBar.value = String((videoEl.currentTime / videoEl.duration) * 1000);
+      timeLabel.textContent = formatTime(videoEl.currentTime);
+    }
+    return;
+  }
   tickVideoFrameIdx = -1;
+  lastRenderedFrameIdx = -1;
   // 显式事件跳转中（playbackEventLinkExact）不同步「最近事件」，避免覆盖 activeEventKey
   if (!playbackEventLinkExact && typeof syncActiveEventFromPlaybackPosition === "function") {
     syncActiveEventFromPlaybackPosition({
       timeSec: videoEl.currentTime,
-      frameIdx: typeof frameIdxAtVideoTime === "function" ? frameIdxAtVideoTime(videoEl.currentTime) : null,
+      frameIdx:
+        typeof getCurrentPlaybackFrameIdx === "function"
+          ? getCurrentPlaybackFrameIdx()
+          : typeof frameIdxAtVideoTime === "function"
+            ? frameIdxAtVideoTime(videoEl.currentTime)
+            : null,
     });
   }
   if (typeof redrawCurrentFrame === "function") redrawCurrentFrame();
@@ -216,6 +234,8 @@ function initEventReviewControls() {
   scheduleEventReviewListScrollHeight();
 
   $("#event-prev-btn")?.addEventListener("click", () => navigateReviewEvent(-1));
+  $("#event-prev-frame-btn")?.addEventListener("click", () => void navigatePlaybackFrame(-1));
+  $("#event-next-frame-btn")?.addEventListener("click", () => void navigatePlaybackFrame(1));
   $("#event-skip-next-btn")?.addEventListener("click", () => void skipToNextEvent());
   $("#event-mark-true-next-btn")?.addEventListener("click", () => void confirmTrueAndNext());
   $("#event-unmark-btn")?.addEventListener("click", () => void unmarkTrueAndNext());
@@ -260,6 +280,17 @@ function initEventReviewControls() {
       togglePlaybackTransport();
       return;
     }
+    if (!playbackEvents.length && !frameByTime.length) return;
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      void navigatePlaybackFrame(-1);
+      return;
+    }
+    if (e.key === "ArrowRight") {
+      e.preventDefault();
+      void navigatePlaybackFrame(1);
+      return;
+    }
     if (!playbackEvents.length) return;
     if (e.key === "y" || e.key === "Y") {
       e.preventDefault();
@@ -283,9 +314,36 @@ function initEventReviewControls() {
 videoEl.addEventListener("seeked", () => {
   if (playbackRenderLoopActive && !videoEl.paused) return;
   const pinnedEventNav = playbackEventLinkExact && activeEventKey;
-  if (!pinnedEventNav) {
-    playbackEventLinkExact = false;
+  const pinnedFi =
+    pinnedEventNav && typeof pinnedEventFrameIdx === "function" ? pinnedEventFrameIdx() : null;
+
+  const explicitFi =
+    typeof getExplicitSeekFrameIdx === "function" ? getExplicitSeekFrameIdx() : null;
+  const authorityFi =
+    typeof getPlaybackAuthorityFrameIdx === "function" ? getPlaybackAuthorityFrameIdx() : null;
+  const targetFi = pinnedFi || authorityFi || explicitFi;
+  if (targetFi && typeof renderExplicitPlaybackFrame === "function") {
+    void renderExplicitPlaybackFrame(targetFi).then((ok) => {
+      if (!ok) return;
+      if (!pinnedEventNav && typeof syncActiveEventFromPlaybackPosition === "function") {
+        syncActiveEventFromPlaybackPosition({
+          timeSec: videoEl.currentTime,
+          frameIdx: targetFi,
+          skipRedraw: true,
+        });
+      } else if (pinnedEventNav && lastRenderedFrameIdx !== targetFi) {
+        void realignPlaybackToPinnedEvent();
+      }
+      if (typeof updateEventReviewFrameNavUi === "function") updateEventReviewFrameNavUi();
+    });
+    return;
   }
+
+  if (pinnedEventNav) {
+    void realignPlaybackToPinnedEvent();
+    return;
+  }
+
   lastRenderedFrameIdx = -1;
   tickPoseFrameIdx = -1;
   tickVideoFrameIdx = -1;
@@ -307,6 +365,8 @@ window.addEventListener("beforeunload", () => {
 });
 
 seekBar.addEventListener("input", async () => {
+  if (typeof clearPlaybackAuthorityFrameIdx === "function") clearPlaybackAuthorityFrameIdx();
+  else if (typeof clearExplicitSeekFrameIdx === "function") clearExplicitSeekFrameIdx();
   playbackEventLinkExact = false;
   lastRenderedFrameIdx = -1;
   tickPoseFrameIdx = -1;

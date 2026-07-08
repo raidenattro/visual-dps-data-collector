@@ -852,15 +852,11 @@ async function applyPendingPlaybackAccuracyNav() {
   }
 
   const seekFrame = parseInt(pending.seekFrameIdx, 10) || 0;
-  if (seekFrame > 0 && typeof seekToTimestamp === "function" && Array.isArray(frameByTime)) {
-    const row = frameByTime.find((r) => Number(r.frameIdx) === seekFrame);
-    if (row && Number.isFinite(row.t)) {
-      await seekToTimestamp(row.t, seekFrame, { skipEventSync: false });
-    }
+  if (seekFrame > 0 && typeof linkPlaybackToFrame === "function") {
+    await linkPlaybackToFrame(seekFrame, { pinEvent: true });
   }
 
   if (typeof renderAccuracySeekMarkers === "function") renderAccuracySeekMarkers();
-  if (typeof redrawCurrentFrame === "function") redrawCurrentFrame();
   if (typeof refreshEventCountLabel === "function") refreshEventCountLabel();
 }
 
@@ -1292,8 +1288,9 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
   const videoLoaded = !!videoResult.loaded;
   const usedOriginalVideo = !!videoResult.usedOriginal;
   await eventsPromise;
-  if (playbackEvents.length) {
-    void beginEventReview();
+  const hadPendingAccuracyNav = !!pendingPlaybackAccuracyNav;
+  if (playbackEvents.length && !hadPendingAccuracyNav) {
+    await beginEventReview();
   }
   if (videoLoaded) {
     const { frameW, frameH } = getVideoFrameSize();

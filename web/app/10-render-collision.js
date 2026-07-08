@@ -346,15 +346,8 @@ function collectAccuracySeekMarkerFrames() {
 
   const falseAlarmFrames = [];
   overlay.allAlarms.forEach(([frame, token]) => {
-    const fi = Number(frame) || 0;
-    if (fi <= 0) return;
-    const covered = overlay.segments.some(
-      (seg) =>
-        fi >= seg.frame_start &&
-        fi <= seg.frame_end &&
-        tokenMatchesAnyList(token, seg.tokens)
-    );
-    if (!covered) falseAlarmFrames.push(fi);
+    if (!isOverlayFalseAlarmEntry(frame, token, overlay)) return;
+    falseAlarmFrames.push(Number(frame) || 0);
   });
 
   return {
@@ -481,6 +474,70 @@ function isPlaybackEventInMissSegment(ev) {
 
   if (typeof isEventVerified !== "function" || !isEventVerified(ev)) return false;
   return true;
+}
+
+/** 评估 overlay 中该告警是否为误报（不在任标真范本段内） */
+function isOverlayFalseAlarmEntry(frame, token, overlay = null) {
+  const ov = overlay || getPlaybackAccuracyOverlay();
+  if (!ov?.segments?.length) return false;
+  const fi = Number(frame) || 0;
+  const tok = String(token || "").trim();
+  if (fi <= 0 || !tok) return false;
+  const covered = ov.segments.some(
+    (seg) =>
+      fi >= seg.frame_start &&
+      fi <= seg.frame_end &&
+      tokenMatchesAnyList(tok, seg.tokens)
+  );
+  return !covered;
+}
+
+/** 从评估 overlay 构建误报导航队列（与误报计数/白描边规则一致） */
+function buildFalseAlarmQueueEvents() {
+  const overlay = externalPlaybackAccuracyOverlay;
+  if (!overlay?.allAlarms?.length) return [];
+
+  const items = [];
+  const seen = new Set();
+
+  overlay.allAlarms.forEach(([frame, token]) => {
+    if (!isOverlayFalseAlarmEntry(frame, token, overlay)) return;
+
+    const fi = Number(frame) || 0;
+    const tok = String(token || "").trim();
+    const dedupeKey = `${fi}\0${tok}`;
+    if (seen.has(dedupeKey)) return;
+    seen.add(dedupeKey);
+
+    const existing = (playbackEvents || []).find((e) => {
+      if (String(e.event_type || "").trim() !== "alarm") return false;
+      if ((parseInt(e.frame_idx, 10) || 0) !== fi) return false;
+      const tokens =
+        typeof normalizeBoxTokenList === "function"
+          ? normalizeBoxTokenList(e.box_tokens)
+          : canonicalizeBoxTokenList(e.box_tokens);
+      return tokenMatchesAnyList(tok, tokens);
+    });
+    if (existing) {
+      items.push(existing);
+      return;
+    }
+
+    const row = frameByTime?.find((r) => Number(r.frameIdx) === fi);
+    items.push({
+      event_type: "alarm",
+      frame_idx: fi,
+      timestamp_sec: row?.t ?? (fi - 1) / (Number(poseData?.fps) || 25),
+      box_tokens: [tok],
+    });
+  });
+
+  items.sort(
+    (a, b) =>
+      (Number(a.timestamp_sec) || 0) - (Number(b.timestamp_sec) || 0) ||
+      (parseInt(a.frame_idx, 10) || 0) - (parseInt(b.frame_idx, 10) || 0)
+  );
+  return items;
 }
 
 /** 告警不在任标真范本段内 → 误报 */
@@ -923,24 +980,35 @@ function getReviewBoxHighlightContext(frameIdx = null) {
   if (!playbackEvents?.length || !annotationBoxes.length) return null;
   if (!eventsPanel || eventsPanel.classList.contains("hidden")) return null;
 
+  const resolvedFi =
+    typeof getResolvedPlaybackFrameIdx === "function" ? getResolvedPlaybackFrameIdx() : null;
   const rawFi =
     frameIdx != null && Number(frameIdx) > 0
       ? Number(frameIdx)
-      : lastRenderedFrameIdx >= 1
-        ? lastRenderedFrameIdx
-        : typeof getCurrentPlaybackFrameIdx === "function"
-          ? getCurrentPlaybackFrameIdx()
-          : null;
+      : resolvedFi != null && resolvedFi > 0
+        ? resolvedFi
+        : lastRenderedFrameIdx >= 1
+          ? lastRenderedFrameIdx
+          : typeof getCurrentPlaybackFrameIdx === "function"
+            ? getCurrentPlaybackFrameIdx()
+            : null;
   const fi =
     typeof playbackOverlayFrameIdx === "function"
       ? playbackOverlayFrameIdx(rawFi) ?? rawFi
       : rawFi;
+  // 未钉住事件时，标真段高亮跟随画面帧，不用事件帧覆盖
+  const segmentFi =
+    playbackEventLinkExact && fi != null && fi > 0
+      ? fi
+      : rawFi != null && rawFi > 0
+        ? rawFi
+        : fi;
 
   const confirmedByToken = new Map();
 
-  if (fi != null && fi > 0) {
+  if (segmentFi != null && segmentFi > 0) {
     for (const seg of buildVerifiedGroundTruthSegments()) {
-      if (fi < seg.frame_start || fi > seg.frame_end) continue;
+      if (segmentFi < seg.frame_start || segmentFi > seg.frame_end) continue;
       seg.tokens.forEach((token) => {
         for (const key of boxTokenLookupKeys(token)) {
           confirmedByToken.set(key, true);
@@ -953,13 +1021,29 @@ function getReviewBoxHighlightContext(frameIdx = null) {
     (typeof getActiveEvent === "function" ? getActiveEvent() : null) ??
     (typeof getActiveFilteredEvent === "function" ? getActiveFilteredEvent() : null);
   if (activeEv) {
-    const boxes =
-      typeof getEventConfirmedBoxes === "function" ? getEventConfirmedBoxes(activeEv) : [];
-    boxes.forEach((token) => {
-      for (const key of boxTokenLookupKeys(token)) {
-        confirmedByToken.set(key, true);
-      }
-    });
+    const playbackFi =
+      resolvedFi != null && resolvedFi > 0
+        ? resolvedFi
+        : lastRenderedFrameIdx >= 1
+          ? lastRenderedFrameIdx
+          : typeof getCurrentPlaybackFrameIdx === "function"
+            ? getCurrentPlaybackFrameIdx()
+            : fi;
+    // 仅当画面帧与事件帧一致，或显式事件跳转钉住时，才叠加选中事件的范本紫色
+    const includeActiveConfirmed =
+      playbackEventLinkExact ||
+      (typeof eventMatchesPlaybackFrame === "function" &&
+        playbackFi != null &&
+        eventMatchesPlaybackFrame(activeEv, playbackFi));
+    if (includeActiveConfirmed) {
+      const boxes =
+        typeof getEventConfirmedBoxes === "function" ? getEventConfirmedBoxes(activeEv) : [];
+      boxes.forEach((token) => {
+        for (const key of boxTokenLookupKeys(token)) {
+          confirmedByToken.set(key, true);
+        }
+      });
+    }
   }
 
   if (!confirmedByToken.size) return null;
@@ -1333,17 +1417,22 @@ function redrawCurrentFrame() {
   if (playbackRenderLoopActive && videoEl && !videoEl.paused) return;
   renderGeneration++;
   const gen = renderGeneration;
+  const pinnedFi =
+    typeof pinnedEventFrameIdx === "function" ? pinnedEventFrameIdx() : null;
+  const authorityFi =
+    typeof getPlaybackAuthorityFrameIdx === "function" ? getPlaybackAuthorityFrameIdx() : null;
+  // 保留刚通过 frame_idx 精确渲染的帧，避免预览视频 seek 差帧把画面拉回
+  const heldFi = lastRenderedFrameIdx >= 1 ? lastRenderedFrameIdx : null;
   lastRenderedFrameIdx = -1;
   tickPoseFrameIdx = -1;
   tickVideoFrameIdx = -1;
   lastEventSyncFrameIdx = -1;
-  const pinnedFi =
-    typeof pinnedEventFrameIdx === "function" ? pinnedEventFrameIdx() : null;
-  if (pinnedFi && frameByTime?.length) {
+  const targetFi = pinnedFi || authorityFi || heldFi;
+  if (targetFi && frameByTime?.length) {
     const hit =
       typeof frameEntryByIdx === "function"
-        ? frameEntryByIdx(pinnedFi)
-        : frameByTime.find((item) => item.frameIdx === pinnedFi) || null;
+        ? frameEntryByIdx(targetFi)
+        : frameByTime.find((item) => item.frameIdx === targetFi) || null;
     if (hit) {
       void renderFrameEntry(hit, gen);
       return;
@@ -1358,6 +1447,17 @@ function redrawCurrentFrame() {
 
 async function renderFrameEntry(hit, renderGen) {
   if (!hit) return;
+  const authorityFi =
+    typeof getPlaybackAuthorityFrameIdx === "function" ? getPlaybackAuthorityFrameIdx() : null;
+  // 丢弃/纠正落后于权威帧的异步渲染，避免 pause/seeked 竞态把画面拉回
+  if (authorityFi != null && authorityFi > 0 && hit.frameIdx !== authorityFi) {
+    const authHit =
+      typeof frameEntryByIdx === "function"
+        ? frameEntryByIdx(authorityFi)
+        : frameByTime.find((e) => e.frameIdx === authorityFi) || null;
+    if (!authHit) return;
+    hit = authHit;
+  }
   const frame = hit.frame || (await ensureFrame(hit.frameIdx));
   if (renderGen != null && renderGen !== renderGeneration) return;
   if (!frame) return;
@@ -1377,6 +1477,7 @@ async function renderFrameEntry(hit, renderGen) {
   if (typeof updatePlaybackWristFeaturesUi === "function") {
     updatePlaybackWristFeaturesUi(hit.frameIdx);
   }
+  if (typeof updateEventReviewFrameNavUi === "function") updateEventReviewFrameNavUi();
 }
 
 async function renderAtTimeCore(timeSec) {
@@ -1408,6 +1509,18 @@ async function renderAtTimeCore(timeSec) {
 }
 
 async function renderAtTime(timeSec) {
+  const authorityFi =
+    typeof getPlaybackAuthorityFrameIdx === "function" ? getPlaybackAuthorityFrameIdx() : null;
+  if (authorityFi != null && authorityFi > 0) {
+    const hit =
+      typeof frameEntryByIdx === "function"
+        ? frameEntryByIdx(authorityFi)
+        : frameByTime.find((e) => e.frameIdx === authorityFi) || null;
+    if (hit) {
+      await renderFrameEntry(hit);
+      return;
+    }
+  }
   if (renderAtTimeInflight) {
     renderAtTimePendingTime = timeSec;
     return;

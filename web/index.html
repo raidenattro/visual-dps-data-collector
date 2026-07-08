@@ -634,6 +634,11 @@
                   重置box标注
                 </button>
               </div>
+              <div class="event-review-frame-nav">
+                <button type="button" id="event-prev-frame-btn" class="btn-review-frame-nav" title="快捷键 ←">◀ 上一帧</button>
+                <span id="event-review-frame-pos" class="event-review-frame-pos">帧 —</span>
+                <button type="button" id="event-next-frame-btn" class="btn-review-frame-nav" title="快捷键 →">下一帧 ▶</button>
+              </div>
               <div class="event-review-actions">
                 <button type="button" id="event-prev-btn" class="btn-review-nav" title="快捷键 ↑">‹ 上一条</button>
                 <button type="button" id="event-skip-next-btn" class="btn-review-skip" title="快捷键 N">下一条 ›</button>
@@ -643,7 +648,7 @@
                 <button type="button" id="event-unmark-all-btn" class="btn-review-bulk-unmark">全部取消标真</button>
                 <button type="button" id="event-review-complete-btn" class="btn-review-complete">标记复核完成</button>
               </div>
-              <p class="event-review-kbd-hint">Y=标真并落盘 box · 紫色=当前已选 · 切换事件丢弃未保存暂选 · 删错：改选/重置后按 Y · N/U · ↑↓</p>
+              <p class="event-review-kbd-hint">Y=标真并落盘 box · 紫色=当前已选 · ←→=逐帧 · ↑↓=上/下一条事件 · N/U</p>
             </div>
             <details id="event-review-list-details" class="event-review-list-details">
               <summary id="event-review-list-summary">全部事件列表</summary>
@@ -681,12 +686,12 @@
   <script src="app/03-tabs.js?v=36"></script>
   <script src="app/04-collision-config.js?v=35"></script>
   <script src="app/05-collect.js?v=42"></script>
-  <script src="app/06-records.js?v=51"></script>
+  <script src="app/06-records.js?v=52"></script>
   <script src="app/07-playback-stage.js?v=71"></script>
-  <script src="app/08-event-review.js?v=71"></script>
-  <script src="app/09-playback-events.js?v=73"></script>
-  <script src="app/10-render-collision.js?v=77"></script>
-  <script src="app/11-playback-controls.js?v=75"></script>
+  <script src="app/08-event-review.js?v=75"></script>
+  <script src="app/09-playback-events.js?v=79"></script>
+  <script src="app/10-render-collision.js?v=83"></script>
+  <script src="app/11-playback-controls.js?v=80"></script>
   <script src="app/12-playback-wrist-features.js?v=3"></script>
   <script src="annotate.js?v=17"></script>
   <script src="accuracy.js?v=12"></script>

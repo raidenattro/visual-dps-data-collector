@@ -1,5 +1,101 @@
 /** 回放事件加载、定位与清除 */
 
+/** 按 frame_idx 精确导航时的权威帧（直到拖动进度条/播放才清除，避免 seeked 回调漂移） */
+let playbackAuthorityFrameIdx = null;
+
+/** 按 frame_idx 精确 seek 时的目标帧（与权威帧同步，供 seeked 回调读取） */
+let explicitSeekFrameIdx = null;
+
+function setPlaybackAuthorityFrameIdx(frameIdx) {
+  const fi = parseInt(frameIdx, 10) || 0;
+  playbackAuthorityFrameIdx = fi > 0 ? fi : null;
+  explicitSeekFrameIdx = playbackAuthorityFrameIdx;
+}
+
+function getPlaybackAuthorityFrameIdx() {
+  return playbackAuthorityFrameIdx;
+}
+
+function clearPlaybackAuthorityFrameIdx() {
+  playbackAuthorityFrameIdx = null;
+  explicitSeekFrameIdx = null;
+}
+
+function setExplicitSeekFrameIdx(frameIdx) {
+  setPlaybackAuthorityFrameIdx(frameIdx);
+}
+
+function getExplicitSeekFrameIdx() {
+  return playbackAuthorityFrameIdx ?? explicitSeekFrameIdx;
+}
+
+function clearExplicitSeekFrameIdx() {
+  clearPlaybackAuthorityFrameIdx();
+}
+
+/** 将回放画面与事件（若有）对齐到指定帧 */
+async function linkPlaybackToFrame(frameIdx, { pinEvent = true } = {}) {
+  const fi = parseInt(frameIdx, 10) || 0;
+  if (!fi || !frameByTime?.length) return;
+  const row = frameEntryByIdx(fi);
+  if (!row) return;
+
+  let ev = null;
+  if (typeof filteredPlaybackEvents === "function") {
+    ev = filteredPlaybackEvents().find((e) => (parseInt(e.frame_idx, 10) || 0) === fi) || null;
+  }
+  if (!ev && playbackEvents?.length) {
+    ev = playbackEvents.find((e) => (parseInt(e.frame_idx, 10) || 0) === fi) || null;
+  }
+
+  if (ev && pinEvent) {
+    await seekToEvent(ev);
+    return;
+  }
+
+  setPlaybackAuthorityFrameIdx(fi);
+  if (!videoEl.paused) videoEl.pause();
+  playbackEventLinkExact = false;
+  await seekToTimestamp(row.t, fi, { skipEventSync: false });
+}
+
+/** 钉住事件期间，将画面拉回事件帧（不解除钉住） */
+async function realignPlaybackToPinnedEvent() {
+  if (!playbackEventLinkExact || !activeEventKey) return false;
+  const ev = typeof getActiveEvent === "function" ? getActiveEvent() : null;
+  if (!ev) return false;
+  const fi =
+    typeof eventDisplayFrameIdx === "function"
+      ? eventDisplayFrameIdx(ev)
+      : parseInt(ev.frame_idx, 10) || 0;
+  if (!fi) return false;
+  const hit = frameEntryByIdx(fi);
+  if (!hit) return false;
+  setPlaybackAuthorityFrameIdx(fi);
+  await renderExplicitPlaybackFrame(fi);
+  if (videoEl.duration && Number.isFinite(videoEl.duration) && videoEl.duration > 0) {
+    videoEl.currentTime = Math.min(hit.t, videoEl.duration);
+    if (seekBar) seekBar.value = String((videoEl.currentTime / videoEl.duration) * 1000);
+    if (timeLabel) timeLabel.textContent = formatTime(videoEl.currentTime);
+  }
+  return lastRenderedFrameIdx === fi;
+}
+
+/** 按显式目标帧渲染（供 seeked / pause 回调与逐帧步进复用） */
+async function renderExplicitPlaybackFrame(frameIdx) {
+  const fi = parseInt(frameIdx, 10) || 0;
+  if (!fi || !frameByTime?.length) return false;
+  const hit = frameEntryByIdx(fi);
+  if (!hit) return false;
+  lastRenderedFrameIdx = -1;
+  tickPoseFrameIdx = -1;
+  tickVideoFrameIdx = -1;
+  lastEventSyncFrameIdx = -1;
+  resetPlaybackCollisionTracker();
+  await renderFrameEntry(hit);
+  return true;
+}
+
 /** 重建 frame_idx → events[] 索引，加速播放时同帧查找 */
 function rebuildPlaybackEventsFrameIndex() {
   playbackEventsFrameIndex = new Map();
@@ -194,6 +290,71 @@ function playbackOverlayFrameIdx(fallback = null) {
   return fb > 0 ? fb : null;
 }
 
+function getPlaybackFrameCount() {
+  return Number(poseData?.frame_count) || frameByTime.length || 0;
+}
+
+function getResolvedPlaybackFrameIdx() {
+  const authority = getPlaybackAuthorityFrameIdx();
+  if (authority != null && authority > 0) return authority;
+  const explicit = getExplicitSeekFrameIdx();
+  if (explicit != null && explicit > 0) return explicit;
+  if (lastRenderedFrameIdx >= 1) return lastRenderedFrameIdx;
+  if (typeof getCurrentPlaybackFrameIdx === "function") {
+    const fi = getCurrentPlaybackFrameIdx();
+    if (fi > 0) return fi;
+  }
+  return null;
+}
+
+/** 更新事件复核栏「帧 N / 总数」与逐帧按钮状态 */
+function updateEventReviewFrameNavUi() {
+  const posEl = $("#event-review-frame-pos");
+  const prevBtn = $("#event-prev-frame-btn");
+  const nextBtn = $("#event-next-frame-btn");
+  if (!posEl && !prevBtn && !nextBtn) return;
+
+  const total = getPlaybackFrameCount();
+  const cur = getResolvedPlaybackFrameIdx();
+  const hasFrames = total > 0 && frameByTime.length > 0;
+
+  if (posEl) {
+    posEl.textContent =
+      cur != null && cur > 0 && total > 0 ? `帧 ${cur} / ${total}` : hasFrames ? `帧 — / ${total}` : "帧 —";
+  }
+  if (prevBtn) prevBtn.disabled = !hasFrames || cur == null || cur <= 1;
+  if (nextBtn) nextBtn.disabled = !hasFrames || cur == null || cur >= total;
+}
+
+/** 按帧步进（±1），与事件跳转独立；步进后关联最近事件 */
+async function navigatePlaybackFrame(delta) {
+  const total = getPlaybackFrameCount();
+  if (!total || !frameByTime.length) return;
+
+  const step = Number(delta) || 0;
+  if (!step) return;
+
+  let cur = getResolvedPlaybackFrameIdx();
+  if (cur == null || cur < 1) cur = 1;
+
+  const nextFi = Math.max(1, Math.min(total, cur + step));
+  if (nextFi === cur) return;
+
+  const hit = frameEntryByIdx(nextFi);
+  if (!hit) return;
+
+  setPlaybackAuthorityFrameIdx(nextFi);
+  if (!videoEl.paused) videoEl.pause();
+  playbackEventLinkExact = false;
+  reviewBackKey = null;
+  await seekToTimestamp(hit.t, hit.frameIdx, { skipEventSync: false });
+  if (typeof updateReviewDock === "function") {
+    updateReviewDock({ skipRedraw: true });
+  }
+  updateEventMarkerActiveState();
+  updateEventReviewFrameNavUi();
+}
+
 function findEventsAtFrame(frameIdx) {
   if (frameIdx == null || !playbackEvents.length) return [];
   return eventsAtFrameIndexed(frameIdx);
@@ -247,15 +408,20 @@ function syncActiveEventFromPlaybackPosition(opts = {}) {
   const timeSec = opts.timeSec ?? getCurrentPlaybackTimeSec();
   const frameIdx = opts.frameIdx ?? getCurrentPlaybackFrameIdx();
 
-  // 复核显式跳转后，同帧多条事件时不要被「同帧优先/最近」覆盖当前选中
+  // 钉住事件时：禁止 sync 解除钉住或切换事件；画面漂移则拉回事件帧
   if (!opts.force && playbackEventLinkExact && activeEventKey) {
     const pinned = getActiveEvent();
     if (pinned) {
-      const pinnedFi = parseInt(pinned.frame_idx, 10) || 0;
+      const pinnedFi =
+        typeof eventDisplayFrameIdx === "function"
+          ? eventDisplayFrameIdx(pinned)
+          : parseInt(pinned.frame_idx, 10) || 0;
       const fi = frameIdx != null ? parseInt(frameIdx, 10) || 0 : null;
-      if (fi != null && fi === pinnedFi) return;
-      if (isExactEventAtPosition(pinned, timeSec, frameIdx)) return;
+      if (pinnedFi > 0 && fi != null && fi > 0 && fi !== pinnedFi) {
+        void realignPlaybackToPinnedEvent();
+      }
     }
+    return;
   }
 
   const ev = findEventForPlaybackPosition(timeSec, frameIdx);
@@ -268,11 +434,11 @@ function syncActiveEventFromPlaybackPosition(opts = {}) {
   if (!opts.keepReviewBack && reviewBackKey && key !== reviewBackKey) {
     reviewBackKey = null;
   }
-  updateReviewDock();
+  updateReviewDock({ skipRedraw: opts.skipRedraw });
   if ($("#event-review-list-details")?.open) renderEventReviewTable();
   updateEventMarkerActiveState();
   if (typeof updateStageBoxPickMode === "function") updateStageBoxPickMode();
-  if (typeof redrawCurrentFrame === "function") redrawCurrentFrame();
+  if (!opts.skipRedraw && typeof redrawCurrentFrame === "function") redrawCurrentFrame();
 }
 
 function updateEventMarkerActiveState() {
@@ -290,6 +456,7 @@ async function seekToTimestamp(timeSec, frameIdx = null, opts = {}) {
   const targetFi = frameIdx != null ? parseInt(frameIdx, 10) || 0 : 0;
   const hitByIdx = targetFi > 0 ? frameEntryByIdx(targetFi) : null;
   const t = hitByIdx?.t ?? Math.max(0, Number(timeSec) || 0);
+  if (hitByIdx) setPlaybackAuthorityFrameIdx(hitByIdx.frameIdx);
   if (videoEl.duration && Number.isFinite(videoEl.duration) && videoEl.duration > 0) {
     videoEl.currentTime = Math.min(t, videoEl.duration);
     seekBar.value = String((videoEl.currentTime / videoEl.duration) * 1000);
@@ -304,6 +471,7 @@ async function seekToTimestamp(timeSec, frameIdx = null, opts = {}) {
       syncActiveEventFromPlaybackPosition({
         timeSec: videoEl.currentTime,
         frameIdx: hitByIdx?.frameIdx ?? frameIdx,
+        skipRedraw: !!hitByIdx,
       });
     }
     return;
@@ -329,22 +497,35 @@ async function seekToTimestamp(timeSec, frameIdx = null, opts = {}) {
 async function seekToEvent(ev, { keepReviewBack = false } = {}) {
   if (!ev) return;
   const key = eventRowKey(ev);
-  // 先暂停，避免 pause 回调用旧播放位置覆盖即将跳转的目标事件
-  videoEl.pause();
+  const targetFi = parseInt(ev.frame_idx, 10) || 0;
+  // 先钉住事件与权威帧，再 pause；否则 pause 回调会按旧 currentTime 异步重绘并覆盖目标帧
   activeEventKey = key;
   playbackEventLinkExact = true;
+  if (targetFi > 0) setPlaybackAuthorityFrameIdx(targetFi);
   if (!keepReviewBack && reviewBackKey && activeEventKey === reviewBackKey) {
     reviewBackKey = null;
   }
+  if (!videoEl.paused) videoEl.pause();
   await seekToTimestamp(ev.timestamp_sec, ev.frame_idx, { skipEventSync: true });
   // seek 完成后再次锁定（防止 seeked/loadedmetadata 异步覆盖）
   activeEventKey = key;
   playbackEventLinkExact = true;
-  updateReviewDock();
+  if (targetFi > 0) setPlaybackAuthorityFrameIdx(targetFi);
+  if (typeof updateReviewDock === "function") {
+    updateReviewDock({ skipRedraw: true });
+  }
   if ($("#event-review-list-details")?.open) renderEventReviewTable();
   updateEventMarkerActiveState();
   if (typeof updateStageBoxPickMode === "function") updateStageBoxPickMode();
-  if (typeof redrawCurrentFrame === "function") redrawCurrentFrame();
+  updateEventReviewFrameNavUi();
+  // 异步 seeked 可能把画面漂移：终态再校验一次
+  if (targetFi > 0 && lastRenderedFrameIdx !== targetFi) {
+    await realignPlaybackToPinnedEvent();
+    activeEventKey = key;
+    playbackEventLinkExact = true;
+    setPlaybackAuthorityFrameIdx(targetFi);
+    updateEventReviewFrameNavUi();
+  }
 }
 
 function clearPlaybackEvents() {
@@ -353,6 +534,7 @@ function clearPlaybackEvents() {
   playbackEventsFrameIndex = new Map();
   activeEventKey = null;
   playbackEventLinkExact = false;
+  clearPlaybackAuthorityFrameIdx();
   verifiedTrueKeys.clear();
   pendingConfirmedBoxesByKey.clear();
   boxAnnotationTouchedKeys.clear();

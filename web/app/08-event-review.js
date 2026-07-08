@@ -860,6 +860,14 @@ function filteredPlaybackEvents() {
     return matched;
   }
   if (mode === "false_alarm") {
+    if (
+      typeof externalPlaybackAccuracyOverlay !== "undefined" &&
+      externalPlaybackAccuracyOverlay?.allAlarms?.length &&
+      typeof buildFalseAlarmQueueEvents === "function"
+    ) {
+      const fromOverlay = buildFalseAlarmQueueEvents();
+      if (fromOverlay.length) return fromOverlay;
+    }
     return typeof isPlaybackEventFalseAlarm === "function"
       ? playbackEvents.filter((e) => isPlaybackEventFalseAlarm(e))
       : [];
@@ -1023,7 +1031,7 @@ function bindEventReviewListScrollSync() {
   }
 }
 
-function updateReviewDock() {
+function updateReviewDock(options = {}) {
   clearEventReviewPickStatusOnEventChange();
   const list = filteredPlaybackEvents();
   const ev = getActiveEvent() ?? getActiveFilteredEvent();
@@ -1141,7 +1149,14 @@ function updateReviewDock() {
     ) {
       accuracyNote = " · 漏报段内";
     }
-    metaEl.textContent = `${formatTime(ev.timestamp_sec)} · 帧 ${ev.frame_idx}${accuracyNote}`;
+    const eventFi = parseInt(ev.frame_idx, 10) || 0;
+    const playbackFi =
+      typeof getResolvedPlaybackFrameIdx === "function" ? getResolvedPlaybackFrameIdx() : null;
+    const frameNote =
+      playbackFi && eventFi && playbackFi !== eventFi
+        ? `画面 帧 ${playbackFi} · 事件 帧 ${eventFi}`
+        : `帧 ${eventFi}`;
+    metaEl.textContent = `${formatTime(ev.timestamp_sec)} · ${frameNote}${accuracyNote}`;
   }
   if (tokensEl) {
     const tokenText = formatEventTokens(ev.box_tokens);
@@ -1205,13 +1220,14 @@ function updateReviewDock() {
   if (verifiedTag) {
     verifiedTag.classList.toggle("hidden", !isEventVerified(ev));
   }
-  finishUpdateReviewDock();
+  finishUpdateReviewDock(options);
 }
 
-function finishUpdateReviewDock() {
+function finishUpdateReviewDock(options = {}) {
   if (typeof invalidatePlaybackAccuracyOverlay === "function") invalidatePlaybackAccuracyOverlay();
   if (typeof updateStageBoxPickMode === "function") updateStageBoxPickMode();
-  if (typeof redrawCurrentFrame === "function") redrawCurrentFrame();
+  if (typeof updateEventReviewFrameNavUi === "function") updateEventReviewFrameNavUi();
+  if (!options.skipRedraw && typeof redrawCurrentFrame === "function") redrawCurrentFrame();
   const filterMode = eventFilterSelect?.value || "all";
   if (filterMode === "miss" || filterMode === "false_alarm") {
     refreshEventCountLabel();
