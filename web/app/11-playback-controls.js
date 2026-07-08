@@ -177,7 +177,8 @@ videoEl.addEventListener("pause", () => {
   if (typeof cancelPlaybackRenderLoop === "function") cancelPlaybackRenderLoop();
   lastRenderedFrameIdx = -1;
   tickVideoFrameIdx = -1;
-  if (typeof syncActiveEventFromPlaybackPosition === "function") {
+  // 显式事件跳转中（playbackEventLinkExact）不同步「最近事件」，避免覆盖 activeEventKey
+  if (!playbackEventLinkExact && typeof syncActiveEventFromPlaybackPosition === "function") {
     syncActiveEventFromPlaybackPosition({
       timeSec: videoEl.currentTime,
       frameIdx: typeof frameIdxAtVideoTime === "function" ? frameIdxAtVideoTime(videoEl.currentTime) : null,
@@ -207,6 +208,7 @@ eventFilterSelect?.addEventListener("change", () => {
     playbackEventLinkExact = false;
     updateReviewDock();
   }
+  eventFilterSelect?.blur();
 });
 
 function initEventReviewControls() {

@@ -172,6 +172,28 @@ function getCurrentPlaybackFrameIdx() {
   return hit?.frameIdx ?? null;
 }
 
+function frameEntryByIdx(frameIdx) {
+  const fi = parseInt(frameIdx, 10) || 0;
+  if (!fi || !frameByTime?.length) return null;
+  return frameByTime.find((item) => item.frameIdx === fi) || null;
+}
+
+/** 复核显式跳转后钉住的事件帧（与视频 currentTime 可能差 1 帧） */
+function pinnedEventFrameIdx() {
+  if (!playbackEventLinkExact || !activeEventKey) return null;
+  const ev = typeof getActiveEvent === "function" ? getActiveEvent() : null;
+  const fi = ev ? parseInt(ev.frame_idx, 10) || 0 : 0;
+  return fi > 0 ? fi : null;
+}
+
+/** 漏报/标真叠加层应对齐的帧号：钉住事件时优先用事件帧 */
+function playbackOverlayFrameIdx(fallback = null) {
+  const pinned = pinnedEventFrameIdx();
+  if (pinned != null && pinned > 0) return pinned;
+  const fb = Number(fallback) || 0;
+  return fb > 0 ? fb : null;
+}
+
 function findEventsAtFrame(frameIdx) {
   if (frameIdx == null || !playbackEvents.length) return [];
   return eventsAtFrameIndexed(frameIdx);
@@ -265,22 +287,29 @@ async function seekToTimestamp(timeSec, frameIdx = null, opts = {}) {
   tickPoseFrameIdx = -1;
   lastEventSyncFrameIdx = -1;
   resetPlaybackCollisionTracker();
-  const t = Math.max(0, Number(timeSec) || 0);
+  const targetFi = frameIdx != null ? parseInt(frameIdx, 10) || 0 : 0;
+  const hitByIdx = targetFi > 0 ? frameEntryByIdx(targetFi) : null;
+  const t = hitByIdx?.t ?? Math.max(0, Number(timeSec) || 0);
   if (videoEl.duration && Number.isFinite(videoEl.duration) && videoEl.duration > 0) {
     videoEl.currentTime = Math.min(t, videoEl.duration);
     seekBar.value = String((videoEl.currentTime / videoEl.duration) * 1000);
     timeLabel.textContent = formatTime(videoEl.currentTime);
-    await renderAtTime(videoEl.currentTime);
+    // 有目标帧时强制按 frame_idx 渲染，避免预览视频 seek 吸附关键帧导致差 1 帧
+    if (hitByIdx) {
+      await renderFrameEntry(hitByIdx);
+    } else {
+      await renderAtTime(videoEl.currentTime);
+    }
     if (!opts.skipEventSync) {
-      syncActiveEventFromPlaybackPosition({ timeSec: videoEl.currentTime, frameIdx });
+      syncActiveEventFromPlaybackPosition({
+        timeSec: videoEl.currentTime,
+        frameIdx: hitByIdx?.frameIdx ?? frameIdx,
+      });
     }
     return;
   }
 
-  let hit = null;
-  if (frameIdx != null) {
-    hit = frameByTime.find((item) => item.frameIdx === frameIdx) || null;
-  }
+  let hit = hitByIdx;
   if (!hit) hit = findFrameAt(t);
   if (hit) {
     await renderFrameEntry(hit);
@@ -299,16 +328,23 @@ async function seekToTimestamp(timeSec, frameIdx = null, opts = {}) {
 
 async function seekToEvent(ev, { keepReviewBack = false } = {}) {
   if (!ev) return;
-  activeEventKey = eventRowKey(ev);
+  const key = eventRowKey(ev);
+  // 先暂停，避免 pause 回调用旧播放位置覆盖即将跳转的目标事件
+  videoEl.pause();
+  activeEventKey = key;
   playbackEventLinkExact = true;
   if (!keepReviewBack && reviewBackKey && activeEventKey === reviewBackKey) {
     reviewBackKey = null;
   }
+  await seekToTimestamp(ev.timestamp_sec, ev.frame_idx, { skipEventSync: true });
+  // seek 完成后再次锁定（防止 seeked/loadedmetadata 异步覆盖）
+  activeEventKey = key;
+  playbackEventLinkExact = true;
   updateReviewDock();
   if ($("#event-review-list-details")?.open) renderEventReviewTable();
   updateEventMarkerActiveState();
-  videoEl.pause();
-  await seekToTimestamp(ev.timestamp_sec, ev.frame_idx, { skipEventSync: true });
+  if (typeof updateStageBoxPickMode === "function") updateStageBoxPickMode();
+  if (typeof redrawCurrentFrame === "function") redrawCurrentFrame();
 }
 
 function clearPlaybackEvents() {

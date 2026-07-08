@@ -828,11 +828,36 @@ function filteredPlaybackEvents() {
     return playbackEvents.filter((e) => e.event_type === mode);
   }
   if (mode === "miss") {
-    return typeof isPlaybackEventInMissSegment === "function"
-      ? playbackEvents.filter((e) => isPlaybackEventInMissSegment(e))
-      : typeof isPlaybackEventMiss === "function"
-        ? playbackEvents.filter((e) => isPlaybackEventMiss(e))
-        : [];
+    const matched =
+      typeof isPlaybackEventInMissSegment === "function"
+        ? playbackEvents.filter((e) => isPlaybackEventInMissSegment(e))
+        : typeof isPlaybackEventMiss === "function"
+          ? playbackEvents.filter((e) => isPlaybackEventMiss(e))
+          : [];
+    if (matched.length) return matched;
+    // 上传评估：无时间线事件命中时，按漏报段起点生成可导航占位事件
+    const overlay =
+      typeof externalPlaybackAccuracyOverlay !== "undefined"
+        ? externalPlaybackAccuracyOverlay
+        : null;
+    if (overlay?.segments?.length) {
+      return overlay.segments
+        .filter((seg) => !seg.detected)
+        .map((seg) => {
+          const fi = Number(seg.frame_start) || 0;
+          const existing = playbackEvents.find((e) => (parseInt(e.frame_idx, 10) || 0) === fi);
+          if (existing) return existing;
+          const row = frameByTime?.find((r) => Number(r.frameIdx) === fi);
+          return {
+            event_type: "alarm",
+            frame_idx: fi,
+            timestamp_sec: row?.t ?? (fi - 1) / (Number(poseData?.fps) || 25),
+            box_tokens: seg.tokens || [],
+          };
+        })
+        .filter((e) => (parseInt(e.frame_idx, 10) || 0) > 0);
+    }
+    return matched;
   }
   if (mode === "false_alarm") {
     return typeof isPlaybackEventFalseAlarm === "function"
@@ -900,7 +925,10 @@ function navigateReviewEvent(delta) {
 
   let idx;
   if (useFiltered) {
-    idx = curKey ? list.findIndex((e) => eventRowKey(e) === curKey) : -1;
+    idx = getActiveFilteredIndex();
+    if (idx < 0 && curKey) {
+      idx = list.findIndex((e) => eventRowKey(e) === curKey);
+    }
     if (idx < 0) {
       const globalIdx = globalIndexForEventKey(curKey);
       if (globalIdx < 0) {
@@ -923,7 +951,11 @@ function navigateReviewEvent(delta) {
         return;
       }
     }
-    idx = Math.max(0, Math.min(list.length - 1, idx + delta));
+    const nextIdx = idx + delta;
+    if (nextIdx < 0 || nextIdx >= list.length) return;
+    reviewBackKey = null;
+    void seekToEvent(list[nextIdx]);
+    return;
   } else {
     idx = getActiveGlobalIndex();
     if (idx < 0) idx = 0;
@@ -931,7 +963,7 @@ function navigateReviewEvent(delta) {
   }
 
   reviewBackKey = null;
-  void seekToEvent(useFiltered ? list[idx] : playbackEvents[idx]);
+  void seekToEvent(playbackEvents[idx]);
 }
 
 function scrollActiveEventRowIntoView() {

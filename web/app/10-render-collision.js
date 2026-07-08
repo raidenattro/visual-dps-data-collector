@@ -456,20 +456,31 @@ function eventGroundTruthTokens(ev) {
 
 /** 已标真且落在未检出范本段内（段内事件，不等同于多计漏报） */
 function isPlaybackEventInMissSegment(ev) {
-  if (!ev || typeof isEventVerified !== "function" || !isEventVerified(ev)) return false;
+  if (!ev) return false;
   const overlay = getPlaybackAccuracyOverlay();
   if (!overlay?.segments?.length) return false;
   const fi = parseInt(ev.frame_idx, 10) || 0;
   if (fi <= 0) return false;
   const tokens = eventGroundTruthTokens(ev);
-  if (!tokens.length) return false;
-  return overlay.segments.some(
-    (seg) =>
-      !seg.detected &&
-      fi >= seg.frame_start &&
-      fi <= seg.frame_end &&
-      tokens.some((t) => tokenMatchesAnyList(t, seg.tokens))
-  );
+
+  const inMissSeg = overlay.segments.some((seg) => {
+    if (seg.detected) return false;
+    if (fi < seg.frame_start || fi > seg.frame_end) return false;
+    if (externalPlaybackAccuracyOverlay) {
+      return (
+        fi === seg.frame_start ||
+        tokens.some((t) => tokenMatchesAnyList(t, seg.tokens))
+      );
+    }
+    return tokens.some((t) => tokenMatchesAnyList(t, seg.tokens));
+  });
+  if (!inMissSeg) return false;
+
+  // 上传推测评估跳转：漏报段内事件不要求已标真
+  if (externalPlaybackAccuracyOverlay) return true;
+
+  if (typeof isEventVerified !== "function" || !isEventVerified(ev)) return false;
+  return true;
 }
 
 /** 告警不在任标真范本段内 → 误报 */
@@ -479,10 +490,31 @@ function isPlaybackEventFalseAlarm(ev) {
   if (!overlay?.segments?.length) return false;
   const fi = parseInt(ev.frame_idx, 10) || 0;
   if (fi <= 0) return false;
-  const tokens = typeof normalizeBoxTokenList === "function"
-    ? normalizeBoxTokenList(ev.box_tokens)
-    : canonicalizeBoxTokenList(ev.box_tokens);
+  const tokens =
+    typeof normalizeBoxTokenList === "function"
+      ? normalizeBoxTokenList(ev.box_tokens)
+      : canonicalizeBoxTokenList(ev.box_tokens);
   if (!tokens.length) return false;
+
+  // 上传推测评估：误报须与 overlay 告警列表中未覆盖标真段的条目对应
+  if (externalPlaybackAccuracyOverlay?.allAlarms?.length) {
+    return tokens.some((token) => {
+      const inOverlay = externalPlaybackAccuracyOverlay.allAlarms.some(
+        ([af, at]) =>
+          Number(af) === fi &&
+          (tokenMatchesAnyList(token, [at]) || tokenMatchesAnyList(at, [token]))
+      );
+      if (!inOverlay) return false;
+      const covered = overlay.segments.some(
+        (seg) =>
+          fi >= seg.frame_start &&
+          fi <= seg.frame_end &&
+          tokenMatchesAnyList(token, seg.tokens)
+      );
+      return !covered;
+    });
+  }
+
   return tokens.some((token) => {
     const covered = overlay.segments.some(
       (seg) =>
@@ -891,7 +923,7 @@ function getReviewBoxHighlightContext(frameIdx = null) {
   if (!playbackEvents?.length || !annotationBoxes.length) return null;
   if (!eventsPanel || eventsPanel.classList.contains("hidden")) return null;
 
-  const fi =
+  const rawFi =
     frameIdx != null && Number(frameIdx) > 0
       ? Number(frameIdx)
       : lastRenderedFrameIdx >= 1
@@ -899,6 +931,10 @@ function getReviewBoxHighlightContext(frameIdx = null) {
         : typeof getCurrentPlaybackFrameIdx === "function"
           ? getCurrentPlaybackFrameIdx()
           : null;
+  const fi =
+    typeof playbackOverlayFrameIdx === "function"
+      ? playbackOverlayFrameIdx(rawFi) ?? rawFi
+      : rawFi;
 
   const confirmedByToken = new Map();
 
@@ -1109,10 +1145,14 @@ function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null, review
 
   const { collisionSet, alarmSet } =
     collisionSets || getFrameCollisionSets(frame, inferW, inferH);
-  const frameIdx =
+  const rawFrameIdx =
     lastRenderedFrameIdx >= 1
       ? lastRenderedFrameIdx
       : Number(frame?.frame_idx) || Number(frame?.source_frame_idx) || 0;
+  const frameIdx =
+    typeof playbackOverlayFrameIdx === "function"
+      ? playbackOverlayFrameIdx(rawFrameIdx) ?? rawFrameIdx
+      : rawFrameIdx;
   reviewCtx = reviewCtx ?? getReviewBoxHighlightContext(frameIdx);
   const { missTokens, falseAlarmTokens } = getAccuracyOutlineForFrame(frameIdx, alarmSet);
 
@@ -1292,14 +1332,27 @@ function drawSkeleton(frame, inferW, inferH, collisionSets = null) {
 function redrawCurrentFrame() {
   if (playbackRenderLoopActive && videoEl && !videoEl.paused) return;
   renderGeneration++;
+  const gen = renderGeneration;
   lastRenderedFrameIdx = -1;
   tickPoseFrameIdx = -1;
   tickVideoFrameIdx = -1;
   lastEventSyncFrameIdx = -1;
+  const pinnedFi =
+    typeof pinnedEventFrameIdx === "function" ? pinnedEventFrameIdx() : null;
+  if (pinnedFi && frameByTime?.length) {
+    const hit =
+      typeof frameEntryByIdx === "function"
+        ? frameEntryByIdx(pinnedFi)
+        : frameByTime.find((item) => item.frameIdx === pinnedFi) || null;
+    if (hit) {
+      void renderFrameEntry(hit, gen);
+      return;
+    }
+  }
   if (videoEl.src && videoEl.readyState >= 1) {
     void renderAtTime(videoEl.currentTime);
   } else if (frameByTime.length) {
-    void renderFrameEntry(frameByTime[0]);
+    void renderFrameEntry(frameByTime[0], gen);
   }
 }
 
