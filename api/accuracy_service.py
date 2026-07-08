@@ -144,16 +144,29 @@ def _extract_alarms(timeline: list[dict[str, Any]]) -> list[tuple[int, str]]:
 
 def _count_timeline_collisions(timeline: list[dict[str, Any]]) -> int:
     """从 timeline 统计碰撞条目数（与告警提取规则一致）。"""
-    count = 0
+    return len(_extract_collisions(timeline))
+
+
+def _extract_collisions(timeline: list[dict[str, Any]]) -> list[tuple[int, str]]:
+    """从 timeline 提取非告警碰撞 (frame_idx, box_token)。"""
+    out: list[tuple[int, str]] = []
     for row in timeline:
         fi = int(row.get("frame_idx") or 0)
         if fi <= 0:
             continue
+        alarm_tokens = [
+            canonical_box_token(str(raw).strip())
+            for raw in (row.get("alarm_collisions") or [])
+        ]
+        alarm_tokens = [t for t in alarm_tokens if t]
         for raw in row.get("collisions") or []:
             token = canonical_box_token(str(raw).strip())
-            if token:
-                count += 1
-    return count
+            if not token:
+                continue
+            if token_matches_any(token, alarm_tokens):
+                continue
+            out.append((fi, token))
+    return out
 
 
 def _segment_detected(segment: GroundTruthSegment, alarms: list[tuple[int, str]]) -> bool:
@@ -387,6 +400,7 @@ def evaluate_single_clip(
         }
 
     alarms = _extract_alarms(timeline)
+    collisions = _extract_collisions(timeline)
     metrics = evaluate_segments(segments, alarms)
     from api.eval_diagnostics import build_clip_diagnostics
 
@@ -395,8 +409,9 @@ def evaluate_single_clip(
         segments,
         alarms,
         metrics,
+        collisions=collisions,
         source_label=f"{tier_label} · timeline 告警",
-        collision_count=_count_timeline_collisions(timeline),
+        collision_count=len(collisions),
         verified_count=len(verified),
     )
 

@@ -87,16 +87,29 @@ def _box_tokens_from_picking_frame(fr: dict[str, Any]) -> list[str]:
 
 def count_rule_collisions_from_frames(frames: list[dict[str, Any]]) -> int:
     """统计上传推测 JSON 中 rule_collisions 条目数。"""
-    count = 0
+    return len(extract_rule_collisions_from_frames(frames))
+
+
+def extract_rule_collisions_from_frames(
+    frames: list[dict[str, Any]],
+) -> list[tuple[int, str]]:
+    """上传推测：提取非告警碰撞 (frame_idx, box_token)。"""
+    from event_engine.box_identity import token_matches_any
+
+    out: list[tuple[int, str]] = []
     for fr in frames:
         fi = int(fr.get("frame_idx") or 0)
         if fi <= 0:
             continue
+        alarm_tokens = _box_tokens_from_picking_frame(fr) if fr.get("is_picking") else []
         for raw in fr.get("rule_collisions") or []:
             token = canonical_box_token(str(raw).strip())
-            if token:
-                count += 1
-    return count
+            if not token:
+                continue
+            if alarm_tokens and token_matches_any(token, alarm_tokens):
+                continue
+            out.append((fi, token))
+    return out
 
 
 def extract_picking_alarms_from_frames(
@@ -272,13 +285,15 @@ def evaluate_uploaded_clip(
         return {**base, "status": "skipped", "error": "verified_true 无有效货框范本"}
 
     alarms = extract_picking_alarms_from_frames(clip.frames)
+    collisions = extract_rule_collisions_from_frames(clip.frames)
     metrics = evaluate_segments(segments, alarms)
     diagnostics = build_clip_diagnostics(
         segments,
         alarms,
         metrics,
+        collisions=collisions,
         source_label="上传推测 · is_picking",
-        collision_count=count_rule_collisions_from_frames(clip.frames),
+        collision_count=len(collisions),
         verified_count=len(verified),
     )
     picking_frame_count = len({

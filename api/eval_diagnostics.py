@@ -14,13 +14,14 @@ def build_playback_overlay(
     segment_details: list[dict[str, Any]],
     alarms: list[tuple[int, str]],
     *,
+    collisions: list[tuple[int, str]] | None = None,
     source_label: str = "",
     collision_count: int = 0,
     verified_count: int = 0,
     missed_segments: int | None = None,
     false_alarms: int | None = None,
 ) -> dict[str, Any]:
-    """生成回放页可用的 overlay（segments + alarms + 评估来源统计）。"""
+    """生成回放页可用的 overlay（segments + 评估碰撞/告警 + 统计）。"""
     segments: list[dict[str, Any]] = []
     for seg in segment_details:
         tokens = list(seg.get("gt_tokens") or [])
@@ -36,6 +37,12 @@ def build_playback_overlay(
         text = str(token or "").strip()
         if fi > 0:
             alarm_rows.append([fi, text])
+    collision_rows: list[list[Any]] = []
+    for frame, token in collisions or []:
+        fi = int(frame or 0)
+        text = str(token or "").strip()
+        if fi > 0 and text:
+            collision_rows.append([fi, text])
     missed = (
         int(missed_segments)
         if missed_segments is not None
@@ -45,10 +52,14 @@ def build_playback_overlay(
     return {
         "segments": segments,
         "alarms": alarm_rows,
+        "collisions": collision_rows,
         "source_label": str(source_label or "").strip(),
         "counts": {
             "alarms": len(alarm_rows),
-            "collisions": max(0, int(collision_count or 0)),
+            "collisions": max(
+                0,
+                int(collision_count or 0) if collision_count else len(collision_rows),
+            ),
             "verified": max(0, int(verified_count or 0)),
             "missed_segments": missed,
             "false_alarms": false_n,
@@ -61,6 +72,7 @@ def build_clip_diagnostics(
     alarms: list[tuple[int, str]],
     metrics: dict[str, Any],
     *,
+    collisions: list[tuple[int, str]] | None = None,
     source_label: str = "",
     collision_count: int = 0,
     verified_count: int = 0,
@@ -118,6 +130,7 @@ def build_clip_diagnostics(
     overlay = build_playback_overlay(
         metrics.get("segment_details") or [],
         alarms,
+        collisions=collisions,
         source_label=source_label,
         collision_count=collision_count,
         verified_count=verified_count,
