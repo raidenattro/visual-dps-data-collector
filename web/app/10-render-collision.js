@@ -177,6 +177,37 @@ let externalPlaybackAccuracyOverlay = null;
 
 const MAX_SEEK_ACCURACY_DOTS = 120;
 
+/** 将评估 overlay 的 [[frame, token], ...] 建成按帧索引 */
+function buildEvalOverlayFrameIndex(alarms, collisions) {
+  const byFrame = new Map();
+  const ensure = (fi) => {
+    if (!byFrame.has(fi)) {
+      byFrame.set(fi, { alarmSet: new Set(), collisionSet: new Set() });
+    }
+    return byFrame.get(fi);
+  };
+  const addToken = (set, token) => {
+    const t = String(token || "").trim();
+    if (!t) return;
+    for (const key of boxTokenLookupKeys(t)) {
+      set.add(key);
+    }
+  };
+  (alarms || []).forEach((row) => {
+    if (!Array.isArray(row) || row.length < 2) return;
+    const fi = parseInt(row[0], 10) || 0;
+    if (fi <= 0) return;
+    addToken(ensure(fi).alarmSet, row[1]);
+  });
+  (collisions || []).forEach((row) => {
+    if (!Array.isArray(row) || row.length < 2) return;
+    const fi = parseInt(row[0], 10) || 0;
+    if (fi <= 0) return;
+    addToken(ensure(fi).collisionSet, row[1]);
+  });
+  return byFrame;
+}
+
 function normalizeExternalPlaybackOverlay(raw) {
   if (!raw || typeof raw !== "object") return null;
   const segments = (raw.segments || []).map((seg) => ({
@@ -194,7 +225,14 @@ function normalizeExternalPlaybackOverlay(raw) {
     const token = String(row[1] || "").trim();
     if (fi > 0) allAlarms.push([fi, token]);
   });
-  if (!segments.length && !allAlarms.length) return null;
+  const allCollisions = [];
+  (raw.collisions || []).forEach((row) => {
+    if (!Array.isArray(row) || row.length < 2) return;
+    const fi = parseInt(row[0], 10) || 0;
+    const token = String(row[1] || "").trim();
+    if (fi > 0 && token) allCollisions.push([fi, token]);
+  });
+  if (!segments.length && !allAlarms.length && !allCollisions.length) return null;
 
   const countsRaw = raw.counts && typeof raw.counts === "object" ? raw.counts : {};
   let falseAlarms = Number(countsRaw.false_alarms);
@@ -214,7 +252,9 @@ function normalizeExternalPlaybackOverlay(raw) {
   const missedSegments = Number(countsRaw.missed_segments);
   const counts = {
     alarms: Number.isFinite(Number(countsRaw.alarms)) ? Number(countsRaw.alarms) : allAlarms.length,
-    collisions: Number.isFinite(Number(countsRaw.collisions)) ? Number(countsRaw.collisions) : 0,
+    collisions: Number.isFinite(Number(countsRaw.collisions))
+      ? Number(countsRaw.collisions)
+      : allCollisions.length,
     verified: Number.isFinite(Number(countsRaw.verified)) ? Number(countsRaw.verified) : 0,
     missed_segments: Number.isFinite(missedSegments)
       ? missedSegments
@@ -225,8 +265,11 @@ function normalizeExternalPlaybackOverlay(raw) {
   return {
     segments,
     allAlarms,
+    allCollisions,
+    evalFrameIndex: buildEvalOverlayFrameIndex(allAlarms, allCollisions),
     source_label: String(raw.source_label || "").trim(),
     counts,
+    useEvalCollisions: true,
   };
 }
 
@@ -235,6 +278,7 @@ function setExternalPlaybackAccuracyOverlay(overlay) {
   playbackAccuracyOverlayCache = externalPlaybackAccuracyOverlay;
   if (typeof renderAccuracySeekMarkers === "function") renderAccuracySeekMarkers();
   if (typeof refreshEventCountLabel === "function") refreshEventCountLabel();
+  if (typeof redrawCurrentFrame === "function") redrawCurrentFrame();
 }
 
 function clearExternalPlaybackAccuracyOverlay() {
@@ -267,6 +311,10 @@ function invalidatePlaybackAccuracyOverlay() {
     playbackAccuracyOverlayCache = null;
   }
   if (typeof renderAccuracySeekMarkers === "function") renderAccuracySeekMarkers();
+  if (externalPlaybackAccuracyOverlay) {
+    if (typeof refreshEventCountLabel === "function") refreshEventCountLabel();
+    if (typeof redrawCurrentFrame === "function") redrawCurrentFrame();
+  }
 }
 
 function collectPlaybackAlarmIndex() {
@@ -288,6 +336,38 @@ function segmentHasMatchingAlarm(seg, allAlarms) {
     ([frame, token]) =>
       frame >= seg.frame_start && frame <= seg.frame_end && tokenMatchesAnyList(token, seg.tokens)
   );
+}
+
+function accuracySegmentKey(seg) {
+  const tokens = canonicalizeBoxTokenList(seg.tokens || []).join(",");
+  return `${Number(seg.frame_start) || 0}-${Number(seg.frame_end) || 0}\0${tokens}`;
+}
+
+/** 漏报/误报对比用 GT 段：优先 event_review 标真段，detected 状态来自评估 overlay */
+function getAccuracyGroundTruthSegments() {
+  const reviewSegs = buildVerifiedGroundTruthSegments();
+  if (!reviewSegs.length) {
+    return externalPlaybackAccuracyOverlay?.segments?.length
+      ? externalPlaybackAccuracyOverlay.segments
+      : [];
+  }
+  if (!externalPlaybackAccuracyOverlay?.segments?.length) {
+    const allAlarms = collectPlaybackAlarmIndex();
+    return reviewSegs.map((seg) => ({
+      ...seg,
+      detected: segmentHasMatchingAlarm(seg, allAlarms),
+    }));
+  }
+  const detectedByKey = new Map();
+  externalPlaybackAccuracyOverlay.segments.forEach((seg) => {
+    detectedByKey.set(accuracySegmentKey(seg), Boolean(seg.detected));
+  });
+  return reviewSegs.map((seg) => ({
+    ...seg,
+    detected: detectedByKey.has(accuracySegmentKey(seg))
+      ? detectedByKey.get(accuracySegmentKey(seg))
+      : segmentHasMatchingAlarm(seg, externalPlaybackAccuracyOverlay.allAlarms || []),
+  }));
 }
 
 /** 与准确率 evaluate_segments 一致：标真范本段 + 全记录告警索引 */
@@ -313,7 +393,11 @@ function buildPlaybackAccuracyOverlay() {
 
 function getPlaybackAccuracyOverlay() {
   if (externalPlaybackAccuracyOverlay) {
-    return externalPlaybackAccuracyOverlay;
+    const gtSegments = getAccuracyGroundTruthSegments();
+    return {
+      ...externalPlaybackAccuracyOverlay,
+      segments: gtSegments.length ? gtSegments : externalPlaybackAccuracyOverlay.segments,
+    };
   }
   if (!playbackAccuracyOverlayCache) {
     playbackAccuracyOverlayCache = buildPlaybackAccuracyOverlayData();
@@ -421,7 +505,21 @@ function getAccuracyOutlineForFrame(frameIdx, alarmSet) {
   });
 
   const falseAlarmTokens = new Set();
-  if (alarmSet?.size) {
+  if (externalPlaybackAccuracyOverlay?.allAlarms?.length) {
+    externalPlaybackAccuracyOverlay.allAlarms.forEach(([frame, token]) => {
+      const afi = Number(frame) || 0;
+      if (afi !== fi) return;
+      const tok = String(token || "").trim();
+      if (!tok) return;
+      const covered = overlay.segments.some(
+        (seg) =>
+          fi >= seg.frame_start &&
+          fi <= seg.frame_end &&
+          tokenMatchesAnyList(tok, seg.tokens)
+      );
+      if (!covered) addTokenKeysToSet(tok, falseAlarmTokens);
+    });
+  } else if (alarmSet?.size) {
     alarmSet.forEach((token) => {
       const covered = overlay.segments.some(
         (seg) =>
@@ -759,7 +857,23 @@ function getPlaybackCollisionTracker() {
   return playbackCollisionTracker;
 }
 
+/** 准确率跳转：按评估 overlay 取当前帧碰撞/告警（黄/红） */
+function getEvalCollisionSetsForFrame(frameIdx) {
+  if (!externalPlaybackAccuracyOverlay?.useEvalCollisions) return null;
+  const fi = parseInt(frameIdx, 10) || 0;
+  if (!fi) return null;
+  const row = externalPlaybackAccuracyOverlay.evalFrameIndex?.get(fi);
+  return {
+    collisionSet: row ? new Set(row.collisionSet) : new Set(),
+    alarmSet: row ? new Set(row.alarmSet) : new Set(),
+  };
+}
+
 function getFrameCollisionSets(frame, inferW, inferH) {
+  const fi = Number(frame?.frame_idx) || Number(frame?.source_frame_idx) || 0;
+  const evalSets = getEvalCollisionSetsForFrame(fi);
+  if (evalSets) return evalSets;
+
   if (frameUsesStoredCollisions(frame)) {
     return {
       collisionSet: new Set(frame.collisions || []),
@@ -869,12 +983,11 @@ function applyTimelineRowsToFrameIndex(rows, inferW, inferH) {
   frameByTime.sort((a, b) => a.t - b.t);
 }
 
-/** frame_interval=1 时由 manifest 本地合成时间轴，避免拉取全量 timeline JSON */
+/** frame_count 已知时合成 1..N 密集时间轴（事件帧可能与稀疏 timeline 行不一致） */
 function buildSyntheticFrameIndexFromManifest() {
   const total = Number(poseData?.frame_count) || 0;
   const fps = Number(poseData?.fps) || 15;
-  const interval = Math.max(1, Number(poseData?.frame_interval) || 1);
-  if (!total || interval !== 1) return false;
+  if (!total) return false;
 
   const inferW = poseData.infer_width || 640;
   const inferH = poseData.infer_height || 480;
@@ -888,6 +1001,39 @@ function buildSyntheticFrameIndexFromManifest() {
     });
   }
   return frameByTime.length > 0;
+}
+
+/** 稀疏 timeline 加载后补齐 1..frame_count，避免事件 frame_idx 无对应行 */
+function densifyFrameIndexFromManifest() {
+  const total = Number(poseData?.frame_count) || 0;
+  if (!total || !frameByTime.length) return;
+  const fps = Number(poseData?.fps) || 15;
+  const inferW = poseData.infer_width || frameByTime[0]?.w || poseData.infer_width || 640;
+  const inferH = poseData.infer_height || frameByTime[0]?.h || poseData.infer_height || 480;
+  const existing = new Set(frameByTime.map((e) => e.frameIdx));
+  for (let i = 1; i <= total; i += 1) {
+    if (existing.has(i)) continue;
+    frameByTime.push({ t: (i - 1) / fps, frameIdx: i, w: inferW, h: inferH });
+  }
+  frameByTime.sort((a, b) => a.t - b.t);
+}
+
+/** 确保 frame_idx 在时间轴中有条目（必要时虚拟补齐） */
+function ensureFrameIndexEntry(frameIdx) {
+  const fi = parseInt(frameIdx, 10) || 0;
+  if (!fi) return null;
+  if (frameByTime?.length) {
+    const hit = frameByTime.find((e) => e.frameIdx === fi) || null;
+    if (hit) return hit;
+  }
+  const fps = Number(poseData?.fps) || 25;
+  const inferW = poseData?.infer_width || frameByTime?.[0]?.w || 640;
+  const inferH = poseData?.infer_height || frameByTime?.[0]?.h || 480;
+  const hit = { t: (fi - 1) / fps, frameIdx: fi, w: inferW, h: inferH };
+  if (!frameByTime) frameByTime = [];
+  frameByTime.push(hit);
+  frameByTime.sort((a, b) => a.t - b.t);
+  return hit;
 }
 
 function buildFrameIndex(recordId = null) {
@@ -910,6 +1056,7 @@ function buildFrameIndex(recordId = null) {
       .then((res) => (res.ok ? res.json() : { timeline: [] }))
       .then((body) => {
         applyTimelineRowsToFrameIndex(body.timeline || [], inferW, inferH);
+        densifyFrameIndexFromManifest();
         if (typeof renderAccuracySeekMarkers === "function") renderAccuracySeekMarkers();
       });
   }
@@ -1171,6 +1318,10 @@ function drawDetBboxes(frame, inferW, inferH) {
 }
 
 function collisionSetsForPlaybackFrame(frame, inferW, inferH) {
+  const fi = Number(frame?.frame_idx) || Number(frame?.source_frame_idx) || 0;
+  const evalSets = getEvalCollisionSetsForFrame(fi);
+  if (evalSets) return evalSets;
+
   if (frameUsesStoredCollisions(frame)) {
     return {
       collisionSet: new Set(frame.collisions || []),
@@ -1430,9 +1581,11 @@ function redrawCurrentFrame() {
   const targetFi = pinnedFi || authorityFi || heldFi;
   if (targetFi && frameByTime?.length) {
     const hit =
-      typeof frameEntryByIdx === "function"
-        ? frameEntryByIdx(targetFi)
-        : frameByTime.find((item) => item.frameIdx === targetFi) || null;
+      typeof ensureFrameIndexEntry === "function"
+        ? ensureFrameIndexEntry(targetFi)
+        : typeof frameEntryByIdx === "function"
+          ? frameEntryByIdx(targetFi)
+          : frameByTime.find((item) => item.frameIdx === targetFi) || null;
     if (hit) {
       void renderFrameEntry(hit, gen);
       return;
@@ -1452,18 +1605,27 @@ async function renderFrameEntry(hit, renderGen) {
   // 丢弃/纠正落后于权威帧的异步渲染，避免 pause/seeked 竞态把画面拉回
   if (authorityFi != null && authorityFi > 0 && hit.frameIdx !== authorityFi) {
     const authHit =
-      typeof frameEntryByIdx === "function"
-        ? frameEntryByIdx(authorityFi)
-        : frameByTime.find((e) => e.frameIdx === authorityFi) || null;
+      typeof ensureFrameIndexEntry === "function"
+        ? ensureFrameIndexEntry(authorityFi)
+        : typeof frameEntryByIdx === "function"
+          ? frameEntryByIdx(authorityFi)
+          : frameByTime.find((e) => e.frameIdx === authorityFi) || null;
     if (!authHit) return;
     hit = authHit;
   }
-  const frame = hit.frame || (await ensureFrame(hit.frameIdx));
+  const requestedFi = hit.frameIdx;
+  let frame = hit.frame || (await ensureFrame(requestedFi));
+  if (!frame && typeof findNearestCachedFrameEntry === "function") {
+    const nearest = findNearestCachedFrameEntry(requestedFi);
+    if (nearest) {
+      frame = nearest.frame || (await ensureFrame(nearest.frameIdx));
+    }
+  }
   if (renderGen != null && renderGen !== renderGeneration) return;
   if (!frame) return;
-  if (hit.frameIdx === lastRenderedFrameIdx) return;
-  lastRenderedFrameIdx = hit.frameIdx;
-  tickPoseFrameIdx = hit.frameIdx;
+  if (requestedFi === lastRenderedFrameIdx) return;
+  lastRenderedFrameIdx = requestedFi;
+  tickPoseFrameIdx = requestedFi;
   const collisionSets = getFrameCollisionSets(frame, hit.w, hit.h);
   drawSkeleton(frame, hit.w, hit.h, collisionSets);
   const { collisionSet, alarmSet } = collisionSets;
@@ -1513,9 +1675,11 @@ async function renderAtTime(timeSec) {
     typeof getPlaybackAuthorityFrameIdx === "function" ? getPlaybackAuthorityFrameIdx() : null;
   if (authorityFi != null && authorityFi > 0) {
     const hit =
-      typeof frameEntryByIdx === "function"
-        ? frameEntryByIdx(authorityFi)
-        : frameByTime.find((e) => e.frameIdx === authorityFi) || null;
+      typeof ensureFrameIndexEntry === "function"
+        ? ensureFrameIndexEntry(authorityFi)
+        : typeof frameEntryByIdx === "function"
+          ? frameEntryByIdx(authorityFi)
+          : frameByTime.find((e) => e.frameIdx === authorityFi) || null;
     if (hit) {
       await renderFrameEntry(hit);
       return;

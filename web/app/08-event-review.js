@@ -556,7 +556,7 @@ async function toggleConfirmedBoxForEvent(ev, token) {
 }
 
 async function resetActiveEventBoxAnnotation() {
-  const ev = getActiveEvent() ?? getActiveFilteredEvent();
+  const ev = getPinnedPlaybackEvent();
   if (!ev) {
     setEventReviewSaveStatus("请先选择一条事件", "");
     return;
@@ -840,9 +840,12 @@ function filteredPlaybackEvents() {
       typeof externalPlaybackAccuracyOverlay !== "undefined"
         ? externalPlaybackAccuracyOverlay
         : null;
-    if (overlay?.segments?.length) {
-      return overlay.segments
-        .filter((seg) => !seg.detected)
+    const missSegments =
+      typeof getAccuracyGroundTruthSegments === "function"
+        ? getAccuracyGroundTruthSegments().filter((seg) => !seg.detected)
+        : overlay?.segments?.filter((seg) => !seg.detected) || [];
+    if (missSegments.length) {
+      return missSegments
         .map((seg) => {
           const fi = Number(seg.frame_start) || 0;
           const existing = playbackEvents.find((e) => (parseInt(e.frame_idx, 10) || 0) === fi);
@@ -880,6 +883,11 @@ function getActiveFilteredEvent() {
   if (!list.length) return null;
   if (!activeEventKey) return list[0];
   return list.find((e) => eventRowKey(e) === activeEventKey) ?? null;
+}
+
+/** 钉住/复核当前事件：完整列表优先，误报/漏报队列占位事件回落到筛选列表 */
+function getPinnedPlaybackEvent() {
+  return getActiveEvent() ?? getActiveFilteredEvent();
 }
 
 function getActiveFilteredIndex() {
@@ -1034,7 +1042,7 @@ function bindEventReviewListScrollSync() {
 function updateReviewDock(options = {}) {
   clearEventReviewPickStatusOnEventChange();
   const list = filteredPlaybackEvents();
-  const ev = getActiveEvent() ?? getActiveFilteredEvent();
+  const ev = getPinnedPlaybackEvent();
   const evInFilter = ev ? list.some((item) => eventRowKey(item) === eventRowKey(ev)) : false;
   const posEl = $("#event-review-position");
   const badgeEl = $("#event-review-badge");
@@ -1073,10 +1081,11 @@ function updateReviewDock(options = {}) {
   if (completeBtn) {
     const reviewDone = isReviewTerminalStatus(currentEventReviewStatus);
     completeBtn.disabled = reviewDone || !currentRecordId;
+    completeBtn.classList.toggle("is-done", reviewDone);
     if (currentEventReviewStatus === "no_collision") {
       completeBtn.textContent = "无碰撞（已复核）";
     } else {
-      completeBtn.textContent = reviewDone ? "已复核完成" : "标记复核完成";
+      completeBtn.textContent = reviewDone ? "✓ 已复核完成" : "标记复核完成";
     }
   }
 

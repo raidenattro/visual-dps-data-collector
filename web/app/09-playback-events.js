@@ -62,7 +62,12 @@ async function linkPlaybackToFrame(frameIdx, { pinEvent = true } = {}) {
 /** 钉住事件期间，将画面拉回事件帧（不解除钉住） */
 async function realignPlaybackToPinnedEvent() {
   if (!playbackEventLinkExact || !activeEventKey) return false;
-  const ev = typeof getActiveEvent === "function" ? getActiveEvent() : null;
+  const ev =
+    typeof getPinnedPlaybackEvent === "function"
+      ? getPinnedPlaybackEvent()
+      : typeof getActiveEvent === "function"
+        ? getActiveEvent()
+        : null;
   if (!ev) return false;
   const fi =
     typeof eventDisplayFrameIdx === "function"
@@ -270,14 +275,21 @@ function getCurrentPlaybackFrameIdx() {
 
 function frameEntryByIdx(frameIdx) {
   const fi = parseInt(frameIdx, 10) || 0;
-  if (!fi || !frameByTime?.length) return null;
+  if (!fi) return null;
+  if (typeof ensureFrameIndexEntry === "function") return ensureFrameIndexEntry(fi);
+  if (!frameByTime?.length) return null;
   return frameByTime.find((item) => item.frameIdx === fi) || null;
 }
 
 /** 复核显式跳转后钉住的事件帧（与视频 currentTime 可能差 1 帧） */
 function pinnedEventFrameIdx() {
   if (!playbackEventLinkExact || !activeEventKey) return null;
-  const ev = typeof getActiveEvent === "function" ? getActiveEvent() : null;
+  const ev =
+    typeof getPinnedPlaybackEvent === "function"
+      ? getPinnedPlaybackEvent()
+      : typeof getActiveEvent === "function"
+        ? getActiveEvent()
+        : null;
   const fi = ev ? parseInt(ev.frame_idx, 10) || 0 : 0;
   return fi > 0 ? fi : null;
 }
@@ -410,7 +422,12 @@ function syncActiveEventFromPlaybackPosition(opts = {}) {
 
   // 钉住事件时：禁止 sync 解除钉住或切换事件；画面漂移则拉回事件帧
   if (!opts.force && playbackEventLinkExact && activeEventKey) {
-    const pinned = getActiveEvent();
+    const pinned =
+      typeof getPinnedPlaybackEvent === "function"
+        ? getPinnedPlaybackEvent()
+        : typeof getActiveEvent === "function"
+          ? getActiveEvent()
+          : null;
     if (pinned) {
       const pinnedFi =
         typeof eventDisplayFrameIdx === "function"
@@ -428,7 +445,14 @@ function syncActiveEventFromPlaybackPosition(opts = {}) {
   if (!ev) return;
   const key = eventRowKey(ev);
   const exact = isExactEventAtPosition(ev, timeSec, frameIdx);
-  if (!opts.force && key === activeEventKey && playbackEventLinkExact === exact) return;
+  // 同一事件因视频漂移不同步时：保持钉住并拉回，不改为「最近」
+  if (!opts.force && key === activeEventKey) {
+    if (playbackEventLinkExact && !exact) {
+      void realignPlaybackToPinnedEvent();
+      return;
+    }
+    if (playbackEventLinkExact === exact) return;
+  }
   activeEventKey = key;
   playbackEventLinkExact = exact;
   if (!opts.keepReviewBack && reviewBackKey && key !== reviewBackKey) {
@@ -518,13 +542,22 @@ async function seekToEvent(ev, { keepReviewBack = false } = {}) {
   updateEventMarkerActiveState();
   if (typeof updateStageBoxPickMode === "function") updateStageBoxPickMode();
   updateEventReviewFrameNavUi();
-  // 异步 seeked 可能把画面漂移：终态再校验一次
+  // 异步 seeked 可能把画面漂移：终态与下一帧任务各校验一次
+  const ensurePinnedAligned = async () => {
+    if (activeEventKey !== key || !playbackEventLinkExact || !targetFi) return;
+    if (lastRenderedFrameIdx !== targetFi || getPlaybackAuthorityFrameIdx() !== targetFi) {
+      await realignPlaybackToPinnedEvent();
+      activeEventKey = key;
+      playbackEventLinkExact = true;
+      setPlaybackAuthorityFrameIdx(targetFi);
+      updateEventReviewFrameNavUi();
+    }
+  };
   if (targetFi > 0 && lastRenderedFrameIdx !== targetFi) {
-    await realignPlaybackToPinnedEvent();
-    activeEventKey = key;
-    playbackEventLinkExact = true;
-    setPlaybackAuthorityFrameIdx(targetFi);
-    updateEventReviewFrameNavUi();
+    await ensurePinnedAligned();
+  } else if (targetFi > 0) {
+    queueMicrotask(() => void ensurePinnedAligned());
+    window.setTimeout(() => void ensurePinnedAligned(), 80);
   }
 }
 
