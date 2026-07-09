@@ -127,6 +127,25 @@ class ComboRule:
         return f"组合{self.combo_id}"
 
 
+@dataclass(frozen=True)
+class MotionComboRule(ComboRule):
+    """Combo 规则 + 段级躯干/下肢运动速度上限（拒绝走过误报）。"""
+
+    max_torso_speed_p50: float | None = None
+    max_lower_mean_speed_p50: float | None = None
+    min_motion_valid_ratio: float | None = None
+
+    @property
+    def label(self) -> str:
+        base = super().label
+        parts = [base]
+        if self.max_torso_speed_p50 is not None:
+            parts.append(f"torso_p50≤{self.max_torso_speed_p50}")
+        if self.max_lower_mean_speed_p50 is not None:
+            parts.append(f"lower_p50≤{self.max_lower_mean_speed_p50}")
+        return "+".join(parts)
+
+
 def combo_rule_from_args(args: argparse.Namespace) -> ComboRule:
     combo_id = int(args.combo_id)
     max_dpf = float(args.max_disp_per_frame)
@@ -178,7 +197,32 @@ def segment_combo_pass(seg: dict[str, Any], rule: ComboRule) -> bool:
         return False
     if rule.max_displacement is not None and disp > rule.max_displacement:
         return False
-    return (disp / fc) <= rule.max_disp_per_frame
+    if (disp / fc) > rule.max_disp_per_frame:
+        return False
+    return segment_motion_pass(seg, rule)
+
+
+def segment_motion_pass(seg: dict[str, Any], rule: ComboRule) -> bool:
+    """段级运动速度过滤：躯干/下肢速度过高则拒绝（走过误报）。"""
+    if not isinstance(rule, MotionComboRule):
+        return True
+
+    valid_ratio = seg.get("motion_valid_ratio")
+    if rule.min_motion_valid_ratio is not None:
+        if valid_ratio is None or float(valid_ratio) < rule.min_motion_valid_ratio:
+            return True
+
+    torso = seg.get("torso_speed_p50")
+    if rule.max_torso_speed_p50 is not None and torso is not None:
+        if float(torso) > rule.max_torso_speed_p50:
+            return False
+
+    lower = seg.get("lower_mean_speed_p50")
+    if rule.max_lower_mean_speed_p50 is not None and lower is not None:
+        if float(lower) > rule.max_lower_mean_speed_p50:
+            return False
+
+    return True
 
 
 def segment_combo_detail(seg: dict[str, Any], rule: ComboRule) -> dict[str, Any]:
@@ -233,6 +277,32 @@ def _build_segments(
 ) -> list[dict[str, Any]]:
     tracked = assign_person_tracks_to_frames(frames, video_fps=fps)
     return extract_collision_segment_rows(tracked, boxes, max_gap_frames=max_gap_frames)
+
+
+def _load_motion_segments_for_locator(locator) -> list[dict[str, Any]] | None:
+    """优先读取已提取的 skeleton_motion_segments.parquet。"""
+    try:
+        import pyarrow.parquet as pq
+    except ImportError:
+        return None
+    seg_path = locator.path / "skeleton_motion_segments.parquet"
+    if not seg_path.is_file():
+        return None
+    rows = pq.read_table(seg_path).to_pylist()
+    return [r for r in rows if isinstance(r, dict)]
+
+
+def _segments_for_record(
+    locator,
+    frames: list[dict[str, Any]],
+    boxes: list[dict[str, Any]],
+    *,
+    fps: float,
+) -> list[dict[str, Any]]:
+    motion = _load_motion_segments_for_locator(locator)
+    if motion:
+        return motion
+    return _build_segments(frames, boxes, fps=fps)
 
 
 def _alarms_to_timeline_rows(alarms: list[tuple[int, str]]) -> list[dict[str, Any]]:
@@ -385,7 +455,7 @@ def _evaluate_record(
     if fps <= 0:
         fps = 15.0
 
-    segments = _build_segments(frames, boxes, fps=fps)
+    segments = _segments_for_record(locator, frames, boxes, fps=fps)
     raw_alarms = _simulate_alarms(
         frames, boxes, alarm_min=alarm_min, alarm_cooldown=alarm_cooldown, fps=fps
     )

@@ -1,4 +1,4 @@
-"""段特征过滤：记录加载与系统级评估（无框空间特征）。"""
+"""段特征过滤：记录加载与系统级评估（含运动速度组合）。"""
 
 from __future__ import annotations
 
@@ -12,12 +12,16 @@ from pose_store import load_all_frames, load_event_review, load_manifest
 from api.accuracy_service import build_ground_truth_segments, evaluate_segments, resolve_annotation_for_accuracy_record
 from api.record_service import locate_record_by_id
 from scripts.data.evaluate_combo1_segment_filter import (
+    COMBO1_MAX_DISP_PER_FRAME,
+    COMBO1_MIN_DURATION,
+    COMBO1_MIN_FRAMES,
     ComboRule,
-    _build_segments,
-    _false_alarm_by_frame_from_alarms,
+    MotionComboRule,
     _infer_size_from_frames,
+    _segments_for_record,
     _simulate_alarms,
     filter_alarms_by_combo,
+    segment_combo_pass,
 )
 
 DEFAULT_TIER = "rtmpose-m"
@@ -50,6 +54,25 @@ def rule_from_tuple(
 
 def combo1_rule() -> ComboRule:
     return rule_from_tuple(4, 0.20, 2.5, None)
+
+
+def combo1_motion_rule(
+    *,
+    max_torso_speed_p50: float | None = 50.0,
+    max_lower_mean_speed_p50: float | None = None,
+    min_motion_valid_ratio: float | None = None,
+) -> MotionComboRule:
+    """Combo1 + 段级躯干/下肢速度上限。"""
+    return MotionComboRule(
+        combo_id=5,
+        min_frames=COMBO1_MIN_FRAMES,
+        min_duration=COMBO1_MIN_DURATION,
+        max_disp_per_frame=COMBO1_MAX_DISP_PER_FRAME,
+        max_displacement=None,
+        max_torso_speed_p50=max_torso_speed_p50,
+        max_lower_mean_speed_p50=max_lower_mean_speed_p50,
+        min_motion_valid_ratio=min_motion_valid_ratio,
+    )
 
 
 def load_record_bundle(
@@ -88,7 +111,7 @@ def load_record_bundle(
     if fps <= 0:
         fps = 15.0
 
-    segments = _build_segments(frames, boxes, fps=fps)
+    segments = _segments_for_record(locator, frames, boxes, fps=fps)
     raw_alarms = _simulate_alarms(
         frames, boxes, alarm_min=alarm_min, alarm_cooldown=alarm_cooldown, fps=fps
     )
@@ -105,7 +128,7 @@ def load_record_bundle(
 
 def evaluate_bundle(
     bundle: RecordBundle,
-    rule: ComboRule | None,
+    rule: ComboRule | MotionComboRule | None,
     *,
     apply_filter: bool,
 ) -> dict[str, Any]:
@@ -132,6 +155,28 @@ def evaluate_bundle(
     }
 
 
+def evaluate_motion_combo_on_bundle(
+    bundle: RecordBundle,
+    rule: MotionComboRule | None = None,
+) -> dict[str, Any]:
+    """评估 Combo1+运动 组合过滤相对原始告警的效果。"""
+    motion_rule = rule or combo1_motion_rule()
+    raw_metrics = evaluate_bundle(bundle, None, apply_filter=False)
+    filtered = evaluate_bundle(bundle, motion_rule, apply_filter=True)
+    fa_base = int(raw_metrics["false_alarms"])
+    fa_new = int(filtered["false_alarms"])
+    tp_base = int(raw_metrics["detected"])
+    tp_new = int(filtered["detected"])
+    return {
+        **filtered,
+        "rule": rule_to_dict(motion_rule),
+        "raw_false_alarms": fa_base,
+        "raw_detected": tp_base,
+        "fp_reduction": round((fa_base - fa_new) / fa_base, 4) if fa_base else None,
+        "tp_loss": round((tp_base - tp_new) / tp_base, 4) if tp_base else None,
+    }
+
+
 def aggregate_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
     if not rows:
         return {}
@@ -154,16 +199,23 @@ def aggregate_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def rule_to_dict(rule: ComboRule) -> dict[str, Any]:
-    return {
+def rule_to_dict(rule: ComboRule | MotionComboRule) -> dict[str, Any]:
+    out = {
         "min_frames": rule.min_frames,
         "min_duration": rule.min_duration,
         "max_disp_per_frame": rule.max_disp_per_frame,
         "max_displacement": rule.max_displacement,
     }
+    if isinstance(rule, MotionComboRule):
+        out["max_torso_speed_p50"] = rule.max_torso_speed_p50
+        out["max_lower_mean_speed_p50"] = rule.max_lower_mean_speed_p50
+        out["min_motion_valid_ratio"] = rule.min_motion_valid_ratio
+    return out
 
 
-def rule_label(rule: ComboRule) -> str:
+def rule_label(rule: ComboRule | MotionComboRule) -> str:
+    if isinstance(rule, MotionComboRule):
+        return rule.label
     parts = [
         f"fc≥{rule.min_frames}",
         f"dur≥{rule.min_duration}",
@@ -172,3 +224,7 @@ def rule_label(rule: ComboRule) -> str:
     if rule.max_displacement is not None:
         parts.append(f"disp≤{rule.max_displacement}")
     return ", ".join(parts)
+
+
+def segment_passes_rule(seg: dict[str, Any], rule: ComboRule | MotionComboRule) -> bool:
+    return segment_combo_pass(seg, rule)
