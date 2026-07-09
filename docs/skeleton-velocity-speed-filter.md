@@ -260,8 +260,11 @@ baseline 原始：TP=147 FP=410
 |------|------|
 | `event_engine/skeleton_features.py` | 速度特征提取与段级统计 |
 | `event_engine/speed_filter.py` | 段级速度过滤与 clip JSON 回写 |
+| `event_engine/speed_gated_collision.py` | **前置**速度门控碰撞处理器 |
 | `scripts/data/validate_baseline28_subsampled_velocity.py` | 28 条纯速度验证脚本 |
-| `scripts/data/export_speed_filtered_upload.py` | **导出速度过滤后的上传目录** |
+| `scripts/data/export_speed_filtered_upload.py` | 导出**后置**速度过滤上传目录 |
+| `scripts/data/export_prefilter_upload.py` | 导出**前置**速度过滤上传目录 |
+| `scripts/data/validate_prefilter28.py` | 前置帧级阈值网格验证 |
 | `scripts/data/run_manifest28_skeleton_extract.py` | 批量特征提取 |
 | `api/skeleton_features_service.py` | Parquet 写入与 API |
 
@@ -294,3 +297,82 @@ python scripts/data/evaluate_inference_upload.py \
 | rule-speed-lower60-prod-test | 144 | 333 | 92.31% |
 
 与离线验证结论一致（FP 降 18.8%，TP 损 2.0%）。
+
+---
+
+## 9. 前置速度过滤（prefilter）
+
+> 验证脚本：`scripts/data/validate_prefilter28.py`
+> 导出脚本：`scripts/data/export_prefilter_upload.py`
+> 实现模块：`event_engine/speed_gated_collision.py`
+> 扫描 JSON：`localdata/export/rule-speed-prefilter-prod-test/prefilter_threshold_scan.json`
+
+### 9.1 与后置过滤的区别
+
+| 维度 | 后置（§8） | 前置（本节） |
+|------|-----------|-------------|
+| 时机 | baseline 告警产生后删 `is_picking` | `CollisionProcessor` 手腕进框**之前**速度门控 |
+| 特征 | 段级 `lower_mean_speed_p50` | **帧级** `lower_mean_speed` |
+| 数据源 | baseline clip JSON | 记录包 timeline **只读** + 标注 ROI |
+| 落盘 | 改 export clip | **仅** `rule-speed-prefilter-prod-test/`，**不写回记录包** |
+
+记录包 timeline 中的标准碰撞信息保留，供速度特征与其它离线计算使用。
+
+### 9.2 算法要点
+
+- `SpeedGatedCollisionProcessor`：帧级 `lower_mean_speed > threshold` 时跳过该人手腕 `pointPolygonTest`
+- `IncrementalAggregateVelocityTracker`：与 `skeleton_features` 同算法，按 track 增量 O(1) 更新
+- 仅在 baseline clip 的 export 抽帧（`pose_frame_interval=2`）上推进碰撞状态
+- `alarm_cooldown_frames=0` 与 baseline prod-test 对齐
+- 无效速度 fail-open（仍做手腕检测）
+
+### 9.3 帧级阈值网格（2026-07-09，28 条）
+
+| 帧级阈值 ≤ | TP | FP | 召回率 |
+|-----------|-----|-----|--------|
+| baseline（磁盘） | 147 | 410 | 94.23% |
+| 30 | 128 | 206 | 82.05% |
+| 40 | 136 | 229 | 87.18% |
+| 50 | 140 | 259 | 89.74% |
+| **60（推荐）** | **142** | **287** | **91.03%** |
+| 70 | 142 | 308 | 91.03% |
+| 80 | 142 | 322 | 91.03% |
+| 100 | 145 | 353 | 92.95% |
+
+推荐帧级阈值 **60**（召回率 ≥90% 下 FP 最小）。注意：帧级 60 ≠ 段级 P50≤60，语义不同但数值可复用为扫描起点。
+
+### 9.4 三向对比（阈值 60）
+
+| 目录 | 阶段 | TP | FP | 召回率 |
+|------|------|-----|-----|--------|
+| rule-baseline-prod-test | 无过滤 | 147 | 410 | 94.23% |
+| rule-speed-prefilter-prod-test | **前置** | 142 | 287 | 91.03% |
+| rule-speed-lower60-prod-test | 后置 | 144 | 333 | 92.31% |
+
+前置在 FP 压制上优于后置（287 vs 333），TP 损失略大（142 vs 144）；前置更早切断 consecutive，行为与后置段级过滤不完全相同。
+
+### 9.5 命令
+
+```bash
+# 阈值网格（内存，不写记录包）
+python scripts/data/validate_prefilter28.py
+
+# 导出前置过滤目录（默认帧级 lower_mean_speed ≤ 60）
+python scripts/data/export_prefilter_upload.py --threshold 60
+
+# 三向对比评估
+python scripts/data/evaluate_inference_upload.py \
+  --dirs localdata/export/rule-baseline-prod-test \
+           localdata/export/rule-speed-prefilter-prod-test \
+           localdata/export/rule-speed-lower60-prod-test --in-place
+```
+
+### 9.6 相关文件（前置）
+
+| 文件 | 说明 |
+|------|------|
+| `event_engine/speed_gated_collision.py` | 前置速度门控碰撞处理器 |
+| `event_engine/skeleton_features.py` | `IncrementalAggregateVelocityTracker` |
+| `scripts/data/export_prefilter_upload.py` | 只读 timeline 重算并导出 |
+| `scripts/data/validate_prefilter28.py` | 帧级阈值网格验证 |
+| `scripts/data/export_speed_filtered_upload.py` | 后置过滤（对比基线，非前置链路） |
