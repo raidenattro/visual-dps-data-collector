@@ -1438,6 +1438,31 @@ def get_record_wrist_features(
     return JSONResponse(payload)
 
 
+@router.get("/api/records/{record_id:path}/skeleton-features")
+def get_record_skeleton_features(
+    record_id: str,
+    frame_idx: int | None = None,
+    all_velocity: bool = False,
+) -> JSONResponse:
+    """全骨骼速度特征与碰撞段运动统计（需先运行 extract_skeleton_features 脚本）。"""
+    from api.skeleton_features_service import load_skeleton_features_payload
+
+    locator = locate_record_by_id(record_id)
+    if not locator:
+        raise HTTPException(404, "记录不存在")
+    try:
+        payload = load_skeleton_features_payload(
+            locator,
+            frame_idx=frame_idx,
+            include_all_velocity=all_velocity,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(500, str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(500, f"读取特征文件失败: {exc}") from exc
+    return JSONResponse(payload)
+
+
 @router.get("/api/records/{record_id:path}/manifest.json")
 def get_record_manifest(record_id: str) -> JSONResponse:
     locator = locate_record_by_id(record_id)
