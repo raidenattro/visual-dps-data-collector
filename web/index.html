@@ -337,6 +337,18 @@
             </label>
           </div>
         </fieldset>
+        <div class="row accuracy-history-row">
+          <label class="accuracy-history-label">
+            <span class="label-with-tip">历史评估
+              <button type="button" class="field-tip" data-tip="从 localdata/eval_runs 加载已落盘的评估结果，无需重新执行。加载后可查看汇总、诊断漏报/误报并跳转回放。">?</button>
+            </span>
+            <select id="accuracy-eval-history" title="选择历史评估 run">
+              <option value="">— 选择历史评估 —</option>
+            </select>
+          </label>
+          <button type="button" id="accuracy-eval-history-load">加载</button>
+          <button type="button" id="accuracy-eval-history-refresh" class="link-btn" title="刷新历史列表">刷新</button>
+        </div>
         <div class="row accuracy-actions">
           <button type="button" id="accuracy-run" class="primary-btn">执行</button>
         </div>
@@ -703,6 +715,6 @@
   <script src="app/11-playback-controls.js?v=81"></script>
   <script src="app/12-playback-wrist-features.js?v=3"></script>
   <script src="annotate.js?v=17"></script>
-  <script src="accuracy.js?v=12"></script>
+  <script src="accuracy.js?v=13"></script>
 </body>
 </html>

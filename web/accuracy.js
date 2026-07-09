@@ -48,6 +48,8 @@ let lastEvalId = "";
 let lastEvalSource = "";
 const lastEvalClipByRecordId = new Map();
 let selectedDiagnosticsRecordId = "";
+const ACCURACY_LAST_EVAL_KEY = "accuracy:lastEvalId";
+let evalRunHistoryRows = [];
 
 function poseTierFromRecordIdForAccuracy(recordId) {
   const rid = String(recordId || "").trim();
@@ -72,6 +74,212 @@ function rememberEvalResult(result) {
     const rid = String(clip?.record_id || "").trim();
     if (rid) lastEvalClipByRecordId.set(rid, clip);
   });
+  if (lastEvalId) {
+    try {
+      localStorage.setItem(ACCURACY_LAST_EVAL_KEY, lastEvalId);
+    } catch {
+      /* 忽略 */
+    }
+    syncEvalHistorySelection(lastEvalId);
+  }
+}
+
+function formatEvalRunTime(iso) {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return String(iso).slice(0, 16);
+    return d.toLocaleString("zh-CN", {
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return String(iso).slice(0, 16);
+  }
+}
+
+function formatEvalRunSourceShort(run) {
+  const params = run?.params || {};
+  const source = String(run?.source || run?.eval_mode || "").trim();
+  if (source === "upload") {
+    const label = String(params.upload_label || "上传推测").trim();
+    const base = label.split(/[/\\]/).filter(Boolean).pop() || label;
+    const short = base.length > 28 ? `${base.slice(0, 28)}…` : base;
+    return `上传·${short}`;
+  }
+  const pose = params.pose_tier || "—";
+  const cam = params.camera_slug || params.camera_label || "—";
+  return `${pose}·${cam}`;
+}
+
+function formatEvalRunHistoryLabel(run) {
+  const evalId = String(run?.eval_id || "").trim();
+  const created = formatEvalRunTime(run?.created_at);
+  const recall = pct(run?.recall);
+  const evaluated = run?.evaluated ?? run?.clip_count ?? "—";
+  const src = formatEvalRunSourceShort(run);
+  const shortId = evalId.length > 18 ? `${evalId.slice(0, 18)}…` : evalId;
+  return `${created} · ${src} · 召回 ${recall} · ${evaluated}片 · ${shortId}`;
+}
+
+function findEvalHistoryOption(evalId) {
+  const sel = acc$("#accuracy-eval-history");
+  if (!sel || !evalId) return null;
+  return Array.from(sel.options).find((opt) => opt.value === evalId) || null;
+}
+
+function syncEvalHistorySelection(evalId) {
+  const sel = acc$("#accuracy-eval-history");
+  if (!sel || !evalId) return;
+  if (!findEvalHistoryOption(evalId)) {
+    const row = evalRunHistoryRows.find((r) => r.eval_id === evalId);
+    const opt = document.createElement("option");
+    opt.value = evalId;
+    opt.textContent = row ? formatEvalRunHistoryLabel(row) : `${formatEvalRunTime(new Date().toISOString())} · 当前评估 · ${evalId}`;
+    const first = sel.options[1];
+    if (first) sel.insertBefore(opt, first);
+    else sel.appendChild(opt);
+  }
+  sel.value = evalId;
+}
+
+function applyHistoricalEvalParams(manifest) {
+  const params = manifest?.params || {};
+  const source = String(manifest?.source || manifest?.eval_mode || "").trim();
+  const modeSel = acc$("#accuracy-eval-mode");
+  if (modeSel) {
+    modeSel.value = source === "upload" ? "upload_evaluate" : "evaluate_only";
+  }
+  const poseSel = acc$("#accuracy-pose-tier");
+  if (poseSel && params.pose_tier) poseSel.value = params.pose_tier;
+  const camSel = acc$("#accuracy-camera");
+  if (camSel && params.camera_label) {
+    const has = Array.from(camSel.options).some((opt) => opt.value === params.camera_label);
+    if (has) camSel.value = params.camera_label;
+  }
+  const tagInput = acc$("#accuracy-tag-filter");
+  if (tagInput) {
+    const tags = Array.isArray(params.tag_filter) ? params.tag_filter : [];
+    tagInput.value = tags.join(", ");
+  }
+  syncAccuracyCollisionUi();
+}
+
+function buildResultFromHistoricalEvalRun(data) {
+  const manifest = data?.manifest || {};
+  const params = manifest.params || {};
+  const summary = data?.summary || {};
+  return {
+    eval_id: data?.eval_id || manifest.eval_id || summary.eval_id,
+    source: manifest.source || manifest.eval_mode || "",
+    pose_tier: params.pose_tier || "",
+    camera_slug: params.camera_slug || "",
+    camera_label: params.camera_label || "",
+    upload_label: params.upload_label || "",
+    summary,
+    clips: Array.isArray(data?.clips) ? data.clips : [],
+    rules: manifest.rules || {},
+    from_history: true,
+  };
+}
+
+async function loadEvalRunHistoryList(options = {}) {
+  const sel = acc$("#accuracy-eval-history");
+  if (!sel) return [];
+  const keepValue = options.keepSelection !== false ? sel.value : "";
+  try {
+    const res = await fetch("/api/accuracy/eval-runs?limit=100");
+    if (!res.ok) throw new Error(await readApiError(res));
+    const body = await res.json();
+    evalRunHistoryRows = Array.isArray(body.runs) ? body.runs : [];
+    sel.innerHTML = '<option value="">— 选择历史评估 —</option>';
+    evalRunHistoryRows.forEach((run) => {
+      const evalId = String(run?.eval_id || "").trim();
+      if (!evalId) return;
+      const opt = document.createElement("option");
+      opt.value = evalId;
+      opt.textContent = formatEvalRunHistoryLabel(run);
+      sel.appendChild(opt);
+    });
+    if (keepValue && findEvalHistoryOption(keepValue)) sel.value = keepValue;
+    return evalRunHistoryRows;
+  } catch (err) {
+    if (!options.silent) {
+      setAccuracyStatus(`❌ 历史评估列表加载失败：${escHtml(err.message)}`, true);
+    }
+    return [];
+  }
+}
+
+async function loadHistoricalEvalRun(evalId, options = {}) {
+  const id = String(evalId || "").trim();
+  if (!id) {
+    setAccuracyStatus("请选择一条历史评估", true);
+    return false;
+  }
+  const silent = Boolean(options.silent);
+  if (!silent) setAccuracyStatus("正在加载历史评估…");
+  try {
+    const res = await fetch(`/api/accuracy/eval-runs/${encodeURIComponent(id)}`);
+    if (!res.ok) throw new Error(await readApiError(res));
+    const data = await res.json();
+    const result = buildResultFromHistoricalEvalRun(data);
+    applyHistoricalEvalParams(data.manifest || {});
+    lastAccuracyMeta = {
+      pose_tier: result.pose_tier || "",
+      camera_slug: result.camera_slug || "",
+      camera_label: result.camera_label || "",
+    };
+    const filterSel = acc$("#accuracy-clip-status-filter");
+    if (filterSel) filterSel.value = "all";
+    renderAccuracySummary(result);
+    renderAccuracyClips(result.clips, lastAccuracyMeta);
+    rememberEvalResult(result);
+    acc$("#accuracy-diagnostics-wrap")?.classList.add("hidden");
+    selectedDiagnosticsRecordId = "";
+    syncEvalHistorySelection(id);
+    if (!result.source || result.source !== "upload") {
+      void refreshAccuracyContext();
+    } else {
+      acc$("#accuracy-context-hint")?.classList.add("hidden");
+    }
+    const s = result.summary || {};
+    const srcLabel = formatEvalRunSourceShort({
+      source: result.source,
+      eval_mode: data?.manifest?.eval_mode,
+      params: data?.manifest?.params,
+    });
+    if (!silent) {
+      setAccuracyStatus(
+        `✅ 已加载历史评估：<code>${escHtml(id)}</code> · ${escHtml(srcLabel)} · 召回率 ${pct(s.recall)} · 误报 ${s.false_alarms ?? 0} 次`
+      );
+    }
+    return true;
+  } catch (err) {
+    if (!silent) setAccuracyStatus(`❌ 加载历史评估失败：${escHtml(err.message)}`, true);
+    return false;
+  }
+}
+
+async function initEvalRunHistory() {
+  await loadEvalRunHistoryList({ silent: true });
+  let saved = "";
+  try {
+    saved = String(localStorage.getItem(ACCURACY_LAST_EVAL_KEY) || "").trim();
+  } catch {
+    saved = "";
+  }
+  if (!saved || !findEvalHistoryOption(saved)) return;
+  const sel = acc$("#accuracy-eval-history");
+  if (sel) sel.value = saved;
+  const ok = await loadHistoricalEvalRun(saved, { silent: true });
+  if (ok && lastEvalId === saved) {
+    setAccuracyStatus(
+      `✅ 已恢复上次评估：<code>${escHtml(saved)}</code> · 可直接诊断或跳转回放，无需重新执行`
+    );
+  }
 }
 
 async function fetchEvalClipDetail(recordId) {
@@ -269,12 +477,16 @@ function renderAccuracySummary(result) {
     : "";
   const evalId = String(result.eval_id || s.eval_id || lastEvalId || "").trim();
   const evalHint = evalId
-    ? `<p class="hint accuracy-eval-id-hint">评估已落盘：<code>${escHtml(evalId)}</code> · 可在分片行点「诊断」查看漏报/误报并跳转回放</p>`
+    ? `<p class="hint accuracy-eval-id-hint">${result.from_history ? "历史评估" : "评估已落盘"}：<code>${escHtml(evalId)}</code> · 可在分片行点「诊断」查看漏报/误报并跳转回放</p>`
     : "";
+  const uploadDirHint =
+    isUpload && result.upload_label
+      ? `<p class="hint accuracy-upload-dir-hint">推测来源：<code>${escHtml(result.upload_label)}</code></p>`
+      : "";
   const headingLabel = isUpload
     ? "上传推测评估"
     : `${escHtml(result.camera_label || "")} · ${escHtml(result.pose_tier || "")}`;
-  if (!s.evaluated && !recomputeBlock && !tagHint && !uploadHint && !evalHint) {
+  if (!s.evaluated && !recomputeBlock && !tagHint && !uploadHint && !evalHint && !uploadDirHint) {
     el.classList.add("hidden");
     return;
   }
@@ -283,6 +495,7 @@ function renderAccuracySummary(result) {
     ${recomputeBlock}
     ${tagHint}
     ${uploadHint}
+    ${uploadDirHint}
     ${evalHint}
     <h2 class="accuracy-summary-heading">汇总 · ${headingLabel}</h2>
     <div class="accuracy-metrics-grid">
@@ -664,6 +877,7 @@ async function runAccuracyUploadJob() {
     renderAccuracyClips(result.clips, lastAccuracyMeta);
     rememberEvalResult(result);
     acc$("#accuracy-diagnostics-wrap")?.classList.add("hidden");
+    void loadEvalRunHistoryList({ silent: true, keepSelection: true });
     const s = result.summary || {};
     setAccuracyStatus(
       `✅ 上传评估完成：${s.evaluated ?? 0} 个分片，召回率 ${pct(s.recall)}，误报 ${s.false_alarms ?? 0} 次`
@@ -743,6 +957,7 @@ async function runAccuracyJob() {
     renderAccuracyClips(result.clips, lastAccuracyMeta);
     rememberEvalResult(result);
     acc$("#accuracy-diagnostics-wrap")?.classList.add("hidden");
+    void loadEvalRunHistoryList({ silent: true, keepSelection: true });
     const s = result.summary || {};
     const rc = result.recompute;
     const recomputeHint = rc
@@ -764,6 +979,7 @@ function initAccuracyPanel() {
     accuracyPanelInited = true;
     loadAccuracyCameras();
     void loadAccuracyTagSuggestions();
+    void initEvalRunHistory();
   }
   syncAccuracyCollisionUi();
 
@@ -831,6 +1047,22 @@ function initAccuracyPanel() {
   });
   acc$("#accuracy-run")?.addEventListener("click", () => {
     void runAccuracyJob();
+  });
+  acc$("#accuracy-eval-history-load")?.addEventListener("click", () => {
+    const evalId = acc$("#accuracy-eval-history")?.value || "";
+    void loadHistoricalEvalRun(evalId);
+  });
+  acc$("#accuracy-eval-history")?.addEventListener("change", () => {
+    const evalId = acc$("#accuracy-eval-history")?.value || "";
+    if (!evalId) return;
+    void loadHistoricalEvalRun(evalId);
+  });
+  acc$("#accuracy-eval-history-refresh")?.addEventListener("click", () => {
+    void (async () => {
+      setAccuracyStatus("正在刷新历史评估列表…");
+      await loadEvalRunHistoryList();
+      setAccuracyStatus(`✅ 历史评估列表已刷新（${evalRunHistoryRows.length} 条）`);
+    })();
   });
   acc$("#accuracy-upload-file")?.addEventListener("change", () => {
     if (acc$("#accuracy-upload-file")?.files?.length) {
