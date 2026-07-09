@@ -262,6 +262,8 @@ baseline 原始：TP=147 FP=410
 | `event_engine/speed_filter.py` | 段级速度过滤与 clip JSON 回写 |
 | `event_engine/speed_gated_collision.py` | **前置**速度门控碰撞处理器 |
 | `scripts/data/validate_baseline28_subsampled_velocity.py` | 28 条纯速度验证脚本 |
+| `scripts/data/export_baseline_upload.py` | 本仓库 `CollisionProcessor` 重算 baseline 并导出 |
+| `scripts/data/upload_export_common.py` | baseline/prefilter 导出公共逻辑 |
 | `scripts/data/export_speed_filtered_upload.py` | 导出**后置**速度过滤上传目录 |
 | `scripts/data/export_prefilter_upload.py` | 导出**前置**速度过滤上传目录 |
 | `scripts/data/validate_prefilter28.py` | 前置帧级阈值网格验证 |
@@ -285,23 +287,44 @@ python scripts/data/evaluate_inference_upload.py \
 
 ### 默认参数
 
-- 输入：`localdata/export/rule-baseline-prod-test`
-- 输出：`localdata/export/rule-speed-lower60-prod-test`
+- 输入（外部）：`localdata/export/rule-baseline-prod-test`
+- 输入（本仓库）：`localdata/export/rule-baseline-local-prod-test`
+- 输出（外部）：`localdata/export/rule-speed-lower60-prod-test`
+- 输出（本仓库）：`localdata/export/rule-speed-lower60-local-prod-test`
 - 规则：`lower_mean_speed_p50 ≤ 60`
 
+### 本仓库 baseline 后置过滤
+
+```bash
+python scripts/data/export_speed_filtered_upload.py \
+  --input-dir localdata/export/rule-baseline-local-prod-test \
+  --output-dir localdata/export/rule-speed-lower60-local-prod-test
+```
+
 ### 实测对比（2026-07-09）
+
+**外部 baseline**：
 
 | 目录 | TP（检出） | FP（误报） | 召回率 |
 |------|-----------|-----------|--------|
 | rule-baseline-prod-test | 147 | 410 | 94.23% |
 | rule-speed-lower60-prod-test | 144 | 333 | 92.31% |
 
-与离线验证结论一致（FP 降 18.8%，TP 损 2.0%）。
+**本仓库 baseline（同引擎三向）**：
+
+| 目录 | 阶段 | TP | FP | 召回率 |
+|------|------|-----|-----|--------|
+| rule-baseline-local-prod-test | 无过滤 | 147 | 429 | 94.23% |
+| rule-speed-prefilter-prod-test | 前置 | 142 | 287 | 91.03% |
+| rule-speed-lower60-local-prod-test | 后置 | 144 | 354 | 92.31% |
+
+同引擎下后置净减 FP 75（429→354），前置净减 FP 142（429→287）；前置 FP 压制更强，后置 TP 损失更小（144 vs 142）。
 
 ---
 
 ## 9. 前置速度过滤（prefilter）
 
+> 本仓库 baseline 导出：`scripts/data/export_baseline_upload.py` → `rule-baseline-local-prod-test/`
 > 验证脚本：`scripts/data/validate_prefilter28.py`
 > 导出脚本：`scripts/data/export_prefilter_upload.py`
 > 实现模块：`event_engine/speed_gated_collision.py`
@@ -341,7 +364,9 @@ python scripts/data/evaluate_inference_upload.py \
 
 推荐帧级阈值 **60**（召回率 ≥90% 下 FP 最小）。注意：帧级 60 ≠ 段级 P50≤60，语义不同但数值可复用为扫描起点。
 
-### 9.4 三向对比（阈值 60）
+### 9.4 对比（阈值 60）
+
+**外部 baseline**（`box_human_det_infer`，2026-07-06）三向：
 
 | 目录 | 阶段 | TP | FP | 召回率 |
 |------|------|-----|-----|--------|
@@ -349,7 +374,14 @@ python scripts/data/evaluate_inference_upload.py \
 | rule-speed-prefilter-prod-test | **前置** | 142 | 287 | 91.03% |
 | rule-speed-lower60-prod-test | 后置 | 144 | 333 | 92.31% |
 
-前置在 FP 压制上优于后置（287 vs 333），TP 损失略大（142 vs 144）；前置更早切断 consecutive，行为与后置段级过滤不完全相同。
+**同引擎公平对比**（本仓库 `LocalBaselineCollisionProcessor` vs 前置）：
+
+| 目录 | 阶段 | TP | FP | 召回率 |
+|------|------|-----|-----|--------|
+| rule-baseline-local-prod-test | 无过滤 | 147 | 429 | 94.23% |
+| rule-speed-prefilter-prod-test | **前置** | 142 | 287 | 91.03% |
+
+同引擎下前置净减 FP 142、新增误报 0（对比外部 baseline 时曾有 30 条新增误报，来自引擎差异）。前置在 FP 压制上优于后置（287 vs 333），TP 损失略大（142 vs 144）；前置更早切断 consecutive，行为与后置段级过滤不完全相同。
 
 ### 9.5 命令
 
@@ -360,7 +392,15 @@ python scripts/data/validate_prefilter28.py
 # 导出前置过滤目录（默认帧级 lower_mean_speed ≤ 60）
 python scripts/data/export_prefilter_upload.py --threshold 60
 
-# 三向对比评估
+# 本仓库 baseline 重算（与 prefilter 同引擎）
+python scripts/data/export_baseline_upload.py
+
+# 同引擎对比评估
+python scripts/data/evaluate_inference_upload.py \
+  --dirs localdata/export/rule-baseline-local-prod-test \
+           localdata/export/rule-speed-prefilter-prod-test --in-place
+
+# 三向对比（含外部 baseline / 后置）
 python scripts/data/evaluate_inference_upload.py \
   --dirs localdata/export/rule-baseline-prod-test \
            localdata/export/rule-speed-prefilter-prod-test \
@@ -373,6 +413,8 @@ python scripts/data/evaluate_inference_upload.py \
 |------|------|
 | `event_engine/speed_gated_collision.py` | 前置速度门控碰撞处理器 |
 | `event_engine/skeleton_features.py` | `IncrementalAggregateVelocityTracker` |
+| `scripts/data/export_baseline_upload.py` | 本仓库 baseline 重算并导出 |
+| `scripts/data/upload_export_common.py` | 导出公共逻辑 |
 | `scripts/data/export_prefilter_upload.py` | 只读 timeline 重算并导出 |
 | `scripts/data/validate_prefilter28.py` | 帧级阈值网格验证 |
 | `scripts/data/export_speed_filtered_upload.py` | 后置过滤（对比基线，非前置链路） |
