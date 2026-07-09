@@ -388,6 +388,143 @@ def extract_aggregate_velocity_rows(
     return out
 
 
+@dataclass
+class AggregateVelocitySnapshot:
+    """单 track 单帧聚合速度快照（前置门控用）。"""
+    lower_mean_speed: float | None = None
+    torso_speed: float | None = None
+    body_mean_speed: float | None = None
+    velocity_valid: bool = False
+
+
+class IncrementalAggregateVelocityTracker:
+    """按 track 增量维护帧级聚合速度，算法与 extract_keypoint_velocity_rows 一致。"""
+
+    def __init__(
+        self,
+        *,
+        infer_width: int,
+        infer_height: int,
+        video_fps: float = 25.0,
+    ):
+        self.diag = math.hypot(max(1, infer_width), max(1, infer_height))
+        self.fps = max(1.0, float(video_fps))
+        self._kpt_buffers: dict[tuple[int, int], _TrackKptBuffer] = {}
+        self._torso_buffers: dict[int, _TrackKptBuffer] = {}
+
+    def update_for_person(
+        self,
+        track_id: int,
+        person: dict[str, Any],
+        *,
+        frame_idx: int,
+        timestamp_sec: float | None = None,
+    ) -> AggregateVelocitySnapshot:
+        ts = float(timestamp_sec or 0.0)
+        if ts <= 0 and frame_idx > 0:
+            ts = frame_idx / self.fps
+
+        kpt_speeds: dict[int, float | None] = {}
+        for kpt_idx in range(KPT_COUNT):
+            key = (track_id, kpt_idx)
+            buf = self._kpt_buffers.setdefault(key, _TrackKptBuffer())
+            pt = _read_kpt(person, kpt_idx)
+            if pt is None:
+                kpt_speeds[kpt_idx] = None
+                continue
+
+            x, y, score = pt
+            if buf.prev_meta is not None:
+                gap = frame_idx - buf.prev_meta.frame_idx
+                if gap > MAX_VELOCITY_GAP_FRAMES:
+                    buf.prev_filtered = None
+                    buf.prev_meta = None
+
+            buf.positions.append((x, y, score, frame_idx, ts))
+            filtered = _filtered_xy(buf)
+            if filtered is None:
+                kpt_speeds[kpt_idx] = None
+                continue
+
+            fx, fy = filtered
+            speed_val: float | None = None
+            if buf.prev_filtered is not None and buf.prev_meta is not None:
+                prev_state = _KptState(
+                    frame_idx=buf.prev_meta.frame_idx,
+                    timestamp_sec=buf.prev_meta.timestamp_sec,
+                    x=buf.prev_filtered[0],
+                    y=buf.prev_filtered[1],
+                )
+                vel = _compute_speed(
+                    fx,
+                    fy,
+                    prev_state,
+                    frame_idx=frame_idx,
+                    ts=ts,
+                    diag=self.diag,
+                )
+                if vel["velocity_valid"]:
+                    speed_val = vel["speed"]
+            kpt_speeds[kpt_idx] = speed_val
+            buf.prev_filtered = (fx, fy)
+            buf.prev_meta = _KptState(frame_idx=frame_idx, timestamp_sec=ts, x=fx, y=fy, score=score)
+
+        torso_buf = self._torso_buffers.setdefault(track_id, _TrackKptBuffer())
+        torso_pt = _torso_xy(person)
+        torso_speed: float | None = None
+        torso_valid = False
+        if torso_pt is not None:
+            tx, ty, tscore = torso_pt
+            if torso_buf.prev_meta is not None:
+                gap = frame_idx - torso_buf.prev_meta.frame_idx
+                if gap > MAX_VELOCITY_GAP_FRAMES:
+                    torso_buf.prev_filtered = None
+                    torso_buf.prev_meta = None
+
+            torso_buf.positions.append((tx, ty, tscore, frame_idx, ts))
+            t_filtered = _filtered_xy(torso_buf)
+            if t_filtered is not None:
+                tfx, tfy = t_filtered
+                if torso_buf.prev_filtered is not None and torso_buf.prev_meta is not None:
+                    prev_state = _KptState(
+                        frame_idx=torso_buf.prev_meta.frame_idx,
+                        timestamp_sec=torso_buf.prev_meta.timestamp_sec,
+                        x=torso_buf.prev_filtered[0],
+                        y=torso_buf.prev_filtered[1],
+                    )
+                    vel = _compute_speed(
+                        tfx,
+                        tfy,
+                        prev_state,
+                        frame_idx=frame_idx,
+                        ts=ts,
+                        diag=self.diag,
+                    )
+                    if vel["velocity_valid"]:
+                        torso_speed = vel["speed"]
+                        torso_valid = True
+                torso_buf.prev_filtered = (tfx, tfy)
+                torso_buf.prev_meta = _KptState(
+                    frame_idx=frame_idx,
+                    timestamp_sec=ts,
+                    x=tfx,
+                    y=tfy,
+                    score=tscore,
+                )
+
+        lower_speeds = [kpt_speeds.get(i) for i in LOWER_KPT_INDICES]
+        all_speeds = [kpt_speeds.get(i) for i in range(KPT_COUNT)]
+        lower_mean = _mean_of_speeds(lower_speeds)
+        body_mean = _mean_of_speeds(all_speeds)
+        has_lower = lower_mean is not None
+        return AggregateVelocitySnapshot(
+            lower_mean_speed=round(lower_mean, 3) if lower_mean is not None else None,
+            torso_speed=round(torso_speed, 3) if torso_speed is not None else None,
+            body_mean_speed=round(body_mean, 3) if body_mean is not None else None,
+            velocity_valid=has_lower or torso_valid,
+        )
+
+
 def filter_frames_to_indices(
     frames: list[dict[str, Any]],
     frame_indices: set[int] | list[int],
