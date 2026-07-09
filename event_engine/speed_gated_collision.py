@@ -44,6 +44,26 @@ def speed_gate_blocks(
         return not config.fail_open
 
 
+class LocalBaselineCollisionProcessor(CollisionProcessor):
+    """本仓库 baseline 重算：无速度门控，cooldown=0 可生效。"""
+
+    def __init__(
+        self,
+        boxes: list,
+        *,
+        alarm_min_consecutive_frames: int = 3,
+        alarm_cooldown_frames: int = 0,
+        video_fps: float = 25.0,
+    ):
+        super().__init__(
+            boxes,
+            alarm_min_consecutive_frames=alarm_min_consecutive_frames,
+            alarm_cooldown_frames=alarm_cooldown_frames,
+            video_fps=video_fps,
+        )
+        self.alarm_cooldown_frames = max(0, int(alarm_cooldown_frames))
+
+
 class SpeedGatedCollisionProcessor(CollisionProcessor):
     """在手腕 pointPolygonTest 之前按帧级速度门控。"""
 
@@ -177,35 +197,19 @@ def build_timeline_frame_index(frames: list[dict[str, Any]]) -> dict[int, dict[s
     return out
 
 
-def recompute_prefilter_upload_frames(
+def _recompute_upload_frames_with_processor(
     timeline_frames: list[dict[str, Any]],
     export_frame_indices: set[int] | list[int],
-    boxes: list[dict[str, Any]],
+    processor: CollisionProcessor,
     *,
     record_id: str,
-    speed_gate: SpeedGateConfig,
-    infer_width: int,
-    infer_height: int,
-    video_fps: float = 25.0,
-    alarm_min_consecutive_frames: int = 3,
-    alarm_cooldown_frames: int = 0,
 ) -> list[dict[str, Any]]:
-    """只读 timeline，内存重算前置过滤碰撞，输出 upload clip 行。"""
+    """只读 timeline，用给定 processor 重算并输出 upload clip 行。"""
     wanted = sorted({int(x) for x in export_frame_indices if int(x) > 0})
     if not wanted:
         return []
 
     by_idx = build_timeline_frame_index(timeline_frames)
-    processor = SpeedGatedCollisionProcessor(
-        boxes,
-        alarm_min_consecutive_frames=alarm_min_consecutive_frames,
-        alarm_cooldown_frames=alarm_cooldown_frames,
-        video_fps=video_fps,
-        speed_gate=speed_gate,
-        infer_width=infer_width,
-        infer_height=infer_height,
-    )
-
     upload_rows: list[dict[str, Any]] = []
     for frame_idx in wanted:
         src = by_idx.get(frame_idx)
@@ -228,3 +232,61 @@ def recompute_prefilter_upload_frames(
             "rule_alarm_collisions": alarm_collisions,
         })
     return upload_rows
+
+
+def recompute_baseline_upload_frames(
+    timeline_frames: list[dict[str, Any]],
+    export_frame_indices: set[int] | list[int],
+    boxes: list[dict[str, Any]],
+    *,
+    record_id: str,
+    infer_width: int,
+    infer_height: int,
+    video_fps: float = 25.0,
+    alarm_min_consecutive_frames: int = 3,
+    alarm_cooldown_frames: int = 0,
+) -> list[dict[str, Any]]:
+    """本仓库 baseline：无速度门控，只读 timeline 内存重算。"""
+    processor = LocalBaselineCollisionProcessor(
+        boxes,
+        alarm_min_consecutive_frames=alarm_min_consecutive_frames,
+        alarm_cooldown_frames=alarm_cooldown_frames,
+        video_fps=video_fps,
+    )
+    return _recompute_upload_frames_with_processor(
+        timeline_frames,
+        export_frame_indices,
+        processor,
+        record_id=record_id,
+    )
+
+
+def recompute_prefilter_upload_frames(
+    timeline_frames: list[dict[str, Any]],
+    export_frame_indices: set[int] | list[int],
+    boxes: list[dict[str, Any]],
+    *,
+    record_id: str,
+    speed_gate: SpeedGateConfig,
+    infer_width: int,
+    infer_height: int,
+    video_fps: float = 25.0,
+    alarm_min_consecutive_frames: int = 3,
+    alarm_cooldown_frames: int = 0,
+) -> list[dict[str, Any]]:
+    """只读 timeline，内存重算前置过滤碰撞，输出 upload clip 行。"""
+    processor = SpeedGatedCollisionProcessor(
+        boxes,
+        alarm_min_consecutive_frames=alarm_min_consecutive_frames,
+        alarm_cooldown_frames=alarm_cooldown_frames,
+        video_fps=video_fps,
+        speed_gate=speed_gate,
+        infer_width=infer_width,
+        infer_height=infer_height,
+    )
+    return _recompute_upload_frames_with_processor(
+        timeline_frames,
+        export_frame_indices,
+        processor,
+        record_id=record_id,
+    )

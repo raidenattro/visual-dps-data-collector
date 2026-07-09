@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""从记录包 timeline 只读重算前置速度过滤碰撞，导出上传评估目录。
+"""本仓库 CollisionProcessor 重算 baseline，导出上传评估目录。
 
-不写回记录包；唯一输出 localdata/export/rule-speed-prefilter-prod-test/
+不写回记录包；输出 localdata/export/rule-baseline-local-prod-test/
+与外部 rule-baseline-prod-test 参数对齐（interval=2, alarm_min=3, cooldown=0），
+便于与前置/后置过滤在同引擎下对比。
 
 用法（项目根目录）:
-  python scripts/data/export_prefilter_upload.py
-  python scripts/data/export_prefilter_upload.py --threshold 50
+  python scripts/data/export_baseline_upload.py
   python scripts/data/evaluate_inference_upload.py \\
     --dirs localdata/export/rule-baseline-local-prod-test \\
              localdata/export/rule-speed-prefilter-prod-test --in-place
@@ -28,7 +29,7 @@ from scripts.data.evaluate_combo1_segment_filter import _ensure_cv2_point_polygo
 _ensure_cv2_point_polygon_test()
 
 from config_loader import resolve_config_path
-from event_engine.speed_gated_collision import SpeedGateConfig, recompute_prefilter_upload_frames
+from event_engine.speed_gated_collision import recompute_baseline_upload_frames
 from scripts.data.upload_export_common import (
     ALARM_COOLDOWN,
     ALARM_MIN_CONSECUTIVE,
@@ -39,17 +40,15 @@ from scripts.data.upload_export_common import (
     process_record_upload_export,
 )
 
-DEFAULT_BASELINE_MANIFEST = ROOT / "localdata/export/rule-baseline-prod-test/_manifest.json"
-DEFAULT_OUTPUT = ROOT / "localdata/export/rule-speed-prefilter-prod-test"
-DEFAULT_THRESHOLD = 60.0
+DEFAULT_REF_MANIFEST = ROOT / "localdata/export/rule-baseline-prod-test/_manifest.json"
+DEFAULT_OUTPUT = ROOT / "localdata/export/rule-baseline-local-prod-test"
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="前置速度过滤：只读 timeline 重算并导出 upload 目录")
-    parser.add_argument("--baseline-manifest", type=Path, default=DEFAULT_BASELINE_MANIFEST)
+    parser = argparse.ArgumentParser(description="本仓库 baseline 碰撞重算并导出 upload 目录")
+    parser.add_argument("--ref-manifest", type=Path, default=DEFAULT_REF_MANIFEST,
+                        help="参考 manifest（取 record 列表与抽帧 frame_idx）")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT)
-    parser.add_argument("--feature", default="lower_mean_speed")
-    parser.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD)
     parser.add_argument("--pose-frame-interval", type=int, default=POSE_FRAME_INTERVAL)
     parser.add_argument("--alarm-min", type=int, default=ALARM_MIN_CONSECUTIVE)
     parser.add_argument("--alarm-cooldown", type=int, default=ALARM_COOLDOWN)
@@ -57,24 +56,17 @@ def main() -> int:
     args = parser.parse_args()
 
     resolve_config_path(None)
-    baseline_manifest_path = args.baseline_manifest.resolve()
-    baseline_dir = baseline_manifest_path.parent
+    ref_manifest_path = args.ref_manifest.resolve()
+    ref_dir = ref_manifest_path.parent
     output_dir = args.output_dir.resolve()
 
-    baseline_manifest = load_baseline_manifest(baseline_manifest_path)
-    records = list(baseline_manifest.get("records") or [])
+    ref_manifest = load_baseline_manifest(ref_manifest_path)
+    records = list(ref_manifest.get("records") or [])
     if not records:
-        print("baseline manifest 无 records")
+        print("参考 manifest 无 records")
         return 2
 
-    speed_gate = SpeedGateConfig(
-        feature=args.feature,
-        max_threshold=args.threshold,
-        fail_open=True,
-    )
-
     recompute_kwargs = {
-        "speed_gate": speed_gate,
         "alarm_min_consecutive_frames": args.alarm_min,
         "alarm_cooldown_frames": args.alarm_cooldown,
     }
@@ -82,7 +74,7 @@ def main() -> int:
     if args.dry_run:
         print(f"将处理 {len(records)} 条记录（只读 timeline，不写回记录包）")
         print(f"输出: {output_dir}")
-        print(f"规则: 帧级 {speed_gate.feature} ≤ {speed_gate.max_threshold}")
+        print(f"引擎: LocalBaselineCollisionProcessor cooldown={args.alarm_cooldown}")
         return 0
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -91,9 +83,9 @@ def main() -> int:
         rid = str(entry.get("record_id") or "")
         res = process_record_upload_export(
             entry,
-            baseline_dir=baseline_dir,
+            baseline_dir=ref_dir,
             output_dir=output_dir,
-            recompute_fn=recompute_prefilter_upload_frames,
+            recompute_fn=recompute_baseline_upload_frames,
             recompute_kwargs=recompute_kwargs,
             pose_frame_interval=args.pose_frame_interval,
         )
@@ -104,19 +96,16 @@ def main() -> int:
             print(f"{rid}: ERROR {res.get('error')}")
 
     out_manifest = build_output_manifest(
-        baseline_manifest,
-        baseline_dir=baseline_dir,
+        ref_manifest,
+        baseline_dir=ref_dir,
         results=results,
         params_patch={
-            "collision_engine": "speed_gated_box_human_det_infer",
-            "speed_filter": {
-                "enabled": True,
-                "stage": "prefilter",
-                "feature": speed_gate.feature,
-                "max_threshold": speed_gate.max_threshold,
-                "fail_open": speed_gate.fail_open,
-                "writeback_timeline": False,
-            },
+            "baseline_type": "rule_local_recompute",
+            "collision_engine": "local_collision_processor",
+            "pose_frame_interval": args.pose_frame_interval,
+            "alarm_min_consecutive_frames": args.alarm_min,
+            "alarm_cooldown_frames": args.alarm_cooldown,
+            "writeback_timeline": False,
         },
     )
     (output_dir / MANIFEST_NAME).write_text(
