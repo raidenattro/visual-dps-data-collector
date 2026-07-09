@@ -781,12 +781,23 @@ function syncAccuracyCollisionUi() {
   }
 }
 
+function shouldSkipAccuracyUploadJson(baseName) {
+  const name = String(baseName || "").trim().toLowerCase();
+  if (!name.endsWith(".json")) return true;
+  if (name === "_manifest.json") return true;
+  if (name === "_accuracy_eval.json") return true;
+  if (name === "accuracy_report.json") return true;
+  if (name === "collision_variants_build_summary.json") return true;
+  if (name.startsWith("accuracy_report")) return true;
+  return false;
+}
+
 function countAccuracyUploadJsonFiles(fileList) {
   let n = 0;
   if (!fileList?.length) return 0;
   for (const f of fileList) {
     const base = (f.webkitRelativePath || f.name || "").split("/").pop();
-    if (base?.toLowerCase().endsWith(".json")) n += 1;
+    if (base && !shouldSkipAccuracyUploadJson(base)) n += 1;
   }
   return n;
 }
@@ -817,7 +828,7 @@ function appendAccuracyUploadFilesToForm(form) {
   let jsonCount = 0;
   for (const f of single || []) {
     const name = f.name || "";
-    if (!name.toLowerCase().endsWith(".json")) continue;
+    if (shouldSkipAccuracyUploadJson(name)) continue;
     form.append("files", f, name);
     jsonCount += 1;
   }
@@ -825,7 +836,7 @@ function appendAccuracyUploadFilesToForm(form) {
     const rel = f.webkitRelativePath || f.name;
     if (!rel) continue;
     const base = rel.split("/").pop() || rel;
-    if (!base.toLowerCase().endsWith(".json")) continue;
+    if (shouldSkipAccuracyUploadJson(base)) continue;
     form.append("files", f, rel);
     jsonCount += 1;
   }

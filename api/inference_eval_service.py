@@ -33,6 +33,46 @@ from api.eval_diagnostics import build_clip_diagnostics
 from api.eval_run_store import save_eval_run
 
 MANIFEST_FILE = "_manifest.json"
+INFERENCE_UPLOAD_SKIP_JSON_NAMES = frozenset({
+    MANIFEST_FILE,
+    "_accuracy_eval.json",
+    "accuracy_report.json",
+    "collision_variants_build_summary.json",
+})
+
+
+def is_skipped_inference_upload_json(filename: str) -> bool:
+    """是否为评估报告/索引等非 clip 推测 JSON。"""
+    base = Path(str(filename or "").replace("\\", "/")).name
+    lower = base.lower()
+    if not lower.endswith(".json"):
+        return True
+    if lower in INFERENCE_UPLOAD_SKIP_JSON_NAMES:
+        return True
+    if lower.startswith("accuracy_report"):
+        return True
+    return False
+
+
+def _json_file_starts_with_array(path: Path) -> bool:
+    """快速判断 JSON 根节点是否为数组（clip 推测格式）。"""
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            while True:
+                ch = f.read(1)
+                if not ch:
+                    return False
+                if not ch.isspace():
+                    return ch == "["
+    except OSError:
+        return False
+
+
+def is_inference_clip_json_file(path: Path) -> bool:
+    """是否为可评估的 clip 推测 JSON 文件。"""
+    if is_skipped_inference_upload_json(path.name):
+        return False
+    return _json_file_starts_with_array(path)
 
 
 def parse_inference_json(raw: Any) -> list[dict[str, Any]]:
@@ -52,8 +92,11 @@ def load_inference_json_file(path: Path) -> list[dict[str, Any]]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"无法读取 JSON: {exc}") from exc
-    return parse_inference_json(data)
+        raise ValueError(f"{path.name}: 无法读取 JSON: {exc}") from exc
+    try:
+        return parse_inference_json(data)
+    except ValueError as exc:
+        raise ValueError(f"{path.name}: {exc}") from exc
 
 
 def extract_record_id_from_frames(frames: list[dict[str, Any]]) -> str:
@@ -185,7 +228,7 @@ def discover_upload_json_files(
             return sorted(paths, key=lambda p: p.name.lower())
 
     return sorted(
-        (p for p in root.rglob("*.json") if p.name != MANIFEST_FILE),
+        (p for p in root.rglob("*.json") if is_inference_clip_json_file(p)),
         key=lambda p: str(p.relative_to(root)).lower(),
     )
 
@@ -444,6 +487,8 @@ def _save_uploaded_file_items(work_dir: Path, file_items: list[tuple[str, bytes]
         if name == MANIFEST_FILE:
             (work_dir / MANIFEST_FILE).write_bytes(content)
             continue
+        if is_skipped_inference_upload_json(name):
+            continue
         if not name.lower().endswith(".json"):
             continue
         target = work_dir / rel
@@ -491,6 +536,8 @@ __all__ = [
     "evaluate_upload_directory",
     "evaluate_uploaded_files",
     "extract_picking_alarms_from_frames",
+    "is_inference_clip_json_file",
+    "is_skipped_inference_upload_json",
     "load_upload_clips_from_dir",
     "parse_accuracy_tag_filter",
 ]

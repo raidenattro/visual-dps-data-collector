@@ -72,8 +72,10 @@ from api.accuracy_service import (
     recompute_camera_records_batch,
 )
 from api.inference_eval_service import (
+    MANIFEST_FILE,
     evaluate_upload_directory,
     evaluate_uploaded_files,
+    is_skipped_inference_upload_json,
 )
 from api.eval_run_store import load_eval_clip, load_eval_run, list_eval_runs
 from api.annotate_service import (
@@ -426,7 +428,13 @@ async def post_accuracy_evaluate_upload(
         content = await uf.read()
         if not content:
             continue
-        if not Path(name).name.lower().endswith(".json") and Path(name).name != "_manifest.json":
+        base_name = Path(name).name
+        if base_name == MANIFEST_FILE:
+            file_items.append((name, content))
+            continue
+        if is_skipped_inference_upload_json(base_name):
+            continue
+        if not base_name.lower().endswith(".json"):
             continue
         file_items.append((name, content))
 
