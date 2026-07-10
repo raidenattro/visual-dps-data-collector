@@ -1,0 +1,636 @@
+{
+  "generated_at": "2026-07-10T05:56:30.076382+00:00",
+  "prepared_count": 28,
+  "params": {
+    "pose_frame_interval": 2,
+    "alarm_min_consecutive_frames": 3,
+    "alarm_cooldown_frames": 0,
+    "lower_threshold": 60.0
+  },
+  "limb_discrimination": {
+    "wrist_max_speed": {
+      "gt_p50": 21.03,
+      "fa_p50": 58.321,
+      "gt_n": 4395,
+      "fa_n": 437
+    },
+    "upper_mean_speed": {
+      "gt_p50": 15.133,
+      "fa_p50": 39.67,
+      "gt_n": 4480,
+      "fa_n": 438
+    },
+    "lower_mean_speed": {
+      "gt_p50": 10.13,
+      "fa_p50": 23.162,
+      "gt_n": 4611,
+      "fa_n": 439
+    }
+  },
+  "local_baseline": {
+    "clip_count": 28,
+    "evaluated": 28,
+    "skipped": 0,
+    "errors": 0,
+    "excluded": 0,
+    "tag_filtered": 0,
+    "gt_segments": 156,
+    "detected": 147,
+    "missed": 9,
+    "false_alarms": 429,
+    "alarm_count": 1955,
+    "recall": 0.9423,
+    "miss_rate": 0.0577,
+    "precision_proxy": 0.2552
+  },
+  "baseline_lower_only": {
+    "clip_count": 28,
+    "evaluated": 28,
+    "skipped": 0,
+    "errors": 0,
+    "excluded": 0,
+    "tag_filtered": 0,
+    "gt_segments": 156,
+    "detected": 142,
+    "missed": 14,
+    "false_alarms": 287,
+    "alarm_count": 1582,
+    "recall": 0.9103,
+    "miss_rate": 0.0897,
+    "precision_proxy": 0.331
+  },
+  "results": [
+    {
+      "name": "baseline_lower_only",
+      "label": "lower>60.0（无豁免）",
+      "gate": {
+        "feature": "lower_mean_speed",
+        "max_threshold": 60.0,
+        "wrist_exempt_max_threshold": null,
+        "upper_exempt_max_threshold": null
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 142,
+        "missed": 14,
+        "false_alarms": 287,
+        "alarm_count": 1582,
+        "recall": 0.9103,
+        "miss_rate": 0.0897,
+        "precision_proxy": 0.331
+      }
+    },
+    {
+      "name": "wrist_exempt_30",
+      "label": "lower≤60.0 + wrist豁免≤30",
+      "gate": {
+        "feature": "lower_mean_speed",
+        "max_threshold": 60.0,
+        "wrist_exempt_max_threshold": 30,
+        "upper_exempt_max_threshold": null
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 142,
+        "missed": 14,
+        "false_alarms": 298,
+        "alarm_count": 1618,
+        "recall": 0.9103,
+        "miss_rate": 0.0897,
+        "precision_proxy": 0.3227
+      }
+    },
+    {
+      "name": "wrist_exempt_40",
+      "label": "lower≤60.0 + wrist豁免≤40",
+      "gate": {
+        "feature": "lower_mean_speed",
+        "max_threshold": 60.0,
+        "wrist_exempt_max_threshold": 40,
+        "upper_exempt_max_threshold": null
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 142,
+        "missed": 14,
+        "false_alarms": 302,
+        "alarm_count": 1640,
+        "recall": 0.9103,
+        "miss_rate": 0.0897,
+        "precision_proxy": 0.3198
+      }
+    },
+    {
+      "name": "wrist_exempt_50",
+      "label": "lower≤60.0 + wrist豁免≤50",
+      "gate": {
+        "feature": "lower_mean_speed",
+        "max_threshold": 60.0,
+        "wrist_exempt_max_threshold": 50,
+        "upper_exempt_max_threshold": null
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 142,
+        "missed": 14,
+        "false_alarms": 303,
+        "alarm_count": 1656,
+        "recall": 0.9103,
+        "miss_rate": 0.0897,
+        "precision_proxy": 0.3191
+      }
+    },
+    {
+      "name": "wrist_exempt_60",
+      "label": "lower≤60.0 + wrist豁免≤60",
+      "gate": {
+        "feature": "lower_mean_speed",
+        "max_threshold": 60.0,
+        "wrist_exempt_max_threshold": 60,
+        "upper_exempt_max_threshold": null
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 142,
+        "missed": 14,
+        "false_alarms": 305,
+        "alarm_count": 1668,
+        "recall": 0.9103,
+        "miss_rate": 0.0897,
+        "precision_proxy": 0.3177
+      }
+    },
+    {
+      "name": "wrist_exempt_80",
+      "label": "lower≤60.0 + wrist豁免≤80",
+      "gate": {
+        "feature": "lower_mean_speed",
+        "max_threshold": 60.0,
+        "wrist_exempt_max_threshold": 80,
+        "upper_exempt_max_threshold": null
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 142,
+        "missed": 14,
+        "false_alarms": 317,
+        "alarm_count": 1707,
+        "recall": 0.9103,
+        "miss_rate": 0.0897,
+        "precision_proxy": 0.3094
+      }
+    },
+    {
+      "name": "wrist_exempt_100",
+      "label": "lower≤60.0 + wrist豁免≤100",
+      "gate": {
+        "feature": "lower_mean_speed",
+        "max_threshold": 60.0,
+        "wrist_exempt_max_threshold": 100,
+        "upper_exempt_max_threshold": null
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 143,
+        "missed": 13,
+        "false_alarms": 324,
+        "alarm_count": 1738,
+        "recall": 0.9167,
+        "miss_rate": 0.0833,
+        "precision_proxy": 0.3062
+      }
+    },
+    {
+      "name": "upper_exempt_30",
+      "label": "lower≤60.0 + upper豁免≤30",
+      "gate": {
+        "feature": "lower_mean_speed",
+        "max_threshold": 60.0,
+        "wrist_exempt_max_threshold": null,
+        "upper_exempt_max_threshold": 30
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 142,
+        "missed": 14,
+        "false_alarms": 298,
+        "alarm_count": 1619,
+        "recall": 0.9103,
+        "miss_rate": 0.0897,
+        "precision_proxy": 0.3227
+      }
+    },
+    {
+      "name": "upper_exempt_40",
+      "label": "lower≤60.0 + upper豁免≤40",
+      "gate": {
+        "feature": "lower_mean_speed",
+        "max_threshold": 60.0,
+        "wrist_exempt_max_threshold": null,
+        "upper_exempt_max_threshold": 40
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 142,
+        "missed": 14,
+        "false_alarms": 299,
+        "alarm_count": 1646,
+        "recall": 0.9103,
+        "miss_rate": 0.0897,
+        "precision_proxy": 0.322
+      }
+    },
+    {
+      "name": "upper_exempt_50",
+      "label": "lower≤60.0 + upper豁免≤50",
+      "gate": {
+        "feature": "lower_mean_speed",
+        "max_threshold": 60.0,
+        "wrist_exempt_max_threshold": null,
+        "upper_exempt_max_threshold": 50
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 142,
+        "missed": 14,
+        "false_alarms": 300,
+        "alarm_count": 1672,
+        "recall": 0.9103,
+        "miss_rate": 0.0897,
+        "precision_proxy": 0.3213
+      }
+    },
+    {
+      "name": "upper_exempt_60",
+      "label": "lower≤60.0 + upper豁免≤60",
+      "gate": {
+        "feature": "lower_mean_speed",
+        "max_threshold": 60.0,
+        "wrist_exempt_max_threshold": null,
+        "upper_exempt_max_threshold": 60
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 143,
+        "missed": 13,
+        "false_alarms": 307,
+        "alarm_count": 1698,
+        "recall": 0.9167,
+        "miss_rate": 0.0833,
+        "precision_proxy": 0.3178
+      }
+    },
+    {
+      "name": "upper_exempt_80",
+      "label": "lower≤60.0 + upper豁免≤80",
+      "gate": {
+        "feature": "lower_mean_speed",
+        "max_threshold": 60.0,
+        "wrist_exempt_max_threshold": null,
+        "upper_exempt_max_threshold": 80
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 143,
+        "missed": 13,
+        "false_alarms": 323,
+        "alarm_count": 1757,
+        "recall": 0.9167,
+        "miss_rate": 0.0833,
+        "precision_proxy": 0.3069
+      }
+    },
+    {
+      "name": "upper_exempt_100",
+      "label": "lower≤60.0 + upper豁免≤100",
+      "gate": {
+        "feature": "lower_mean_speed",
+        "max_threshold": 60.0,
+        "wrist_exempt_max_threshold": null,
+        "upper_exempt_max_threshold": 100
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 144,
+        "missed": 12,
+        "false_alarms": 343,
+        "alarm_count": 1800,
+        "recall": 0.9231,
+        "miss_rate": 0.0769,
+        "precision_proxy": 0.2957
+      }
+    },
+    {
+      "name": "both_exempt_40",
+      "label": "lower≤60.0 + wrist豁免≤40 + upper豁免≤40",
+      "gate": {
+        "feature": "lower_mean_speed",
+        "max_threshold": 60.0,
+        "wrist_exempt_max_threshold": 40,
+        "upper_exempt_max_threshold": 40
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 142,
+        "missed": 14,
+        "false_alarms": 302,
+        "alarm_count": 1667,
+        "recall": 0.9103,
+        "miss_rate": 0.0897,
+        "precision_proxy": 0.3198
+      }
+    },
+    {
+      "name": "both_exempt_50",
+      "label": "lower≤60.0 + wrist豁免≤50 + upper豁免≤50",
+      "gate": {
+        "feature": "lower_mean_speed",
+        "max_threshold": 60.0,
+        "wrist_exempt_max_threshold": 50,
+        "upper_exempt_max_threshold": 50
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 142,
+        "missed": 14,
+        "false_alarms": 303,
+        "alarm_count": 1694,
+        "recall": 0.9103,
+        "miss_rate": 0.0897,
+        "precision_proxy": 0.3191
+      }
+    },
+    {
+      "name": "both_exempt_60",
+      "label": "lower≤60.0 + wrist豁免≤60 + upper豁免≤60",
+      "gate": {
+        "feature": "lower_mean_speed",
+        "max_threshold": 60.0,
+        "wrist_exempt_max_threshold": 60,
+        "upper_exempt_max_threshold": 60
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 143,
+        "missed": 13,
+        "false_alarms": 310,
+        "alarm_count": 1712,
+        "recall": 0.9167,
+        "miss_rate": 0.0833,
+        "precision_proxy": 0.3157
+      }
+    },
+    {
+      "name": "both_exempt_80",
+      "label": "lower≤60.0 + wrist豁免≤80 + upper豁免≤80",
+      "gate": {
+        "feature": "lower_mean_speed",
+        "max_threshold": 60.0,
+        "wrist_exempt_max_threshold": 80,
+        "upper_exempt_max_threshold": 80
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 143,
+        "missed": 13,
+        "false_alarms": 330,
+        "alarm_count": 1764,
+        "recall": 0.9167,
+        "miss_rate": 0.0833,
+        "precision_proxy": 0.3023
+      }
+    }
+  ],
+  "recommendation": "推荐：**lower≤60.0 + upper豁免≤100** — TP=144 FP=343 召回=0.9231",
+  "squat_watch": [
+    {
+      "upload_file": "clip_0009_start_00-37-59_rtmpose_m.json",
+      "label": "lower>60.0（无豁免）",
+      "missed_segments": [
+        {
+          "frame_start": 91,
+          "frame_end": 111,
+          "gt_tokens": [
+            "Box_3079"
+          ],
+          "seek_frame": 91,
+          "kind": "fn",
+          "label": "漏报 · Box_3079 · 帧 91–111"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0009_start_00-37-59_rtmpose_m.json",
+      "label": "lower≤60.0 + upper豁免≤100",
+      "missed_segments": [
+        {
+          "frame_start": 91,
+          "frame_end": 111,
+          "gt_tokens": [
+            "Box_3079"
+          ],
+          "seek_frame": 91,
+          "kind": "fn",
+          "label": "漏报 · Box_3079 · 帧 91–111"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0013_start_00-42-48_rtmpose_m.json",
+      "label": "lower>60.0（无豁免）",
+      "missed_segments": [
+        {
+          "frame_start": 109,
+          "frame_end": 131,
+          "gt_tokens": [
+            "Box_3100"
+          ],
+          "seek_frame": 109,
+          "kind": "fn",
+          "label": "漏报 · Box_3100 · 帧 109–131"
+        },
+        {
+          "frame_start": 159,
+          "frame_end": 169,
+          "gt_tokens": [
+            "Box_3105"
+          ],
+          "seek_frame": 159,
+          "kind": "fn",
+          "label": "漏报 · Box_3105 · 帧 159–169"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0013_start_00-42-48_rtmpose_m.json",
+      "label": "lower≤60.0 + upper豁免≤100",
+      "missed_segments": [
+        {
+          "frame_start": 109,
+          "frame_end": 131,
+          "gt_tokens": [
+            "Box_3100"
+          ],
+          "seek_frame": 109,
+          "kind": "fn",
+          "label": "漏报 · Box_3100 · 帧 109–131"
+        },
+        {
+          "frame_start": 159,
+          "frame_end": 169,
+          "gt_tokens": [
+            "Box_3105"
+          ],
+          "seek_frame": 159,
+          "kind": "fn",
+          "label": "漏报 · Box_3105 · 帧 159–169"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0020_start_00-48-44_rtmpose_m.json",
+      "label": "lower>60.0（无豁免）",
+      "missed_segments": [
+        {
+          "frame_start": 79,
+          "frame_end": 82,
+          "gt_tokens": [
+            "Box_3018"
+          ],
+          "seek_frame": 79,
+          "kind": "fn",
+          "label": "漏报 · Box_3018 · 帧 79–82"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0020_start_00-48-44_rtmpose_m.json",
+      "label": "lower≤60.0 + upper豁免≤100",
+      "missed_segments": []
+    },
+    {
+      "upload_file": "clip_0013_start_00-29-53_rtmpose_m.json",
+      "label": "lower>60.0（无豁免）",
+      "missed_segments": [
+        {
+          "frame_start": 2244,
+          "frame_end": 2254,
+          "gt_tokens": [
+            "Box_4014"
+          ],
+          "seek_frame": 2244,
+          "kind": "fn",
+          "label": "漏报 · Box_4014 · 帧 2244–2254"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0013_start_00-29-53_rtmpose_m.json",
+      "label": "lower≤60.0 + upper豁免≤100",
+      "missed_segments": []
+    }
+  ],
+  "conclusion": "手腕/上肢豁免有效：漏报 14→12，FP 287→343。取货停留时上肢低速可作为下肢高速的豁免条件。"
+}

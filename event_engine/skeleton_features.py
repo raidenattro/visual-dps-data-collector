@@ -401,6 +401,8 @@ class AggregateVelocitySnapshot:
     knee_ankle_mean_speed: float | None = None
     torso_speed: float | None = None
     body_mean_speed: float | None = None
+    upper_mean_speed: float | None = None
+    wrist_max_speed: float | None = None
     velocity_valid: bool = False
 
 
@@ -521,18 +523,25 @@ class IncrementalAggregateVelocityTracker:
 
         lower_speeds = [kpt_speeds.get(i) for i in LOWER_KPT_INDICES]
         knee_ankle_speeds = [kpt_speeds.get(i) for i in KNEE_ANKLE_KPT_INDICES]
+        upper_speeds = [kpt_speeds.get(i) for i in UPPER_KPT_INDICES]
+        wrist_speeds = [kpt_speeds.get(i) for i in WRIST_INDICES]
         all_speeds = [kpt_speeds.get(i) for i in range(KPT_COUNT)]
         lower_mean = _mean_of_speeds(lower_speeds)
         knee_ankle_mean = _mean_of_speeds(knee_ankle_speeds)
+        upper_mean = _mean_of_speeds(upper_speeds)
+        wrist_max = _max_of_speeds(wrist_speeds)
         body_mean = _mean_of_speeds(all_speeds)
         has_lower = lower_mean is not None
         has_knee_ankle = knee_ankle_mean is not None
+        has_upper = upper_mean is not None or wrist_max is not None
         return AggregateVelocitySnapshot(
             lower_mean_speed=round(lower_mean, 3) if lower_mean is not None else None,
             knee_ankle_mean_speed=round(knee_ankle_mean, 3) if knee_ankle_mean is not None else None,
             torso_speed=round(torso_speed, 3) if torso_speed is not None else None,
             body_mean_speed=round(body_mean, 3) if body_mean is not None else None,
-            velocity_valid=has_lower or has_knee_ankle or torso_valid,
+            upper_mean_speed=round(upper_mean, 3) if upper_mean is not None else None,
+            wrist_max_speed=round(wrist_max, 3) if wrist_max is not None else None,
+            velocity_valid=has_lower or has_knee_ankle or torso_valid or has_upper,
         )
 
 

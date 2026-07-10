@@ -17,6 +17,9 @@ class SpeedGateConfig:
     feature: str = "lower_mean_speed"
     max_threshold: float = 60.0
     fail_open: bool = True
+    # 取货时手腕/上肢停留较慢：下肢高速时若上肢也慢则豁免门控（仍做手腕进框检测）
+    wrist_exempt_max_threshold: float | None = None
+    upper_exempt_max_threshold: float | None = None
 
 
 def _speed_value(snapshot: AggregateVelocitySnapshot, feature: str) -> float | None:
@@ -28,7 +31,26 @@ def _speed_value(snapshot: AggregateVelocitySnapshot, feature: str) -> float | N
         return snapshot.torso_speed
     if feature == "body_mean_speed":
         return snapshot.body_mean_speed
+    if feature == "upper_mean_speed":
+        return snapshot.upper_mean_speed
+    if feature == "wrist_max_speed":
+        return snapshot.wrist_max_speed
     return snapshot.lower_mean_speed
+
+
+def _picking_limb_exempt(snapshot: AggregateVelocitySnapshot, *, config: SpeedGateConfig) -> bool:
+    """上肢/手腕低速 → 更像取货停留，豁免下肢高速门控。"""
+    wrist_thr = config.wrist_exempt_max_threshold
+    if wrist_thr is not None:
+        wrist = snapshot.wrist_max_speed
+        if wrist is not None and float(wrist) <= float(wrist_thr):
+            return True
+    upper_thr = config.upper_exempt_max_threshold
+    if upper_thr is not None:
+        upper = snapshot.upper_mean_speed
+        if upper is not None and float(upper) <= float(upper_thr):
+            return True
+    return False
 
 
 def speed_gate_blocks(
@@ -41,9 +63,15 @@ def speed_gate_blocks(
     if val is None:
         return not config.fail_open
     try:
-        return float(val) > float(config.max_threshold)
+        lower_fast = float(val) > float(config.max_threshold)
     except (TypeError, ValueError):
         return not config.fail_open
+    if not lower_fast:
+        return False
+    # 下肢高速：若手腕/肩肘腕平均速度低（取货停留），不 block
+    if _picking_limb_exempt(snapshot, config=config):
+        return False
+    return True
 
 
 class LocalBaselineCollisionProcessor(CollisionProcessor):

@@ -109,6 +109,9 @@ def main() -> int:
         results=results,
         params_patch={
             "collision_engine": "speed_gated_box_human_det_infer",
+            "pose_frame_interval": args.pose_frame_interval,
+            "alarm_min_consecutive_frames": args.alarm_min,
+            "alarm_cooldown_frames": args.alarm_cooldown,
             "speed_filter": {
                 "enabled": True,
                 "stage": "prefilter",

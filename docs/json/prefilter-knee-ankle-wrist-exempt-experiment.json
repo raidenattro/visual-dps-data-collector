@@ -1,0 +1,849 @@
+{
+  "generated_at": "2026-07-10T06:24:29.038838+00:00",
+  "prepared_count": 28,
+  "params": {
+    "pose_frame_interval": 2,
+    "alarm_min_consecutive_frames": 3,
+    "alarm_cooldown_frames": 0,
+    "gate_feature": "knee_ankle_mean_speed"
+  },
+  "local_baseline": {
+    "clip_count": 28,
+    "evaluated": 28,
+    "skipped": 0,
+    "errors": 0,
+    "excluded": 0,
+    "tag_filtered": 0,
+    "gt_segments": 156,
+    "detected": 147,
+    "missed": 9,
+    "false_alarms": 429,
+    "alarm_count": 1955,
+    "recall": 0.9423,
+    "miss_rate": 0.0577,
+    "precision_proxy": 0.2552
+  },
+  "knee_ankle_threshold_grid": [
+    {
+      "max_threshold": 30,
+      "detected": 133,
+      "missed": 23,
+      "false_alarms": 198,
+      "recall": 0.8526,
+      "precision_proxy": 0.4018
+    },
+    {
+      "max_threshold": 40,
+      "detected": 140,
+      "missed": 16,
+      "false_alarms": 229,
+      "recall": 0.8974,
+      "precision_proxy": 0.3794
+    },
+    {
+      "max_threshold": 50,
+      "detected": 142,
+      "missed": 14,
+      "false_alarms": 261,
+      "recall": 0.9103,
+      "precision_proxy": 0.3524
+    },
+    {
+      "max_threshold": 55,
+      "detected": 143,
+      "missed": 13,
+      "false_alarms": 270,
+      "recall": 0.9167,
+      "precision_proxy": 0.3462
+    },
+    {
+      "max_threshold": 60,
+      "detected": 143,
+      "missed": 13,
+      "false_alarms": 286,
+      "recall": 0.9167,
+      "precision_proxy": 0.3333
+    },
+    {
+      "max_threshold": 65,
+      "detected": 144,
+      "missed": 12,
+      "false_alarms": 298,
+      "recall": 0.9231,
+      "precision_proxy": 0.3258
+    },
+    {
+      "max_threshold": 70,
+      "detected": 145,
+      "missed": 11,
+      "false_alarms": 310,
+      "recall": 0.9295,
+      "precision_proxy": 0.3187
+    },
+    {
+      "max_threshold": 75,
+      "detected": 145,
+      "missed": 11,
+      "false_alarms": 313,
+      "recall": 0.9295,
+      "precision_proxy": 0.3166
+    },
+    {
+      "max_threshold": 80,
+      "detected": 145,
+      "missed": 11,
+      "false_alarms": 319,
+      "recall": 0.9295,
+      "precision_proxy": 0.3125
+    },
+    {
+      "max_threshold": 90,
+      "detected": 145,
+      "missed": 11,
+      "false_alarms": 331,
+      "recall": 0.9295,
+      "precision_proxy": 0.3046
+    },
+    {
+      "max_threshold": 100,
+      "detected": 145,
+      "missed": 11,
+      "false_alarms": 342,
+      "recall": 0.9295,
+      "precision_proxy": 0.2977
+    },
+    {
+      "max_threshold": 110,
+      "detected": 146,
+      "missed": 10,
+      "false_alarms": 349,
+      "recall": 0.9359,
+      "precision_proxy": 0.2949
+    },
+    {
+      "max_threshold": 120,
+      "detected": 146,
+      "missed": 10,
+      "false_alarms": 363,
+      "recall": 0.9359,
+      "precision_proxy": 0.2868
+    }
+  ],
+  "threshold_selection": {
+    "conservative_recall90_min_fp": {
+      "max_threshold": 50,
+      "detected": 142,
+      "missed": 14,
+      "false_alarms": 261,
+      "recall": 0.9103,
+      "precision_proxy": 0.3524
+    },
+    "balanced_recall915_min_fp": {
+      "max_threshold": 55,
+      "detected": 143,
+      "missed": 13,
+      "false_alarms": 270,
+      "recall": 0.9167,
+      "precision_proxy": 0.3462
+    },
+    "recall92_min_fp": {
+      "max_threshold": 65,
+      "detected": 144,
+      "missed": 12,
+      "false_alarms": 298,
+      "recall": 0.9231,
+      "precision_proxy": 0.3258
+    },
+    "max_recall_min_fp": {
+      "max_threshold": 110,
+      "detected": 146,
+      "missed": 10,
+      "false_alarms": 349,
+      "recall": 0.9359,
+      "precision_proxy": 0.2949
+    },
+    "pareto_frontier": [
+      {
+        "max_threshold": 30,
+        "detected": 133,
+        "missed": 23,
+        "false_alarms": 198,
+        "recall": 0.8526,
+        "precision_proxy": 0.4018
+      },
+      {
+        "max_threshold": 40,
+        "detected": 140,
+        "missed": 16,
+        "false_alarms": 229,
+        "recall": 0.8974,
+        "precision_proxy": 0.3794
+      },
+      {
+        "max_threshold": 50,
+        "detected": 142,
+        "missed": 14,
+        "false_alarms": 261,
+        "recall": 0.9103,
+        "precision_proxy": 0.3524
+      },
+      {
+        "max_threshold": 55,
+        "detected": 143,
+        "missed": 13,
+        "false_alarms": 270,
+        "recall": 0.9167,
+        "precision_proxy": 0.3462
+      },
+      {
+        "max_threshold": 65,
+        "detected": 144,
+        "missed": 12,
+        "false_alarms": 298,
+        "recall": 0.9231,
+        "precision_proxy": 0.3258
+      },
+      {
+        "max_threshold": 70,
+        "detected": 145,
+        "missed": 11,
+        "false_alarms": 310,
+        "recall": 0.9295,
+        "precision_proxy": 0.3187
+      },
+      {
+        "max_threshold": 110,
+        "detected": 146,
+        "missed": 10,
+        "false_alarms": 349,
+        "recall": 0.9359,
+        "precision_proxy": 0.2949
+      }
+    ],
+    "selected": {
+      "max_threshold": 65,
+      "detected": 144,
+      "missed": 12,
+      "false_alarms": 298,
+      "recall": 0.9231,
+      "precision_proxy": 0.3258
+    },
+    "selected_threshold": 65.0,
+    "selection_criterion": "召回率≥92% 下 FP 最小；若无则依次降级 balanced(≥91.5%)/conservative(≥90%)"
+  },
+  "optimal_knee_ankle_threshold": 65.0,
+  "knee_ankle_only_at_optimal": {
+    "clip_count": 28,
+    "evaluated": 28,
+    "skipped": 0,
+    "errors": 0,
+    "excluded": 0,
+    "tag_filtered": 0,
+    "gt_segments": 156,
+    "detected": 144,
+    "missed": 12,
+    "false_alarms": 298,
+    "alarm_count": 1624,
+    "recall": 0.9231,
+    "miss_rate": 0.0769,
+    "precision_proxy": 0.3258
+  },
+  "exempt_results": [
+    {
+      "name": "knee_ankle_only",
+      "label": "膝踝>65.0（无豁免）",
+      "gate": {
+        "feature": "knee_ankle_mean_speed",
+        "max_threshold": 65.0,
+        "wrist_exempt_max_threshold": null,
+        "upper_exempt_max_threshold": null
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 144,
+        "missed": 12,
+        "false_alarms": 298,
+        "alarm_count": 1624,
+        "recall": 0.9231,
+        "miss_rate": 0.0769,
+        "precision_proxy": 0.3258
+      }
+    },
+    {
+      "name": "wrist_exempt_30",
+      "label": "膝踝≤65.0 + wrist豁免≤30",
+      "gate": {
+        "feature": "knee_ankle_mean_speed",
+        "max_threshold": 65.0,
+        "wrist_exempt_max_threshold": 30,
+        "upper_exempt_max_threshold": null
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 144,
+        "missed": 12,
+        "false_alarms": 306,
+        "alarm_count": 1656,
+        "recall": 0.9231,
+        "miss_rate": 0.0769,
+        "precision_proxy": 0.32
+      }
+    },
+    {
+      "name": "wrist_exempt_40",
+      "label": "膝踝≤65.0 + wrist豁免≤40",
+      "gate": {
+        "feature": "knee_ankle_mean_speed",
+        "max_threshold": 65.0,
+        "wrist_exempt_max_threshold": 40,
+        "upper_exempt_max_threshold": null
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 144,
+        "missed": 12,
+        "false_alarms": 310,
+        "alarm_count": 1668,
+        "recall": 0.9231,
+        "miss_rate": 0.0769,
+        "precision_proxy": 0.3172
+      }
+    },
+    {
+      "name": "wrist_exempt_50",
+      "label": "膝踝≤65.0 + wrist豁免≤50",
+      "gate": {
+        "feature": "knee_ankle_mean_speed",
+        "max_threshold": 65.0,
+        "wrist_exempt_max_threshold": 50,
+        "upper_exempt_max_threshold": null
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 144,
+        "missed": 12,
+        "false_alarms": 310,
+        "alarm_count": 1679,
+        "recall": 0.9231,
+        "miss_rate": 0.0769,
+        "precision_proxy": 0.3172
+      }
+    },
+    {
+      "name": "wrist_exempt_60",
+      "label": "膝踝≤65.0 + wrist豁免≤60",
+      "gate": {
+        "feature": "knee_ankle_mean_speed",
+        "max_threshold": 65.0,
+        "wrist_exempt_max_threshold": 60,
+        "upper_exempt_max_threshold": null
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 144,
+        "missed": 12,
+        "false_alarms": 314,
+        "alarm_count": 1700,
+        "recall": 0.9231,
+        "miss_rate": 0.0769,
+        "precision_proxy": 0.3144
+      }
+    },
+    {
+      "name": "wrist_exempt_80",
+      "label": "膝踝≤65.0 + wrist豁免≤80",
+      "gate": {
+        "feature": "knee_ankle_mean_speed",
+        "max_threshold": 65.0,
+        "wrist_exempt_max_threshold": 80,
+        "upper_exempt_max_threshold": null
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 144,
+        "missed": 12,
+        "false_alarms": 324,
+        "alarm_count": 1735,
+        "recall": 0.9231,
+        "miss_rate": 0.0769,
+        "precision_proxy": 0.3077
+      }
+    },
+    {
+      "name": "wrist_exempt_100",
+      "label": "膝踝≤65.0 + wrist豁免≤100",
+      "gate": {
+        "feature": "knee_ankle_mean_speed",
+        "max_threshold": 65.0,
+        "wrist_exempt_max_threshold": 100,
+        "upper_exempt_max_threshold": null
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 145,
+        "missed": 11,
+        "false_alarms": 332,
+        "alarm_count": 1762,
+        "recall": 0.9295,
+        "miss_rate": 0.0705,
+        "precision_proxy": 0.304
+      }
+    },
+    {
+      "name": "upper_exempt_30",
+      "label": "膝踝≤65.0 + upper豁免≤30",
+      "gate": {
+        "feature": "knee_ankle_mean_speed",
+        "max_threshold": 65.0,
+        "wrist_exempt_max_threshold": null,
+        "upper_exempt_max_threshold": 30
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 144,
+        "missed": 12,
+        "false_alarms": 309,
+        "alarm_count": 1663,
+        "recall": 0.9231,
+        "miss_rate": 0.0769,
+        "precision_proxy": 0.3179
+      }
+    },
+    {
+      "name": "upper_exempt_40",
+      "label": "膝踝≤65.0 + upper豁免≤40",
+      "gate": {
+        "feature": "knee_ankle_mean_speed",
+        "max_threshold": 65.0,
+        "wrist_exempt_max_threshold": null,
+        "upper_exempt_max_threshold": 40
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 144,
+        "missed": 12,
+        "false_alarms": 310,
+        "alarm_count": 1688,
+        "recall": 0.9231,
+        "miss_rate": 0.0769,
+        "precision_proxy": 0.3172
+      }
+    },
+    {
+      "name": "upper_exempt_50",
+      "label": "膝踝≤65.0 + upper豁免≤50",
+      "gate": {
+        "feature": "knee_ankle_mean_speed",
+        "max_threshold": 65.0,
+        "wrist_exempt_max_threshold": null,
+        "upper_exempt_max_threshold": 50
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 144,
+        "missed": 12,
+        "false_alarms": 312,
+        "alarm_count": 1722,
+        "recall": 0.9231,
+        "miss_rate": 0.0769,
+        "precision_proxy": 0.3158
+      }
+    },
+    {
+      "name": "upper_exempt_60",
+      "label": "膝踝≤65.0 + upper豁免≤60",
+      "gate": {
+        "feature": "knee_ankle_mean_speed",
+        "max_threshold": 65.0,
+        "wrist_exempt_max_threshold": null,
+        "upper_exempt_max_threshold": 60
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 145,
+        "missed": 11,
+        "false_alarms": 320,
+        "alarm_count": 1748,
+        "recall": 0.9295,
+        "miss_rate": 0.0705,
+        "precision_proxy": 0.3118
+      }
+    },
+    {
+      "name": "upper_exempt_80",
+      "label": "膝踝≤65.0 + upper豁免≤80",
+      "gate": {
+        "feature": "knee_ankle_mean_speed",
+        "max_threshold": 65.0,
+        "wrist_exempt_max_threshold": null,
+        "upper_exempt_max_threshold": 80
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 145,
+        "missed": 11,
+        "false_alarms": 341,
+        "alarm_count": 1796,
+        "recall": 0.9295,
+        "miss_rate": 0.0705,
+        "precision_proxy": 0.2984
+      }
+    },
+    {
+      "name": "upper_exempt_100",
+      "label": "膝踝≤65.0 + upper豁免≤100",
+      "gate": {
+        "feature": "knee_ankle_mean_speed",
+        "max_threshold": 65.0,
+        "wrist_exempt_max_threshold": null,
+        "upper_exempt_max_threshold": 100
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 146,
+        "missed": 10,
+        "false_alarms": 352,
+        "alarm_count": 1831,
+        "recall": 0.9359,
+        "miss_rate": 0.0641,
+        "precision_proxy": 0.2932
+      }
+    },
+    {
+      "name": "both_exempt_40",
+      "label": "膝踝≤65.0 + wrist豁免≤40 + upper豁免≤40",
+      "gate": {
+        "feature": "knee_ankle_mean_speed",
+        "max_threshold": 65.0,
+        "wrist_exempt_max_threshold": 40,
+        "upper_exempt_max_threshold": 40
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 144,
+        "missed": 12,
+        "false_alarms": 310,
+        "alarm_count": 1697,
+        "recall": 0.9231,
+        "miss_rate": 0.0769,
+        "precision_proxy": 0.3172
+      }
+    },
+    {
+      "name": "both_exempt_50",
+      "label": "膝踝≤65.0 + wrist豁免≤50 + upper豁免≤50",
+      "gate": {
+        "feature": "knee_ankle_mean_speed",
+        "max_threshold": 65.0,
+        "wrist_exempt_max_threshold": 50,
+        "upper_exempt_max_threshold": 50
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 144,
+        "missed": 12,
+        "false_alarms": 312,
+        "alarm_count": 1728,
+        "recall": 0.9231,
+        "miss_rate": 0.0769,
+        "precision_proxy": 0.3158
+      }
+    },
+    {
+      "name": "both_exempt_60",
+      "label": "膝踝≤65.0 + wrist豁免≤60 + upper豁免≤60",
+      "gate": {
+        "feature": "knee_ankle_mean_speed",
+        "max_threshold": 65.0,
+        "wrist_exempt_max_threshold": 60,
+        "upper_exempt_max_threshold": 60
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 145,
+        "missed": 11,
+        "false_alarms": 325,
+        "alarm_count": 1753,
+        "recall": 0.9295,
+        "miss_rate": 0.0705,
+        "precision_proxy": 0.3085
+      }
+    },
+    {
+      "name": "both_exempt_80",
+      "label": "膝踝≤65.0 + wrist豁免≤80 + upper豁免≤80",
+      "gate": {
+        "feature": "knee_ankle_mean_speed",
+        "max_threshold": 65.0,
+        "wrist_exempt_max_threshold": 80,
+        "upper_exempt_max_threshold": 80
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 145,
+        "missed": 11,
+        "false_alarms": 343,
+        "alarm_count": 1798,
+        "recall": 0.9295,
+        "miss_rate": 0.0705,
+        "precision_proxy": 0.2971
+      }
+    },
+    {
+      "name": "both_exempt_100",
+      "label": "膝踝≤65.0 + wrist豁免≤100 + upper豁免≤100",
+      "gate": {
+        "feature": "knee_ankle_mean_speed",
+        "max_threshold": 65.0,
+        "wrist_exempt_max_threshold": 100,
+        "upper_exempt_max_threshold": 100
+      },
+      "summary": {
+        "clip_count": 28,
+        "evaluated": 28,
+        "skipped": 0,
+        "errors": 0,
+        "excluded": 0,
+        "tag_filtered": 0,
+        "gt_segments": 156,
+        "detected": 146,
+        "missed": 10,
+        "false_alarms": 354,
+        "alarm_count": 1833,
+        "recall": 0.9359,
+        "miss_rate": 0.0641,
+        "precision_proxy": 0.292
+      }
+    }
+  ],
+  "best_exempt": {
+    "name": "upper_exempt_100",
+    "label": "膝踝≤65.0 + upper豁免≤100",
+    "gate": {
+      "feature": "knee_ankle_mean_speed",
+      "max_threshold": 65.0,
+      "wrist_exempt_max_threshold": null,
+      "upper_exempt_max_threshold": 100
+    },
+    "summary": {
+      "clip_count": 28,
+      "evaluated": 28,
+      "skipped": 0,
+      "errors": 0,
+      "excluded": 0,
+      "tag_filtered": 0,
+      "gt_segments": 156,
+      "detected": 146,
+      "missed": 10,
+      "false_alarms": 352,
+      "alarm_count": 1831,
+      "recall": 0.9359,
+      "miss_rate": 0.0641,
+      "precision_proxy": 0.2932
+    }
+  },
+  "squat_watch": [
+    {
+      "upload_file": "clip_0009_start_00-37-59_rtmpose_m.json",
+      "label": "膝踝>65.0（无豁免）",
+      "missed_segments": []
+    },
+    {
+      "upload_file": "clip_0009_start_00-37-59_rtmpose_m.json",
+      "label": "膝踝≤65.0 + upper豁免≤100",
+      "missed_segments": []
+    },
+    {
+      "upload_file": "clip_0013_start_00-42-48_rtmpose_m.json",
+      "label": "膝踝>65.0（无豁免）",
+      "missed_segments": [
+        {
+          "frame_start": 159,
+          "frame_end": 169,
+          "gt_tokens": [
+            "Box_3105"
+          ],
+          "seek_frame": 159,
+          "kind": "fn",
+          "label": "漏报 · Box_3105 · 帧 159–169"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0013_start_00-42-48_rtmpose_m.json",
+      "label": "膝踝≤65.0 + upper豁免≤100",
+      "missed_segments": [
+        {
+          "frame_start": 159,
+          "frame_end": 169,
+          "gt_tokens": [
+            "Box_3105"
+          ],
+          "seek_frame": 159,
+          "kind": "fn",
+          "label": "漏报 · Box_3105 · 帧 159–169"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0020_start_00-48-44_rtmpose_m.json",
+      "label": "膝踝>65.0（无豁免）",
+      "missed_segments": [
+        {
+          "frame_start": 79,
+          "frame_end": 82,
+          "gt_tokens": [
+            "Box_3018"
+          ],
+          "seek_frame": 79,
+          "kind": "fn",
+          "label": "漏报 · Box_3018 · 帧 79–82"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0020_start_00-48-44_rtmpose_m.json",
+      "label": "膝踝≤65.0 + upper豁免≤100",
+      "missed_segments": []
+    },
+    {
+      "upload_file": "clip_0013_start_00-29-53_rtmpose_m.json",
+      "label": "膝踝>65.0（无豁免）",
+      "missed_segments": [
+        {
+          "frame_start": 2244,
+          "frame_end": 2254,
+          "gt_tokens": [
+            "Box_4014"
+          ],
+          "seek_frame": 2244,
+          "kind": "fn",
+          "label": "漏报 · Box_4014 · 帧 2244–2254"
+        }
+      ]
+    },
+    {
+      "upload_file": "clip_0013_start_00-29-53_rtmpose_m.json",
+      "label": "膝踝≤65.0 + upper豁免≤100",
+      "missed_segments": []
+    }
+  ],
+  "recommendation": "膝踝最佳阈 **65.0**；豁免推荐 **膝踝≤65.0 + upper豁免≤100** — TP=146 FP=352 FN=10 召回=0.9359",
+  "conclusion": "膝踝阈从 60 调整为 **65.0**（召回≥92% 下 FP 最小）。无豁免：TP=144 FP=298 漏报=12。 叠加豁免后 TP=146 FP=352 漏报=10。历史膝踝@60+upper豁免100为 145/349/11@92.95%。",
+  "historical_reference": {
+    "knee_ankle_60_no_exempt": {
+      "tp": 143,
+      "fp": 286,
+      "missed": 13,
+      "recall": 0.9167
+    },
+    "knee_ankle_60_upper_exempt_100": {
+      "tp": 145,
+      "fp": 349,
+      "missed": 11,
+      "recall": 0.9295
+    }
+  }
+}
