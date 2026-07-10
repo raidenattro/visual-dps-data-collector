@@ -22,6 +22,8 @@ class SpeedGateConfig:
 def _speed_value(snapshot: AggregateVelocitySnapshot, feature: str) -> float | None:
     if feature == "lower_mean_speed":
         return snapshot.lower_mean_speed
+    if feature == "knee_ankle_mean_speed":
+        return snapshot.knee_ankle_mean_speed
     if feature == "torso_speed":
         return snapshot.torso_speed
     if feature == "body_mean_speed":

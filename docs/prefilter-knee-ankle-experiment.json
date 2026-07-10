@@ -1,0 +1,843 @@
+{
+  "generated_at": "2026-07-10T05:16:08.072081+00:00",
+  "record_count": 28,
+  "prepared_count": 28,
+  "errors": [],
+  "params": {
+    "pose_frame_interval": 2,
+    "alarm_min_consecutive_frames": 3,
+    "alarm_cooldown_frames": 0,
+    "default_threshold": 60.0,
+    "baseline_dir": "D:\\work\\workspace\\git-repo\\visual-dps-datacollect\\localdata\\export\\rule-baseline-local-prod-test",
+    "speed_filter_stage": "prefilter",
+    "writeback_timeline": false
+  },
+  "feature_definitions": {
+    "lower_mean_speed": "髋+膝+踝 6 点算术平均",
+    "knee_ankle_mean_speed": "膝+踝 4 点算术平均（不含髋）"
+  },
+  "local_baseline_summary": {
+    "clip_count": 28,
+    "evaluated": 28,
+    "skipped": 0,
+    "errors": 0,
+    "excluded": 0,
+    "tag_filtered": 0,
+    "gt_segments": 156,
+    "detected": 147,
+    "missed": 9,
+    "false_alarms": 429,
+    "alarm_count": 1955,
+    "recall": 0.9423,
+    "miss_rate": 0.0577,
+    "precision_proxy": 0.2552
+  },
+  "frame_discrimination": {
+    "lower_mean_speed": {
+      "gt_overlap": {
+        "count": 4611,
+        "p50": 10.13
+      },
+      "false_alarm": {
+        "count": 439,
+        "p50": 23.162
+      },
+      "frame_threshold_scan": [
+        {
+          "threshold": 10,
+          "precision": 0.9448,
+          "recall": 0.4975,
+          "f1": 0.6518,
+          "tp": 2294,
+          "fp": 134,
+          "fn": 2317
+        },
+        {
+          "threshold": 20,
+          "precision": 0.9387,
+          "recall": 0.6842,
+          "f1": 0.7915,
+          "tp": 3155,
+          "fp": 206,
+          "fn": 1456
+        },
+        {
+          "threshold": 30,
+          "precision": 0.9339,
+          "recall": 0.7938,
+          "f1": 0.8581,
+          "tp": 3660,
+          "fp": 259,
+          "fn": 951
+        },
+        {
+          "threshold": 40,
+          "precision": 0.9325,
+          "recall": 0.8653,
+          "f1": 0.8976,
+          "tp": 3990,
+          "fp": 289,
+          "fn": 621
+        },
+        {
+          "threshold": 50,
+          "precision": 0.9285,
+          "recall": 0.9046,
+          "f1": 0.9164,
+          "tp": 4171,
+          "fp": 321,
+          "fn": 440
+        },
+        {
+          "threshold": 60,
+          "precision": 0.9259,
+          "recall": 0.9345,
+          "f1": 0.9302,
+          "tp": 4309,
+          "fp": 345,
+          "fn": 302
+        },
+        {
+          "threshold": 80,
+          "precision": 0.922,
+          "recall": 0.9644,
+          "f1": 0.9428,
+          "tp": 4447,
+          "fp": 376,
+          "fn": 164
+        },
+        {
+          "threshold": 100,
+          "precision": 0.9189,
+          "recall": 0.98,
+          "f1": 0.9485,
+          "tp": 4519,
+          "fp": 399,
+          "fn": 92
+        },
+        {
+          "threshold": 120,
+          "precision": 0.9173,
+          "recall": 0.9887,
+          "f1": 0.9517,
+          "tp": 4559,
+          "fp": 411,
+          "fn": 52
+        },
+        {
+          "threshold": 150,
+          "precision": 0.915,
+          "recall": 0.9939,
+          "f1": 0.9528,
+          "tp": 4583,
+          "fp": 426,
+          "fn": 28
+        }
+      ]
+    },
+    "knee_ankle_mean_speed": {
+      "gt_overlap": {
+        "count": 4598,
+        "p50": 8.748
+      },
+      "false_alarm": {
+        "count": 438,
+        "p50": 20.332
+      },
+      "frame_threshold_scan": [
+        {
+          "threshold": 10,
+          "precision": 0.9417,
+          "recall": 0.5378,
+          "f1": 0.6847,
+          "tp": 2473,
+          "fp": 153,
+          "fn": 2125
+        },
+        {
+          "threshold": 20,
+          "precision": 0.9376,
+          "recall": 0.7155,
+          "f1": 0.8116,
+          "tp": 3290,
+          "fp": 219,
+          "fn": 1308
+        },
+        {
+          "threshold": 30,
+          "precision": 0.9324,
+          "recall": 0.8106,
+          "f1": 0.8672,
+          "tp": 3727,
+          "fp": 270,
+          "fn": 871
+        },
+        {
+          "threshold": 40,
+          "precision": 0.9302,
+          "recall": 0.8756,
+          "f1": 0.9021,
+          "tp": 4026,
+          "fp": 302,
+          "fn": 572
+        },
+        {
+          "threshold": 50,
+          "precision": 0.9267,
+          "recall": 0.9104,
+          "f1": 0.9185,
+          "tp": 4186,
+          "fp": 331,
+          "fn": 412
+        },
+        {
+          "threshold": 60,
+          "precision": 0.9244,
+          "recall": 0.9334,
+          "f1": 0.9289,
+          "tp": 4292,
+          "fp": 351,
+          "fn": 306
+        },
+        {
+          "threshold": 80,
+          "precision": 0.9213,
+          "recall": 0.9624,
+          "f1": 0.9414,
+          "tp": 4425,
+          "fp": 378,
+          "fn": 173
+        },
+        {
+          "threshold": 100,
+          "precision": 0.9189,
+          "recall": 0.978,
+          "f1": 0.9475,
+          "tp": 4497,
+          "fp": 397,
+          "fn": 101
+        },
+        {
+          "threshold": 120,
+          "precision": 0.9171,
+          "recall": 0.9863,
+          "f1": 0.9504,
+          "tp": 4535,
+          "fp": 410,
+          "fn": 63
+        },
+        {
+          "threshold": 150,
+          "precision": 0.9155,
+          "recall": 0.992,
+          "f1": 0.9522,
+          "tp": 4561,
+          "fp": 421,
+          "fn": 37
+        }
+      ]
+    }
+  },
+  "threshold_grids": {
+    "lower_mean_speed": [
+      {
+        "max_threshold": 30,
+        "feature": "lower_mean_speed",
+        "detected": 128,
+        "missed": 28,
+        "false_alarms": 206,
+        "recall": 0.8205,
+        "precision_proxy": 0.3832
+      },
+      {
+        "max_threshold": 40,
+        "feature": "lower_mean_speed",
+        "detected": 136,
+        "missed": 20,
+        "false_alarms": 229,
+        "recall": 0.8718,
+        "precision_proxy": 0.3726
+      },
+      {
+        "max_threshold": 50,
+        "feature": "lower_mean_speed",
+        "detected": 140,
+        "missed": 16,
+        "false_alarms": 259,
+        "recall": 0.8974,
+        "precision_proxy": 0.3509
+      },
+      {
+        "max_threshold": 60,
+        "feature": "lower_mean_speed",
+        "detected": 142,
+        "missed": 14,
+        "false_alarms": 287,
+        "recall": 0.9103,
+        "precision_proxy": 0.331
+      },
+      {
+        "max_threshold": 70,
+        "feature": "lower_mean_speed",
+        "detected": 142,
+        "missed": 14,
+        "false_alarms": 308,
+        "recall": 0.9103,
+        "precision_proxy": 0.3156
+      },
+      {
+        "max_threshold": 80,
+        "feature": "lower_mean_speed",
+        "detected": 142,
+        "missed": 14,
+        "false_alarms": 322,
+        "recall": 0.9103,
+        "precision_proxy": 0.306
+      },
+      {
+        "max_threshold": 100,
+        "feature": "lower_mean_speed",
+        "detected": 145,
+        "missed": 11,
+        "false_alarms": 353,
+        "recall": 0.9295,
+        "precision_proxy": 0.2912
+      },
+      {
+        "max_threshold": 120,
+        "feature": "lower_mean_speed",
+        "detected": 145,
+        "missed": 11,
+        "false_alarms": 369,
+        "recall": 0.9295,
+        "precision_proxy": 0.2821
+      }
+    ],
+    "knee_ankle_mean_speed": [
+      {
+        "max_threshold": 30,
+        "feature": "knee_ankle_mean_speed",
+        "detected": 133,
+        "missed": 23,
+        "false_alarms": 198,
+        "recall": 0.8526,
+        "precision_proxy": 0.4018
+      },
+      {
+        "max_threshold": 40,
+        "feature": "knee_ankle_mean_speed",
+        "detected": 140,
+        "missed": 16,
+        "false_alarms": 229,
+        "recall": 0.8974,
+        "precision_proxy": 0.3794
+      },
+      {
+        "max_threshold": 50,
+        "feature": "knee_ankle_mean_speed",
+        "detected": 142,
+        "missed": 14,
+        "false_alarms": 261,
+        "recall": 0.9103,
+        "precision_proxy": 0.3524
+      },
+      {
+        "max_threshold": 60,
+        "feature": "knee_ankle_mean_speed",
+        "detected": 143,
+        "missed": 13,
+        "false_alarms": 286,
+        "recall": 0.9167,
+        "precision_proxy": 0.3333
+      },
+      {
+        "max_threshold": 70,
+        "feature": "knee_ankle_mean_speed",
+        "detected": 145,
+        "missed": 11,
+        "false_alarms": 310,
+        "recall": 0.9295,
+        "precision_proxy": 0.3187
+      },
+      {
+        "max_threshold": 80,
+        "feature": "knee_ankle_mean_speed",
+        "detected": 145,
+        "missed": 11,
+        "false_alarms": 319,
+        "recall": 0.9295,
+        "precision_proxy": 0.3125
+      },
+      {
+        "max_threshold": 100,
+        "feature": "knee_ankle_mean_speed",
+        "detected": 145,
+        "missed": 11,
+        "false_alarms": 342,
+        "recall": 0.9295,
+        "precision_proxy": 0.2977
+      },
+      {
+        "max_threshold": 120,
+        "feature": "knee_ankle_mean_speed",
+        "detected": 146,
+        "missed": 10,
+        "false_alarms": 363,
+        "recall": 0.9359,
+        "precision_proxy": 0.2868
+      }
+    ]
+  },
+  "at_threshold_60": {
+    "lower_mean_speed": {
+      "clip_count": 28,
+      "evaluated": 28,
+      "skipped": 0,
+      "errors": 0,
+      "excluded": 0,
+      "tag_filtered": 0,
+      "gt_segments": 156,
+      "detected": 142,
+      "missed": 14,
+      "false_alarms": 287,
+      "alarm_count": 1582,
+      "recall": 0.9103,
+      "miss_rate": 0.0897,
+      "precision_proxy": 0.331
+    },
+    "knee_ankle_mean_speed": {
+      "clip_count": 28,
+      "evaluated": 28,
+      "skipped": 0,
+      "errors": 0,
+      "excluded": 0,
+      "tag_filtered": 0,
+      "gt_segments": 156,
+      "detected": 143,
+      "missed": 13,
+      "false_alarms": 286,
+      "alarm_count": 1577,
+      "recall": 0.9167,
+      "miss_rate": 0.0833,
+      "precision_proxy": 0.3333
+    }
+  },
+  "squat_watch": [
+    {
+      "upload_file": "clip_0009_start_00-37-59_rtmpose_m.json",
+      "feature": "lower_mean_speed",
+      "missed_segments": [
+        {
+          "frame_start": 91,
+          "frame_end": 111,
+          "gt_tokens": [
+            "Box_3079"
+          ],
+          "seek_frame": 91,
+          "kind": "fn",
+          "label": "漏报 · Box_3079 · 帧 91–111"
+        }
+      ],
+      "gate_blocked_at_gt": {
+        "lower_mean_speed": [
+          {
+            "frame_idx": 95,
+            "lower_mean_speed": 92.279,
+            "knee_ankle_mean_speed": 97.423,
+            "gate_feature": "lower_mean_speed",
+            "gate_value": 92.279
+          }
+        ],
+        "knee_ankle_mean_speed": [
+          {
+            "frame_idx": 95,
+            "lower_mean_speed": 92.279,
+            "knee_ankle_mean_speed": 97.423,
+            "gate_feature": "knee_ankle_mean_speed",
+            "gate_value": 97.423
+          }
+        ]
+      }
+    },
+    {
+      "upload_file": "clip_0013_start_00-42-48_rtmpose_m.json",
+      "feature": "lower_mean_speed",
+      "missed_segments": [
+        {
+          "frame_start": 109,
+          "frame_end": 131,
+          "gt_tokens": [
+            "Box_3100"
+          ],
+          "seek_frame": 109,
+          "kind": "fn",
+          "label": "漏报 · Box_3100 · 帧 109–131"
+        },
+        {
+          "frame_start": 159,
+          "frame_end": 169,
+          "gt_tokens": [
+            "Box_3105"
+          ],
+          "seek_frame": 159,
+          "kind": "fn",
+          "label": "漏报 · Box_3105 · 帧 159–169"
+        }
+      ],
+      "gate_blocked_at_gt": {
+        "lower_mean_speed": [
+          {
+            "frame_idx": 109,
+            "lower_mean_speed": 124.453,
+            "knee_ankle_mean_speed": 14.318,
+            "gate_feature": "lower_mean_speed",
+            "gate_value": 124.453
+          },
+          {
+            "frame_idx": 113,
+            "lower_mean_speed": 328.495,
+            "knee_ankle_mean_speed": 310.36,
+            "gate_feature": "lower_mean_speed",
+            "gate_value": 328.495
+          },
+          {
+            "frame_idx": 115,
+            "lower_mean_speed": 131.741,
+            "knee_ankle_mean_speed": 127.846,
+            "gate_feature": "lower_mean_speed",
+            "gate_value": 131.741
+          },
+          {
+            "frame_idx": 119,
+            "lower_mean_speed": 232.328,
+            "knee_ankle_mean_speed": 202.576,
+            "gate_feature": "lower_mean_speed",
+            "gate_value": 232.328
+          },
+          {
+            "frame_idx": 123,
+            "lower_mean_speed": 224.28,
+            "knee_ankle_mean_speed": 179.657,
+            "gate_feature": "lower_mean_speed",
+            "gate_value": 224.28
+          }
+        ],
+        "knee_ankle_mean_speed": [
+          {
+            "frame_idx": 113,
+            "lower_mean_speed": 328.495,
+            "knee_ankle_mean_speed": 310.36,
+            "gate_feature": "knee_ankle_mean_speed",
+            "gate_value": 310.36
+          },
+          {
+            "frame_idx": 115,
+            "lower_mean_speed": 131.741,
+            "knee_ankle_mean_speed": 127.846,
+            "gate_feature": "knee_ankle_mean_speed",
+            "gate_value": 127.846
+          },
+          {
+            "frame_idx": 119,
+            "lower_mean_speed": 232.328,
+            "knee_ankle_mean_speed": 202.576,
+            "gate_feature": "knee_ankle_mean_speed",
+            "gate_value": 202.576
+          },
+          {
+            "frame_idx": 123,
+            "lower_mean_speed": 224.28,
+            "knee_ankle_mean_speed": 179.657,
+            "gate_feature": "knee_ankle_mean_speed",
+            "gate_value": 179.657
+          }
+        ]
+      }
+    },
+    {
+      "upload_file": "clip_0020_start_00-48-44_rtmpose_m.json",
+      "feature": "lower_mean_speed",
+      "missed_segments": [
+        {
+          "frame_start": 79,
+          "frame_end": 82,
+          "gt_tokens": [
+            "Box_3018"
+          ],
+          "seek_frame": 79,
+          "kind": "fn",
+          "label": "漏报 · Box_3018 · 帧 79–82"
+        }
+      ],
+      "gate_blocked_at_gt": {
+        "lower_mean_speed": [
+          {
+            "frame_idx": 79,
+            "lower_mean_speed": 94.229,
+            "knee_ankle_mean_speed": 105.669,
+            "gate_feature": "lower_mean_speed",
+            "gate_value": 94.229
+          }
+        ],
+        "knee_ankle_mean_speed": [
+          {
+            "frame_idx": 79,
+            "lower_mean_speed": 94.229,
+            "knee_ankle_mean_speed": 105.669,
+            "gate_feature": "knee_ankle_mean_speed",
+            "gate_value": 105.669
+          }
+        ]
+      }
+    },
+    {
+      "upload_file": "clip_0013_start_00-29-53_rtmpose_m.json",
+      "feature": "lower_mean_speed",
+      "missed_segments": [
+        {
+          "frame_start": 2244,
+          "frame_end": 2254,
+          "gt_tokens": [
+            "Box_4014"
+          ],
+          "seek_frame": 2244,
+          "kind": "fn",
+          "label": "漏报 · Box_4014 · 帧 2244–2254"
+        }
+      ],
+      "gate_blocked_at_gt": {
+        "lower_mean_speed": [
+          {
+            "frame_idx": 2245,
+            "lower_mean_speed": 88.241,
+            "knee_ankle_mean_speed": 62.956,
+            "gate_feature": "lower_mean_speed",
+            "gate_value": 88.241
+          },
+          {
+            "frame_idx": 2247,
+            "lower_mean_speed": 74.514,
+            "knee_ankle_mean_speed": 72.09,
+            "gate_feature": "lower_mean_speed",
+            "gate_value": 74.514
+          },
+          {
+            "frame_idx": 2249,
+            "lower_mean_speed": 81.418,
+            "knee_ankle_mean_speed": 81.415,
+            "gate_feature": "lower_mean_speed",
+            "gate_value": 81.418
+          },
+          {
+            "frame_idx": 2251,
+            "lower_mean_speed": 78.734,
+            "knee_ankle_mean_speed": 75.492,
+            "gate_feature": "lower_mean_speed",
+            "gate_value": 78.734
+          }
+        ],
+        "knee_ankle_mean_speed": [
+          {
+            "frame_idx": 2245,
+            "lower_mean_speed": 88.241,
+            "knee_ankle_mean_speed": 62.956,
+            "gate_feature": "knee_ankle_mean_speed",
+            "gate_value": 62.956
+          },
+          {
+            "frame_idx": 2247,
+            "lower_mean_speed": 74.514,
+            "knee_ankle_mean_speed": 72.09,
+            "gate_feature": "knee_ankle_mean_speed",
+            "gate_value": 72.09
+          },
+          {
+            "frame_idx": 2249,
+            "lower_mean_speed": 81.418,
+            "knee_ankle_mean_speed": 81.415,
+            "gate_feature": "knee_ankle_mean_speed",
+            "gate_value": 81.415
+          },
+          {
+            "frame_idx": 2251,
+            "lower_mean_speed": 78.734,
+            "knee_ankle_mean_speed": 75.492,
+            "gate_feature": "knee_ankle_mean_speed",
+            "gate_value": 75.492
+          }
+        ]
+      }
+    },
+    {
+      "upload_file": "clip_0009_start_00-37-59_rtmpose_m.json",
+      "feature": "knee_ankle_mean_speed",
+      "missed_segments": [
+        {
+          "frame_start": 91,
+          "frame_end": 111,
+          "gt_tokens": [
+            "Box_3079"
+          ],
+          "seek_frame": 91,
+          "kind": "fn",
+          "label": "漏报 · Box_3079 · 帧 91–111"
+        }
+      ],
+      "gate_blocked_at_gt": {
+        "lower_mean_speed": [
+          {
+            "frame_idx": 95,
+            "lower_mean_speed": 92.279,
+            "knee_ankle_mean_speed": 97.423,
+            "gate_feature": "lower_mean_speed",
+            "gate_value": 92.279
+          }
+        ],
+        "knee_ankle_mean_speed": [
+          {
+            "frame_idx": 95,
+            "lower_mean_speed": 92.279,
+            "knee_ankle_mean_speed": 97.423,
+            "gate_feature": "knee_ankle_mean_speed",
+            "gate_value": 97.423
+          }
+        ]
+      }
+    },
+    {
+      "upload_file": "clip_0013_start_00-42-48_rtmpose_m.json",
+      "feature": "knee_ankle_mean_speed",
+      "missed_segments": [
+        {
+          "frame_start": 159,
+          "frame_end": 169,
+          "gt_tokens": [
+            "Box_3105"
+          ],
+          "seek_frame": 159,
+          "kind": "fn",
+          "label": "漏报 · Box_3105 · 帧 159–169"
+        }
+      ],
+      "gate_blocked_at_gt": {
+        "lower_mean_speed": [],
+        "knee_ankle_mean_speed": []
+      }
+    },
+    {
+      "upload_file": "clip_0020_start_00-48-44_rtmpose_m.json",
+      "feature": "knee_ankle_mean_speed",
+      "missed_segments": [
+        {
+          "frame_start": 79,
+          "frame_end": 82,
+          "gt_tokens": [
+            "Box_3018"
+          ],
+          "seek_frame": 79,
+          "kind": "fn",
+          "label": "漏报 · Box_3018 · 帧 79–82"
+        }
+      ],
+      "gate_blocked_at_gt": {
+        "lower_mean_speed": [
+          {
+            "frame_idx": 79,
+            "lower_mean_speed": 94.229,
+            "knee_ankle_mean_speed": 105.669,
+            "gate_feature": "lower_mean_speed",
+            "gate_value": 94.229
+          }
+        ],
+        "knee_ankle_mean_speed": [
+          {
+            "frame_idx": 79,
+            "lower_mean_speed": 94.229,
+            "knee_ankle_mean_speed": 105.669,
+            "gate_feature": "knee_ankle_mean_speed",
+            "gate_value": 105.669
+          }
+        ]
+      }
+    },
+    {
+      "upload_file": "clip_0013_start_00-29-53_rtmpose_m.json",
+      "feature": "knee_ankle_mean_speed",
+      "missed_segments": [
+        {
+          "frame_start": 2244,
+          "frame_end": 2254,
+          "gt_tokens": [
+            "Box_4014"
+          ],
+          "seek_frame": 2244,
+          "kind": "fn",
+          "label": "漏报 · Box_4014 · 帧 2244–2254"
+        }
+      ],
+      "gate_blocked_at_gt": {
+        "lower_mean_speed": [
+          {
+            "frame_idx": 2245,
+            "lower_mean_speed": 88.241,
+            "knee_ankle_mean_speed": 62.956,
+            "gate_feature": "lower_mean_speed",
+            "gate_value": 88.241
+          },
+          {
+            "frame_idx": 2247,
+            "lower_mean_speed": 74.514,
+            "knee_ankle_mean_speed": 72.09,
+            "gate_feature": "lower_mean_speed",
+            "gate_value": 74.514
+          },
+          {
+            "frame_idx": 2249,
+            "lower_mean_speed": 81.418,
+            "knee_ankle_mean_speed": 81.415,
+            "gate_feature": "lower_mean_speed",
+            "gate_value": 81.418
+          },
+          {
+            "frame_idx": 2251,
+            "lower_mean_speed": 78.734,
+            "knee_ankle_mean_speed": 75.492,
+            "gate_feature": "lower_mean_speed",
+            "gate_value": 78.734
+          }
+        ],
+        "knee_ankle_mean_speed": [
+          {
+            "frame_idx": 2245,
+            "lower_mean_speed": 88.241,
+            "knee_ankle_mean_speed": 62.956,
+            "gate_feature": "knee_ankle_mean_speed",
+            "gate_value": 62.956
+          },
+          {
+            "frame_idx": 2247,
+            "lower_mean_speed": 74.514,
+            "knee_ankle_mean_speed": 72.09,
+            "gate_feature": "knee_ankle_mean_speed",
+            "gate_value": 72.09
+          },
+          {
+            "frame_idx": 2249,
+            "lower_mean_speed": 81.418,
+            "knee_ankle_mean_speed": 81.415,
+            "gate_feature": "knee_ankle_mean_speed",
+            "gate_value": 81.415
+          },
+          {
+            "frame_idx": 2251,
+            "lower_mean_speed": 78.734,
+            "knee_ankle_mean_speed": 75.492,
+            "gate_feature": "knee_ankle_mean_speed",
+            "gate_value": 75.492
+          }
+        ]
+      }
+    }
+  ],
+  "conclusion": "膝踝平均特征在阈值 60 下召回改善：漏报段 14→13（少 1 段），FP 287→286。建议前置门控改用 `knee_ankle_mean_speed`。"
+}

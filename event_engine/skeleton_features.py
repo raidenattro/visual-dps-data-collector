@@ -21,6 +21,8 @@ KPT_COUNT = len(COCO17_KEYPOINT_NAMES)
 UPPER_KPT_INDICES = (5, 6, 7, 8, 9, 10)
 # 下肢：髋/膝/踝
 LOWER_KPT_INDICES = (11, 12, 13, 14, 15, 16)
+# 膝/踝（不含髋，蹲起时髋位移大、膝踝相对小）
+KNEE_ANKLE_KPT_INDICES = (13, 14, 15, 16)
 # 躯干锚点：肩优先，否则髋
 TORSO_SHOULDER_INDICES = (5, 6)
 TORSO_HIP_INDICES = (11, 12)
@@ -317,6 +319,7 @@ def extract_keypoint_velocity_rows(
 
             upper_speeds = [kpt_speeds.get(i) for i in UPPER_KPT_INDICES]
             lower_speeds = [kpt_speeds.get(i) for i in LOWER_KPT_INDICES]
+            knee_ankle_speeds = [kpt_speeds.get(i) for i in KNEE_ANKLE_KPT_INDICES]
             wrist_speeds = [kpt_speeds.get(i) for i in WRIST_INDICES]
             elbow_speeds = [kpt_speeds.get(i) for i in ELBOW_INDICES]
             all_speeds = [kpt_speeds.get(i) for i in range(KPT_COUNT)]
@@ -325,6 +328,7 @@ def extract_keypoint_velocity_rows(
             body_max = _max_of_speeds(all_speeds)
             upper_mean = _mean_of_speeds(upper_speeds)
             lower_mean = _mean_of_speeds(lower_speeds)
+            knee_ankle_mean = _mean_of_speeds(knee_ankle_speeds)
             wrist_max = _max_of_speeds(wrist_speeds)
             elbow_max = _max_of_speeds(elbow_speeds)
 
@@ -332,6 +336,7 @@ def extract_keypoint_velocity_rows(
             row["body_max_speed"] = round(body_max, 3) if body_max is not None else None
             row["upper_mean_speed"] = round(upper_mean, 3) if upper_mean is not None else None
             row["lower_mean_speed"] = round(lower_mean, 3) if lower_mean is not None else None
+            row["knee_ankle_mean_speed"] = round(knee_ankle_mean, 3) if knee_ankle_mean is not None else None
             row["wrist_max_speed"] = round(wrist_max, 3) if wrist_max is not None else None
             row["elbow_max_speed"] = round(elbow_max, 3) if elbow_max is not None else None
 
@@ -374,6 +379,7 @@ def extract_aggregate_velocity_rows(
         "body_max_speed",
         "upper_mean_speed",
         "lower_mean_speed",
+        "knee_ankle_mean_speed",
         "wrist_max_speed",
         "elbow_max_speed",
         "wrist_torso_ratio",
@@ -392,6 +398,7 @@ def extract_aggregate_velocity_rows(
 class AggregateVelocitySnapshot:
     """单 track 单帧聚合速度快照（前置门控用）。"""
     lower_mean_speed: float | None = None
+    knee_ankle_mean_speed: float | None = None
     torso_speed: float | None = None
     body_mean_speed: float | None = None
     velocity_valid: bool = False
@@ -513,15 +520,19 @@ class IncrementalAggregateVelocityTracker:
                 )
 
         lower_speeds = [kpt_speeds.get(i) for i in LOWER_KPT_INDICES]
+        knee_ankle_speeds = [kpt_speeds.get(i) for i in KNEE_ANKLE_KPT_INDICES]
         all_speeds = [kpt_speeds.get(i) for i in range(KPT_COUNT)]
         lower_mean = _mean_of_speeds(lower_speeds)
+        knee_ankle_mean = _mean_of_speeds(knee_ankle_speeds)
         body_mean = _mean_of_speeds(all_speeds)
         has_lower = lower_mean is not None
+        has_knee_ankle = knee_ankle_mean is not None
         return AggregateVelocitySnapshot(
             lower_mean_speed=round(lower_mean, 3) if lower_mean is not None else None,
+            knee_ankle_mean_speed=round(knee_ankle_mean, 3) if knee_ankle_mean is not None else None,
             torso_speed=round(torso_speed, 3) if torso_speed is not None else None,
             body_mean_speed=round(body_mean, 3) if body_mean is not None else None,
-            velocity_valid=has_lower or torso_valid,
+            velocity_valid=has_lower or has_knee_ankle or torso_valid,
         )
 
 
