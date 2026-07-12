@@ -1,0 +1,1185 @@
+{
+  "generated_at": "2026-07-12T12:22:57.870516+00:00",
+  "prepared_count": 28,
+  "gate_base": "ankle_max_speed@80.0 + triple90",
+  "feature_compare": {
+    "torso_leg_angle_mean": {
+      "gt_all": {
+        "count": 3696,
+        "p50": 169.48,
+        "min": 9.72,
+        "max": 179.85
+      },
+      "fa_all": {
+        "count": 428,
+        "p50": 168.11,
+        "min": 13.04,
+        "max": 179.04
+      },
+      "gt_blocked_triple90": {
+        "count": 361,
+        "p50": 170.6,
+        "min": 15.93,
+        "max": 179.58
+      },
+      "fa_blocked_triple90": {
+        "count": 81,
+        "p50": 170.04,
+        "min": 16.15,
+        "max": 179.04
+      }
+    },
+    "torso_leg_angle_min": {
+      "gt_all": {
+        "count": 3696,
+        "p50": 162.425,
+        "min": 1.15,
+        "max": 179.66
+      },
+      "fa_all": {
+        "count": 428,
+        "p50": 158.295,
+        "min": 0.06,
+        "max": 177.92
+      },
+      "gt_blocked_triple90": {
+        "count": 361,
+        "p50": 164.08,
+        "min": 1.21,
+        "max": 179.21
+      },
+      "fa_blocked_triple90": {
+        "count": 81,
+        "p50": 163.83,
+        "min": 2.24,
+        "max": 177.87
+      }
+    },
+    "torso_leg_angle_max": {
+      "gt_all": {
+        "count": 3696,
+        "p50": 176.04,
+        "min": 19.65,
+        "max": 180.0
+      },
+      "fa_all": {
+        "count": 428,
+        "p50": 176.26,
+        "min": 23.05,
+        "max": 179.99
+      },
+      "gt_blocked_triple90": {
+        "count": 361,
+        "p50": 176.75,
+        "min": 25.05,
+        "max": 180.0
+      },
+      "fa_blocked_triple90": {
+        "count": 81,
+        "p50": 176.37,
+        "min": 26.49,
+        "max": 179.99
+      }
+    },
+    "center_torso_leg_angle": {
+      "gt_all": {
+        "count": 3696,
+        "p50": 170.89,
+        "min": 1.15,
+        "max": 180.0
+      },
+      "fa_all": {
+        "count": 428,
+        "p50": 170.65,
+        "min": 0.06,
+        "max": 179.99
+      },
+      "gt_blocked_triple90": {
+        "count": 361,
+        "p50": 173.97,
+        "min": 8.46,
+        "max": 179.99
+      },
+      "fa_blocked_triple90": {
+        "count": 81,
+        "p50": 175.2,
+        "min": 3.94,
+        "max": 179.99
+      }
+    },
+    "left_torso_leg_angle": {
+      "gt_all": {
+        "count": 3422,
+        "p50": 168.7,
+        "min": 9.8,
+        "max": 180.0
+      },
+      "fa_all": {
+        "count": 405,
+        "p50": 167.12,
+        "min": 2.24,
+        "max": 179.96
+      },
+      "gt_blocked_triple90": {
+        "count": 354,
+        "p50": 170.01,
+        "min": 19.78,
+        "max": 180.0
+      },
+      "fa_blocked_triple90": {
+        "count": 78,
+        "p50": 166.665,
+        "min": 2.24,
+        "max": 179.77
+      }
+    },
+    "right_torso_leg_angle": {
+      "gt_all": {
+        "count": 3493,
+        "p50": 168.8,
+        "min": 1.21,
+        "max": 180.0
+      },
+      "fa_all": {
+        "count": 420,
+        "p50": 166.475,
+        "min": 2.95,
+        "max": 179.93
+      },
+      "gt_blocked_triple90": {
+        "count": 357,
+        "p50": 168.83,
+        "min": 1.21,
+        "max": 179.98
+      },
+      "fa_blocked_triple90": {
+        "count": 79,
+        "p50": 167.78,
+        "min": 2.95,
+        "max": 179.68
+      }
+    },
+    "knee_angle_mean": {
+      "gt_all": {
+        "count": 4479,
+        "p50": 174.89,
+        "min": 0.02,
+        "max": 179.96
+      },
+      "fa_all": {
+        "count": 432,
+        "p50": 173.99,
+        "min": 5.82,
+        "max": 179.69
+      },
+      "gt_blocked_triple90": {
+        "count": 373,
+        "p50": 173.92,
+        "min": 13.31,
+        "max": 179.94
+      },
+      "fa_blocked_triple90": {
+        "count": 80,
+        "p50": 173.145,
+        "min": 102.69,
+        "max": 178.86
+      }
+    },
+    "knee_angle_min": {
+      "gt_all": {
+        "count": 4479,
+        "p50": 172.7,
+        "min": 0.02,
+        "max": 179.93
+      },
+      "fa_all": {
+        "count": 432,
+        "p50": 171.66,
+        "min": 3.62,
+        "max": 179.68
+      },
+      "gt_blocked_triple90": {
+        "count": 373,
+        "p50": 171.09,
+        "min": 13.31,
+        "max": 179.89
+      },
+      "fa_blocked_triple90": {
+        "count": 80,
+        "p50": 169.28,
+        "min": 29.14,
+        "max": 178.86
+      }
+    },
+    "knee_angle_max": {
+      "gt_all": {
+        "count": 4479,
+        "p50": 177.38,
+        "min": 0.02,
+        "max": 180.0
+      },
+      "fa_all": {
+        "count": 432,
+        "p50": 177.0,
+        "min": 5.82,
+        "max": 180.0
+      },
+      "gt_blocked_triple90": {
+        "count": 373,
+        "p50": 177.08,
+        "min": 13.31,
+        "max": 180.0
+      },
+      "fa_blocked_triple90": {
+        "count": 80,
+        "p50": 177.625,
+        "min": 120.44,
+        "max": 180.0
+      }
+    },
+    "leg_span_ratio": {
+      "gt_all": {
+        "count": 3684,
+        "p50": 1.2243,
+        "min": 0.0914,
+        "max": 68.8834
+      },
+      "fa_all": {
+        "count": 428,
+        "p50": 1.0112,
+        "min": 0.1052,
+        "max": 31.1881
+      },
+      "gt_blocked_triple90": {
+        "count": 361,
+        "p50": 1.1457,
+        "min": 0.3005,
+        "max": 24.7718
+      },
+      "fa_blocked_triple90": {
+        "count": 81,
+        "p50": 1.0001,
+        "min": 0.3153,
+        "max": 24.7718
+      }
+    },
+    "hip_knee_ankle_vertical_ratio": {
+      "gt_all": {
+        "count": 4472,
+        "p50": 1.1077,
+        "min": 0.0096,
+        "max": 37.4451
+      },
+      "fa_all": {
+        "count": 432,
+        "p50": 1.263,
+        "min": 0.0555,
+        "max": 29.671
+      },
+      "gt_blocked_triple90": {
+        "count": 372,
+        "p50": 1.1201,
+        "min": 0.0831,
+        "max": 15.6132
+      },
+      "fa_blocked_triple90": {
+        "count": 80,
+        "p50": 1.3946,
+        "min": 0.906,
+        "max": 12.3244
+      }
+    },
+    "elbow_waist_angle_max": {
+      "gt_all": {
+        "count": 3686,
+        "p50": 120.88,
+        "min": 0.33,
+        "max": 179.99
+      },
+      "fa_all": {
+        "count": 430,
+        "p50": 117.72,
+        "min": 16.82,
+        "max": 176.15
+      },
+      "gt_blocked_triple90": {
+        "count": 359,
+        "p50": 119.88,
+        "min": 13.77,
+        "max": 179.43
+      },
+      "fa_blocked_triple90": {
+        "count": 80,
+        "p50": 119.81,
+        "min": 20.14,
+        "max": 160.87
+      }
+    },
+    "arm_torso_angle_max": {
+      "gt_all": {
+        "count": 3686,
+        "p50": 82.42,
+        "min": 1.08,
+        "max": 179.51
+      },
+      "fa_all": {
+        "count": 430,
+        "p50": 70.255,
+        "min": 12.25,
+        "max": 172.33
+      },
+      "gt_blocked_triple90": {
+        "count": 359,
+        "p50": 64.55,
+        "min": 1.99,
+        "max": 179.5
+      },
+      "fa_blocked_triple90": {
+        "count": 80,
+        "p50": 46.99,
+        "min": 19.33,
+        "max": 172.33
+      }
+    },
+    "wrist_elevation_angle_max": {
+      "gt_all": {
+        "count": 3677,
+        "p50": 45.0,
+        "min": 0.0,
+        "max": 171.87
+      },
+      "fa_all": {
+        "count": 432,
+        "p50": 45.755,
+        "min": 0.0,
+        "max": 171.92
+      },
+      "gt_blocked_triple90": {
+        "count": 358,
+        "p50": 38.745,
+        "min": 0.83,
+        "max": 153.41
+      },
+      "fa_blocked_triple90": {
+        "count": 81,
+        "p50": 28.69,
+        "min": 0.49,
+        "max": 171.92
+      }
+    },
+    "ankle_max_speed": {
+      "gt_all": {
+        "count": 4561,
+        "p50": 8.171,
+        "min": 0.0,
+        "max": 967.023
+      },
+      "fa_all": {
+        "count": 434,
+        "p50": 21.9155,
+        "min": 0.0,
+        "max": 864.031
+      },
+      "gt_blocked_triple90": {
+        "count": 387,
+        "p50": 126.938,
+        "min": 80.568,
+        "max": 967.023
+      },
+      "fa_blocked_triple90": {
+        "count": 81,
+        "p50": 170.113,
+        "min": 81.022,
+        "max": 864.031
+      }
+    },
+    "torso_speed": {
+      "gt_all": {
+        "count": 4514,
+        "p50": 10.5,
+        "min": 0.0,
+        "max": 653.503
+      },
+      "fa_all": {
+        "count": 438,
+        "p50": 25.2,
+        "min": 0.0,
+        "max": 217.937
+      },
+      "gt_blocked_triple90": {
+        "count": 380,
+        "p50": 44.5495,
+        "min": 0.0,
+        "max": 653.503
+      },
+      "fa_blocked_triple90": {
+        "count": 81,
+        "p50": 74.949,
+        "min": 4.034,
+        "max": 198.19
+      }
+    }
+  },
+  "squat_watch": [
+    {
+      "upload_file": "clip_0009_start_00-37-59_rtmpose_m.json",
+      "gt_frame_count": 50,
+      "triple90_blocked_frames": [
+        19,
+        67,
+        69,
+        95
+      ],
+      "feature_stats_gt": {
+        "torso_leg_angle_mean": {
+          "count": 49,
+          "p50": 148.73,
+          "min": 107.43,
+          "max": 177.99
+        },
+        "torso_leg_angle_min": {
+          "count": 49,
+          "p50": 132.6,
+          "min": 103.31,
+          "max": 176.78
+        },
+        "torso_leg_angle_max": {
+          "count": 49,
+          "p50": 162.78,
+          "min": 111.55,
+          "max": 179.39
+        },
+        "center_torso_leg_angle": {
+          "count": 49,
+          "p50": 144.66,
+          "min": 103.31,
+          "max": 178.06
+        },
+        "left_torso_leg_angle": {
+          "count": 41,
+          "p50": 141.09,
+          "min": 122.14,
+          "max": 179.13
+        },
+        "right_torso_leg_angle": {
+          "count": 49,
+          "p50": 162.69,
+          "min": 111.55,
+          "max": 179.39
+        },
+        "knee_angle_mean": {
+          "count": 49,
+          "p50": 152.21,
+          "min": 0.02,
+          "max": 177.92
+        },
+        "knee_angle_min": {
+          "count": 49,
+          "p50": 149.69,
+          "min": 0.02,
+          "max": 177.34
+        },
+        "knee_angle_max": {
+          "count": 49,
+          "p50": 154.73,
+          "min": 0.02,
+          "max": 178.82
+        },
+        "leg_span_ratio": {
+          "count": 49,
+          "p50": 0.8351,
+          "min": 0.1026,
+          "max": 4.4884
+        },
+        "hip_knee_ankle_vertical_ratio": {
+          "count": 49,
+          "p50": 1.0808,
+          "min": 0.2671,
+          "max": 2.7858
+        },
+        "elbow_waist_angle_max": {
+          "count": 50,
+          "p50": 138.24,
+          "min": 43.27,
+          "max": 179.91
+        },
+        "arm_torso_angle_max": {
+          "count": 50,
+          "p50": 76.65,
+          "min": 58.5,
+          "max": 116.36
+        },
+        "wrist_elevation_angle_max": {
+          "count": 47,
+          "p50": 48.9,
+          "min": 17.35,
+          "max": 171.87
+        },
+        "ankle_max_speed": {
+          "count": 48,
+          "p50": 11.9955,
+          "min": 0.75,
+          "max": 176.821
+        },
+        "torso_speed": {
+          "count": 50,
+          "p50": 14.321,
+          "min": 0.0,
+          "max": 138.877
+        }
+      }
+    },
+    {
+      "upload_file": "clip_0013_start_00-42-48_rtmpose_m.json",
+      "gt_frame_count": 18,
+      "triple90_blocked_frames": [
+        113,
+        115,
+        119
+      ],
+      "feature_stats_gt": {
+        "torso_leg_angle_mean": {
+          "count": 18,
+          "p50": 168.045,
+          "min": 142.94,
+          "max": 174.78
+        },
+        "torso_leg_angle_min": {
+          "count": 18,
+          "p50": 161.2,
+          "min": 136.43,
+          "max": 171.02
+        },
+        "torso_leg_angle_max": {
+          "count": 18,
+          "p50": 177.825,
+          "min": 149.45,
+          "max": 179.5
+        },
+        "center_torso_leg_angle": {
+          "count": 18,
+          "p50": 170.88,
+          "min": 136.43,
+          "max": 179.5
+        },
+        "left_torso_leg_angle": {
+          "count": 17,
+          "p50": 170.11,
+          "min": 163.51,
+          "max": 178.66
+        },
+        "right_torso_leg_angle": {
+          "count": 18,
+          "p50": 161.2,
+          "min": 141.73,
+          "max": 174.21
+        },
+        "knee_angle_mean": {
+          "count": 18,
+          "p50": 172.225,
+          "min": 89.45,
+          "max": 179.22
+        },
+        "knee_angle_min": {
+          "count": 18,
+          "p50": 169.95,
+          "min": 89.45,
+          "max": 179.09
+        },
+        "knee_angle_max": {
+          "count": 18,
+          "p50": 173.975,
+          "min": 89.45,
+          "max": 179.86
+        },
+        "leg_span_ratio": {
+          "count": 18,
+          "p50": 0.852,
+          "min": 0.336,
+          "max": 3.0497
+        },
+        "hip_knee_ankle_vertical_ratio": {
+          "count": 18,
+          "p50": 1.2483,
+          "min": 0.9493,
+          "max": 21.7304
+        },
+        "elbow_waist_angle_max": {
+          "count": 18,
+          "p50": 115.195,
+          "min": 66.13,
+          "max": 131.32
+        },
+        "arm_torso_angle_max": {
+          "count": 18,
+          "p50": 109.96,
+          "min": 72.05,
+          "max": 155.15
+        },
+        "wrist_elevation_angle_max": {
+          "count": 18,
+          "p50": 94.335,
+          "min": 5.35,
+          "max": 138.49
+        },
+        "ankle_max_speed": {
+          "count": 17,
+          "p50": 16.487,
+          "min": 2.317,
+          "max": 274.67
+        },
+        "torso_speed": {
+          "count": 18,
+          "p50": 42.069,
+          "min": 6.075,
+          "max": 153.791
+        }
+      }
+    },
+    {
+      "upload_file": "clip_0020_start_00-48-44_rtmpose_m.json",
+      "gt_frame_count": 2,
+      "triple90_blocked_frames": [],
+      "feature_stats_gt": {
+        "torso_leg_angle_mean": {
+          "count": 2,
+          "p50": 151.46,
+          "min": 151.41,
+          "max": 151.51
+        },
+        "torso_leg_angle_min": {
+          "count": 2,
+          "p50": 138.685,
+          "min": 137.51,
+          "max": 139.86
+        },
+        "torso_leg_angle_max": {
+          "count": 2,
+          "p50": 163.225,
+          "min": 162.04,
+          "max": 164.41
+        },
+        "center_torso_leg_angle": {
+          "count": 2,
+          "p50": 152.465,
+          "min": 152.33,
+          "max": 152.6
+        },
+        "left_torso_leg_angle": {
+          "count": 2,
+          "p50": 138.685,
+          "min": 137.51,
+          "max": 139.86
+        },
+        "right_torso_leg_angle": {
+          "count": 2,
+          "p50": 163.225,
+          "min": 162.04,
+          "max": 164.41
+        },
+        "knee_angle_mean": {
+          "count": 2,
+          "p50": 148.455,
+          "min": 143.97,
+          "max": 152.94
+        },
+        "knee_angle_min": {
+          "count": 2,
+          "p50": 132.325,
+          "min": 124.21,
+          "max": 140.44
+        },
+        "knee_angle_max": {
+          "count": 2,
+          "p50": 164.575,
+          "min": 163.72,
+          "max": 165.43
+        },
+        "leg_span_ratio": {
+          "count": 2,
+          "p50": 0.8159,
+          "min": 0.7698,
+          "max": 0.862
+        },
+        "hip_knee_ankle_vertical_ratio": {
+          "count": 2,
+          "p50": 1.9745,
+          "min": 1.8228,
+          "max": 2.1261
+        },
+        "elbow_waist_angle_max": {
+          "count": 2,
+          "p50": 100.01,
+          "min": 99.48,
+          "max": 100.54
+        },
+        "arm_torso_angle_max": {
+          "count": 2,
+          "p50": 127.28,
+          "min": 123.54,
+          "max": 131.02
+        },
+        "wrist_elevation_angle_max": {
+          "count": 2,
+          "p50": 116.345,
+          "min": 110.19,
+          "max": 122.5
+        },
+        "ankle_max_speed": {
+          "count": 2,
+          "p50": 101.711,
+          "min": 16.53,
+          "max": 186.892
+        },
+        "torso_speed": {
+          "count": 2,
+          "p50": 43.8745,
+          "min": 38.153,
+          "max": 49.596
+        }
+      }
+    },
+    {
+      "upload_file": "clip_0013_start_00-29-53_rtmpose_m.json",
+      "gt_frame_count": 41,
+      "triple90_blocked_frames": [
+        2129,
+        2133,
+        2135,
+        2137,
+        2247,
+        2249,
+        2251,
+        2253
+      ],
+      "feature_stats_gt": {
+        "torso_leg_angle_mean": {
+          "count": 41,
+          "p50": 166.3,
+          "min": 40.0,
+          "max": 174.08
+        },
+        "torso_leg_angle_min": {
+          "count": 41,
+          "p50": 154.75,
+          "min": 35.55,
+          "max": 167.91
+        },
+        "torso_leg_angle_max": {
+          "count": 41,
+          "p50": 175.6,
+          "min": 43.77,
+          "max": 179.71
+        },
+        "center_torso_leg_angle": {
+          "count": 41,
+          "p50": 167.53,
+          "min": 40.46,
+          "max": 178.06
+        },
+        "left_torso_leg_angle": {
+          "count": 41,
+          "p50": 154.75,
+          "min": 43.77,
+          "max": 179.66
+        },
+        "right_torso_leg_angle": {
+          "count": 41,
+          "p50": 165.15,
+          "min": 35.55,
+          "max": 179.71
+        },
+        "knee_angle_mean": {
+          "count": 41,
+          "p50": 169.48,
+          "min": 163.02,
+          "max": 178.96
+        },
+        "knee_angle_min": {
+          "count": 41,
+          "p50": 168.49,
+          "min": 159.82,
+          "max": 178.64
+        },
+        "knee_angle_max": {
+          "count": 41,
+          "p50": 170.1,
+          "min": 163.95,
+          "max": 179.99
+        },
+        "leg_span_ratio": {
+          "count": 41,
+          "p50": 1.0544,
+          "min": 0.6724,
+          "max": 2.5632
+        },
+        "hip_knee_ankle_vertical_ratio": {
+          "count": 41,
+          "p50": 1.5053,
+          "min": 0.8747,
+          "max": 2.0939
+        },
+        "elbow_waist_angle_max": {
+          "count": 41,
+          "p50": 123.95,
+          "min": 65.81,
+          "max": 175.37
+        },
+        "arm_torso_angle_max": {
+          "count": 41,
+          "p50": 132.01,
+          "min": 45.92,
+          "max": 159.37
+        },
+        "wrist_elevation_angle_max": {
+          "count": 41,
+          "p50": 99.61,
+          "min": 34.25,
+          "max": 109.29
+        },
+        "ankle_max_speed": {
+          "count": 41,
+          "p50": 27.229,
+          "min": 1.25,
+          "max": 231.386
+        },
+        "torso_speed": {
+          "count": 41,
+          "p50": 34.252,
+          "min": 0.563,
+          "max": 110.541
+        }
+      }
+    }
+  ],
+  "focus_segments": [
+    {
+      "upload_file": "clip_0013_start_00-42-48_rtmpose_m.json",
+      "frame_range": [
+        159,
+        169
+      ],
+      "row_count": 6,
+      "triple90_blocked_rows": 0,
+      "feature_stats": {
+        "torso_leg_angle_mean": {
+          "count": 6,
+          "p50": 161.115,
+          "min": 152.93,
+          "max": 165.63
+        },
+        "torso_leg_angle_min": {
+          "count": 6,
+          "p50": 153.835,
+          "min": 141.73,
+          "max": 161.53
+        },
+        "torso_leg_angle_max": {
+          "count": 6,
+          "p50": 168.025,
+          "min": 166.76,
+          "max": 178.02
+        },
+        "center_torso_leg_angle": {
+          "count": 6,
+          "p50": 158.87,
+          "min": 148.98,
+          "max": 164.71
+        },
+        "left_torso_leg_angle": {
+          "count": 6,
+          "p50": 168.025,
+          "min": 166.76,
+          "max": 178.02
+        },
+        "right_torso_leg_angle": {
+          "count": 6,
+          "p50": 153.835,
+          "min": 141.73,
+          "max": 161.53
+        },
+        "knee_angle_mean": {
+          "count": 6,
+          "p50": 151.535,
+          "min": 148.98,
+          "max": 162.3
+        },
+        "knee_angle_min": {
+          "count": 6,
+          "p50": 140.42,
+          "min": 132.7,
+          "max": 161.35
+        },
+        "knee_angle_max": {
+          "count": 6,
+          "p50": 163.495,
+          "min": 162.57,
+          "max": 165.33
+        },
+        "leg_span_ratio": {
+          "count": 6,
+          "p50": 2.5351,
+          "min": 1.8623,
+          "max": 3.0497
+        },
+        "hip_knee_ankle_vertical_ratio": {
+          "count": 6,
+          "p50": 1.4466,
+          "min": 1.2507,
+          "max": 1.6316
+        },
+        "elbow_waist_angle_max": {
+          "count": 6,
+          "p50": 69.76,
+          "min": 66.13,
+          "max": 91.03
+        },
+        "arm_torso_angle_max": {
+          "count": 6,
+          "p50": 88.975,
+          "min": 72.05,
+          "max": 92.12
+        },
+        "wrist_elevation_angle_max": {
+          "count": 6,
+          "p50": 7.445,
+          "min": 5.35,
+          "max": 30.74
+        },
+        "ankle_max_speed": {
+          "count": 6,
+          "p50": 11.8435,
+          "min": 2.317,
+          "max": 73.191
+        },
+        "torso_speed": {
+          "count": 6,
+          "p50": 30.58,
+          "min": 6.077,
+          "max": 90.242
+        }
+      }
+    },
+    {
+      "upload_file": "clip_0020_start_00-48-44_rtmpose_m.json",
+      "frame_range": [
+        79,
+        82
+      ],
+      "row_count": 2,
+      "triple90_blocked_rows": 0,
+      "feature_stats": {
+        "torso_leg_angle_mean": {
+          "count": 2,
+          "p50": 151.46,
+          "min": 151.41,
+          "max": 151.51
+        },
+        "torso_leg_angle_min": {
+          "count": 2,
+          "p50": 138.685,
+          "min": 137.51,
+          "max": 139.86
+        },
+        "torso_leg_angle_max": {
+          "count": 2,
+          "p50": 163.225,
+          "min": 162.04,
+          "max": 164.41
+        },
+        "center_torso_leg_angle": {
+          "count": 2,
+          "p50": 152.465,
+          "min": 152.33,
+          "max": 152.6
+        },
+        "left_torso_leg_angle": {
+          "count": 2,
+          "p50": 138.685,
+          "min": 137.51,
+          "max": 139.86
+        },
+        "right_torso_leg_angle": {
+          "count": 2,
+          "p50": 163.225,
+          "min": 162.04,
+          "max": 164.41
+        },
+        "knee_angle_mean": {
+          "count": 2,
+          "p50": 148.455,
+          "min": 143.97,
+          "max": 152.94
+        },
+        "knee_angle_min": {
+          "count": 2,
+          "p50": 132.325,
+          "min": 124.21,
+          "max": 140.44
+        },
+        "knee_angle_max": {
+          "count": 2,
+          "p50": 164.575,
+          "min": 163.72,
+          "max": 165.43
+        },
+        "leg_span_ratio": {
+          "count": 2,
+          "p50": 0.8159,
+          "min": 0.7698,
+          "max": 0.862
+        },
+        "hip_knee_ankle_vertical_ratio": {
+          "count": 2,
+          "p50": 1.9745,
+          "min": 1.8228,
+          "max": 2.1261
+        },
+        "elbow_waist_angle_max": {
+          "count": 2,
+          "p50": 100.01,
+          "min": 99.48,
+          "max": 100.54
+        },
+        "arm_torso_angle_max": {
+          "count": 2,
+          "p50": 127.28,
+          "min": 123.54,
+          "max": 131.02
+        },
+        "wrist_elevation_angle_max": {
+          "count": 2,
+          "p50": 116.345,
+          "min": 110.19,
+          "max": 122.5
+        },
+        "ankle_max_speed": {
+          "count": 2,
+          "p50": 101.711,
+          "min": 16.53,
+          "max": 186.892
+        },
+        "torso_speed": {
+          "count": 2,
+          "p50": 43.8745,
+          "min": 38.153,
+          "max": 49.596
+        }
+      }
+    },
+    {
+      "upload_file": "clip_0013_start_00-29-53_rtmpose_m.json",
+      "frame_range": [
+        2244,
+        2254
+      ],
+      "row_count": 5,
+      "triple90_blocked_rows": 4,
+      "feature_stats": {
+        "torso_leg_angle_mean": {
+          "count": 5,
+          "p50": 172.59,
+          "min": 171.77,
+          "max": 174.08
+        },
+        "torso_leg_angle_min": {
+          "count": 5,
+          "p50": 164.95,
+          "min": 164.13,
+          "max": 167.91
+        },
+        "torso_leg_angle_max": {
+          "count": 5,
+          "p50": 179.12,
+          "min": 176.78,
+          "max": 179.66
+        },
+        "center_torso_leg_angle": {
+          "count": 5,
+          "p50": 174.4,
+          "min": 172.83,
+          "max": 175.21
+        },
+        "left_torso_leg_angle": {
+          "count": 5,
+          "p50": 179.12,
+          "min": 176.78,
+          "max": 179.66
+        },
+        "right_torso_leg_angle": {
+          "count": 5,
+          "p50": 164.95,
+          "min": 164.13,
+          "max": 167.91
+        },
+        "knee_angle_mean": {
+          "count": 5,
+          "p50": 165.83,
+          "min": 163.02,
+          "max": 170.48
+        },
+        "knee_angle_min": {
+          "count": 5,
+          "p50": 164.7,
+          "min": 159.82,
+          "max": 166.33
+        },
+        "knee_angle_max": {
+          "count": 5,
+          "p50": 167.23,
+          "min": 166.02,
+          "max": 174.63
+        },
+        "leg_span_ratio": {
+          "count": 5,
+          "p50": 1.0744,
+          "min": 1.0431,
+          "max": 1.1129
+        },
+        "hip_knee_ankle_vertical_ratio": {
+          "count": 5,
+          "p50": 1.3333,
+          "min": 1.1934,
+          "max": 1.4058
+        },
+        "elbow_waist_angle_max": {
+          "count": 5,
+          "p50": 126.08,
+          "min": 124.36,
+          "max": 127.68
+        },
+        "arm_torso_angle_max": {
+          "count": 5,
+          "p50": 51.92,
+          "min": 49.23,
+          "max": 55.66
+        },
+        "wrist_elevation_angle_max": {
+          "count": 5,
+          "p50": 37.91,
+          "min": 34.25,
+          "max": 44.61
+        },
+        "ankle_max_speed": {
+          "count": 5,
+          "p50": 94.929,
+          "min": 62.625,
+          "max": 156.625
+        },
+        "torso_speed": {
+          "count": 5,
+          "p50": 69.51,
+          "min": 33.856,
+          "max": 110.541
+        }
+      }
+    }
+  ],
+  "blocked_counts": {
+    "gt_frames": 4869,
+    "fa_frames": 446,
+    "gt_blocked_triple90": 387,
+    "fa_blocked_triple90": 81
+  },
+  "conclusion": "上下半身夹角 torso_leg_mean：标真 blocked P50=170.6° vs 误报 170.0°。 torso_leg_min：标真 blocked P50=164.1° vs 误报 163.8°（蹲取可看 min）。 膝角区分度有限（标真 blocked P50=173.9° vs 误报 blocked P50=173.1°），需结合 leg_span_ratio 网格验证。"
+}

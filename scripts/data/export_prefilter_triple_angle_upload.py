@@ -10,7 +10,8 @@
   python scripts/data/export_prefilter_triple_angle_upload.py
   python scripts/data/export_prefilter_triple_angle_upload.py \\
     --speed-feature ankle_max_speed --speed-threshold 80 \\
-    --output-dir localdata/export/rule-speed-prefilter-ankle-max80-triple90-prod-test
+    --stance-feature torso_leg_angle_mean --stance-threshold 160 \\
+    --output-dir localdata/export/rule-speed-prefilter-ankle-max80-triple90-torso160-prod-test
   python scripts/data/evaluate_inference_upload.py \\
     --dirs localdata/export/rule-speed-prefilter-knee65-triple90-prod-test --in-place
 """
@@ -57,6 +58,46 @@ TRIPLE_AND_CONDS: list[tuple[str, float]] = [
     ("wrist_elevation_angle_max", 60.0),
 ]
 
+# 站立姿态（肩-髋-踝整体夹角）：仅站立时速度门控可 block
+DEFAULT_STANCE_FEATURE = "torso_leg_angle_mean"
+DEFAULT_STANCE_THRESHOLD = 160.0
+# ankle_max@80 + triple90 推荐导出目录后缀
+ANKLE_TRIPLE90_STANCE_OUTPUT = (
+    ROOT / "localdata/export/rule-speed-prefilter-ankle-max80-triple90-torso160-prod-test"
+)
+
+
+def _is_standing_row(row: dict[str, Any], *, stance_feat: str, stance_thr: float) -> bool:
+    from scripts.data.analyze_skeleton_velocity_discrimination import _float_or_none
+
+    v = _float_or_none(row.get(stance_feat))
+    if v is None:
+        return True
+    return v >= stance_thr
+
+
+def _triple_stance_gate_blocks(
+    row: dict[str, Any],
+    *,
+    speed_feature: str,
+    speed_threshold: float,
+    triple_conds: list[tuple[str, float]],
+    stance_feature: str,
+    stance_threshold: float,
+) -> bool:
+    if not _multi_logic_gate_blocks(
+        row,
+        speed_feature=speed_feature,
+        speed_thr=speed_threshold,
+        conds=triple_conds,
+        logic="and",
+    ):
+        return False
+    if stance_feature:
+        if not _is_standing_row(row, stance_feat=stance_feature, stance_thr=stance_threshold):
+            return False
+    return True
+
 
 def _merge_velocity_angle_rows(
     velocity_rows: list[dict[str, Any]],
@@ -86,9 +127,11 @@ def recompute_triple_and_prefilter_upload_frames(
     alarm_cooldown_frames: int = 0,
     speed_feature: str = DEFAULT_SPEED_FEATURE,
     speed_threshold: float = DEFAULT_SPEED_THRESHOLD,
+    stance_feature: str = "",
+    stance_threshold: float = DEFAULT_STANCE_THRESHOLD,
     **_extra: Any,
 ) -> list[dict[str, Any]]:
-    """速度门控 + 三重角度 AND 豁免，只读 timeline 重算 upload 行。"""
+    """速度门控 + 三重角度 AND 豁免；可选站立姿态约束。"""
     velocity_rows = extract_subsampled_velocity_from_frames(
         timeline_frames,
         export_frame_indices,
@@ -111,12 +154,13 @@ def recompute_triple_and_prefilter_upload_frames(
     }
     return _recompute_with_row_gate(
         ctx,
-        gate_fn=lambda row: _multi_logic_gate_blocks(
+        gate_fn=lambda row: _triple_stance_gate_blocks(
             row,
             speed_feature=speed_feature,
-            speed_thr=speed_threshold,
-            conds=TRIPLE_AND_CONDS,
-            logic="and",
+            speed_threshold=speed_threshold,
+            triple_conds=TRIPLE_AND_CONDS,
+            stance_feature=str(stance_feature or "").strip(),
+            stance_threshold=float(stance_threshold),
         ),
     )
 
@@ -127,6 +171,17 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--speed-feature", default=DEFAULT_SPEED_FEATURE)
     parser.add_argument("--speed-threshold", type=float, default=DEFAULT_SPEED_THRESHOLD)
+    parser.add_argument(
+        "--stance-feature",
+        default=DEFAULT_STANCE_FEATURE,
+        help="站立判定特征（如 knee_angle_mean）；空则禁用姿态豁免",
+    )
+    parser.add_argument(
+        "--stance-threshold",
+        type=float,
+        default=DEFAULT_STANCE_THRESHOLD,
+        help="站立阈：特征 >= 阈视为站立，门控可 block",
+    )
     parser.add_argument("--pose-frame-interval", type=int, default=POSE_FRAME_INTERVAL)
     parser.add_argument("--alarm-min", type=int, default=ALARM_MIN_CONSECUTIVE)
     parser.add_argument("--alarm-cooldown", type=int, default=ALARM_COOLDOWN)
@@ -153,6 +208,10 @@ def main() -> int:
         f"elbow≥{TRIPLE_AND_CONDS[1][1]:.0f} AND "
         f"wrist_elev≥{TRIPLE_AND_CONDS[2][1]:.0f}"
     )
+    stance_feature = str(args.stance_feature or "").strip()
+    stance_threshold = float(args.stance_threshold)
+    if stance_feature:
+        rule_label += f" + standing({stance_feature}≥{stance_threshold:.0f})"
 
     if args.dry_run:
         print(f"将处理 {len(records)} 条记录")
@@ -165,6 +224,8 @@ def main() -> int:
         "alarm_cooldown_frames": args.alarm_cooldown,
         "speed_feature": speed_feature,
         "speed_threshold": speed_threshold,
+        "stance_feature": stance_feature,
+        "stance_threshold": stance_threshold,
     }
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -207,6 +268,16 @@ def main() -> int:
                         {"feature": f, "min_threshold": t} for f, t in TRIPLE_AND_CONDS
                     ],
                 },
+                **(
+                    {
+                        "stance_required": {
+                            "feature": stance_feature,
+                            "min_threshold": stance_threshold,
+                        },
+                    }
+                    if stance_feature
+                    else {}
+                ),
             },
         },
     )

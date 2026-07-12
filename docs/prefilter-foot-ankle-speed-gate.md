@@ -164,3 +164,55 @@ python scripts/data/export_prefilter_triple_angle_upload.py \
   --speed-feature ankle_max_speed --speed-threshold 80 \
   --output-dir localdata/export/rule-speed-prefilter-ankle-max80-triple90-prod-test
 ```
+
+## 11. 站立姿态豁免（ankle_max@80 + triple90 + 肩髋踝）
+
+**动机**：相对 baseline 仍多 2 段漏报，多为蹲取时踝速高但 triple90 未满足。采用 **∠(肩, 髋, 踝)** 上下半身整体夹角判定站立，仅站立时速度门控可 block。
+
+**门控逻辑**：
+
+```
+block = ankle_max_speed > 80
+    AND NOT triple90
+    AND torso_leg_angle_mean >= 160   # 肩-髋-踝，蹲姿豁免
+```
+
+**特征字段**（`event_engine/skeleton_angles.py`）：
+- `left/right_torso_leg_angle`、`torso_leg_angle_mean/min/max`
+- `center_torso_leg_angle`（肩中-髋中-踝中）
+- 辅助：`knee_angle_mean/min/max`、`leg_span_ratio`、`hip_knee_ankle_vertical_ratio`
+
+**28-clip 实验结果**（`validate_prefilter_stance_exempt28.py`）：
+
+| 方案 | TP | FP | FN | 召回 |
+|------|-----|-----|-----|------|
+| baseline | 147 | 429 | 9 | 94.23% |
+| ankle_max@80 + triple90 | 145 | 290 | 11 | 92.95% |
+| ankle_max@80 + triple90 + knee≥120 | 146 | 294 | 10 | 93.59% |
+| **ankle_max@80 + triple90 + torso≥160** | **146** | **311** | **10** | **93.59%** |
+
+相对 triple90：FN −1，FP +21；**未追平 baseline FN=9**。
+
+**筛查结论**（`screen_prefilter_stance_proxy28.py`）：
+- 俯视 2D 下 `torso_leg_angle_mean` P50 标真/误报均 ~170°，区分度弱
+- `torso_leg_angle_min` 对蹲姿略敏感（P50 标真 164° vs 误报 164°）
+- 膝角 `knee_angle_mean` P50 亦 ~174°，已弃用为主站立代理
+
+**导出包（当前采用）**：
+
+```
+localdata/export/rule-speed-prefilter-ankle-max80-triple90-torso160-prod-test/
+```
+
+```bash
+python scripts/data/export_prefilter_triple_angle_upload.py \
+  --speed-feature ankle_max_speed --speed-threshold 80 \
+  --stance-feature torso_leg_angle_mean --stance-threshold 160 \
+  --output-dir localdata/export/rule-speed-prefilter-ankle-max80-triple90-torso160-prod-test
+```
+
+对比 MD：
+- `localdata/export/compare_rule-speed-prefilter-ankle-max80-triple90-torso160-prod-test_vs_rule-baseline-local-prod-test.md`
+- `localdata/export/compare_rule-speed-prefilter-ankle-max80-triple90-torso160-prod-test_vs_rule-speed-prefilter-ankle-max80-triple90-prod-test.md`
+
+**待跟进**：俯视相机下肩髋踝区分仍有限；可试 `torso_leg_min`、腕抬升组合或 3D/侧面机位特征。
