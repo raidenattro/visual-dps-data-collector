@@ -125,7 +125,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="对 MD 中被消除的误报序号加删除线")
     parser.add_argument(
         "--md",
-        default=str(ROOT / "localdata" / "export" / "rule-baseline-prod-test误报漏报情况.md"),
+        default=str(ROOT / "localdata" / "export" / "diagnostics" / "rule-baseline-prod-test误报漏报情况.md"),
     )
     parser.add_argument(
         "--baseline-report",

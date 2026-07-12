@@ -353,8 +353,8 @@ def main() -> int:
     parser.add_argument("--experiment", required=True, help="实验目录（含 accuracy_report.json）")
     parser.add_argument(
         "--out-dir",
-        default=str(ROOT / "localdata" / "export"),
-        help="报告输出目录（默认 localdata/export）",
+        default=str(ROOT / "localdata" / "export" / "compare"),
+        help="报告输出目录（默认 localdata/export/compare）",
     )
     parser.add_argument("--stem", default="", help="报告文件名前缀（默认 compare_{实验}_vs_{基准}）")
     args = parser.parse_args()

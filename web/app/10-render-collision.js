@@ -1375,6 +1375,75 @@ function drawDetBboxes(frame, inferW, inferH) {
   ctx.restore();
 }
 
+/** 骨骼特征 track 标签（锚点跟随当前帧骨架，不依赖 API 缓存坐标） */
+function resolvePersonLabelAnchor(person) {
+  const kpts = person?.keypoints || [];
+  if (kpts.length >= 7) {
+    const ls = kpts[5];
+    const rs = kpts[6];
+    if (ls && rs && ls[2] > 0.2 && rs[2] > 0.2) {
+      return { ax: (ls[0] + rs[0]) / 2, ay: (ls[1] + rs[1]) / 2 };
+    }
+  }
+  const bbox = person?.bbox;
+  if (Array.isArray(bbox) && bbox.length >= 4) {
+    return { ax: (bbox[0] + bbox[2]) / 2, ay: bbox[1] };
+  }
+  return { ax: NaN, ay: NaN };
+}
+
+function drawPersonFeatureTrackLabels(frame, inferW, inferH) {
+  if (typeof isPlaybackFeatureTrackLabelsEnabled === "function") {
+    if (!isPlaybackFeatureTrackLabelsEnabled()) return;
+  }
+
+  const framePersons = frame?.persons || [];
+  if (!framePersons.length) return;
+
+  const gateByTrack =
+    typeof getPlaybackFeatureGateByTrack === "function"
+      ? getPlaybackFeatureGateByTrack()
+      : new Map();
+
+  const layout = getDisplayLayout();
+
+  ctx.save();
+  ctx.font = "bold 13px system-ui, sans-serif";
+
+  framePersons.forEach((person, idx) => {
+    const trackId =
+      person.person_track_id != null && person.person_track_id !== ""
+        ? person.person_track_id
+        : idx + 1;
+    const pid = person.person_id != null ? person.person_id : idx;
+    const { ax, ay } = resolvePersonLabelAnchor(person);
+    if (!Number.isFinite(ax) || !Number.isFinite(ay)) return;
+
+    const [dx, dy] = mapInferToDisplay(ax, ay, inferW, inferH, layout);
+    const text = `T${trackId} · P${pid}`;
+    const padX = 5;
+    const padY = 3;
+    const metrics = ctx.measureText(text);
+    const boxW = metrics.width + padX * 2;
+    const boxH = 18;
+    const left = dx + 6;
+    const top = dy - 28;
+    const gate = gateByTrack.get(Number(trackId));
+
+    ctx.fillStyle = "rgba(15, 23, 42, 0.82)";
+    ctx.fillRect(left, top, boxW, boxH);
+    ctx.strokeStyle = gate?.would_block_collision
+      ? "rgba(248, 113, 113, 0.95)"
+      : "rgba(52, 211, 153, 0.95)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(left, top, boxW, boxH);
+    ctx.fillStyle = "#f8fafc";
+    ctx.fillText(text, left + padX, top + boxH - padY - 2);
+  });
+
+  ctx.restore();
+}
+
 function collisionSetsForPlaybackFrame(frame, inferW, inferH) {
   const fi = Number(frame?.frame_idx) || Number(frame?.source_frame_idx) || 0;
   const evalSets = getEvalCollisionSetsForFrame(fi);
@@ -1576,6 +1645,7 @@ function drawSkeletonPlaybackOnly(frame, inferW, inferH) {
     });
   });
   ctx.stroke();
+  drawPersonFeatureTrackLabels(frame, inferW, inferH);
 }
 
 function clearFrozenPlaybackLayout() {
@@ -1620,6 +1690,25 @@ function drawSkeleton(frame, inferW, inferH, collisionSets = null) {
       ctx.fill();
     });
   });
+  drawPersonFeatureTrackLabels(frame, inferW, inferH);
+}
+
+/** 特征异步加载后仅重绘 track 标签，避免整帧 redraw 风暴 */
+function repaintFeatureTrackLabelsOnly() {
+  if (playbackRenderLoopActive && videoEl && !videoEl.paused) return;
+  const fi =
+    typeof lastRenderedFrameIdx === "number" && lastRenderedFrameIdx > 0
+      ? lastRenderedFrameIdx
+      : typeof getCurrentPlaybackFrameIdx === "function"
+        ? getCurrentPlaybackFrameIdx()
+        : 0;
+  if (fi <= 0) return;
+  const hit =
+    typeof frameEntryByIdx === "function"
+      ? frameEntryByIdx(fi)
+      : frameByTime?.find((e) => e.frameIdx === fi) || null;
+  if (!hit?.frame) return;
+  drawPersonFeatureTrackLabels(hit.frame, hit.w, hit.h);
 }
 
 function redrawCurrentFrame() {
@@ -1694,8 +1783,13 @@ async function renderFrameEntry(hit, renderGen) {
   } else {
     timeLabel.title = annotationBoxes.length ? "无碰撞" : "";
   }
-  if (typeof updatePlaybackWristFeaturesUi === "function") {
+  const skipFeatureUi =
+    playbackRenderLoopActive && videoEl && !videoEl.paused;
+  if (!skipFeatureUi && typeof updatePlaybackWristFeaturesUi === "function") {
     updatePlaybackWristFeaturesUi(hit.frameIdx);
+  }
+  if (!skipFeatureUi && typeof updatePlaybackSkeletonFeaturesUi === "function") {
+    updatePlaybackSkeletonFeaturesUi(hit.frameIdx);
   }
   if (typeof updateEventReviewFrameNavUi === "function") updateEventReviewFrameNavUi();
 }

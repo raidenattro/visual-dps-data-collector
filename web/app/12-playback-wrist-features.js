@@ -306,15 +306,42 @@ function updatePlaybackWristFeaturesUi(frameIdx) {
   const panel = wristFeaturesPanelEl();
   if (!panel || panel.classList.contains("hidden")) return;
   const fi = parseInt(frameIdx, 10);
+  const frameLabel = $("#playback-wrist-features-frame");
   if (!Number.isFinite(fi) || fi <= 0) {
     renderVelocityRowsForFrame(0, []);
     renderSegmentsForFrame(0);
-    const frameLabel = $("#playback-wrist-features-frame");
     if (frameLabel) frameLabel.textContent = "—";
     return;
   }
-  const frameLabel = $("#playback-wrist-features-frame");
   if (frameLabel) frameLabel.textContent = String(fi);
+
+  // 仅暂停时加载帧级手腕速度
+  if (typeof isPlaybackVideoPlaying === "function" && isPlaybackVideoPlaying()) {
+    renderWristFeaturesPlayingPlaceholder(fi);
+    return;
+  }
+
   renderSegmentsForFrame(fi);
   void ensurePlaybackWristVelocityForFrame(fi);
+}
+
+function renderWristFeaturesPlayingPlaceholder(frameIdx) {
+  const velBody = $("#playback-wrist-velocity-body");
+  if (velBody) {
+    velBody.innerHTML = '<p class="hint">播放中，暂停后可查看本帧手腕速度</p>';
+  }
+  const segBody = $("#playback-wrist-segments-body");
+  if (segBody) {
+    segBody.innerHTML = '<tr><td colspan="8" class="hint">播放中，暂停后显示</td></tr>';
+  }
+}
+
+function onPlaybackWristFeaturesPlayStateChange() {
+  const fi =
+    typeof currentPlaybackWristFrameIdx === "function" ? currentPlaybackWristFrameIdx() : 0;
+  if (typeof isPlaybackVideoPlaying === "function" && isPlaybackVideoPlaying()) {
+    if (fi > 0) renderWristFeaturesPlayingPlaceholder(fi);
+    return;
+  }
+  if (fi > 0) updatePlaybackWristFeaturesUi(fi);
 }

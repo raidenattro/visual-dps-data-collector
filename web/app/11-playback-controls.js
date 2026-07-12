@@ -172,6 +172,7 @@ videoEl.addEventListener("play", () => {
   if (typeof clearPlaybackAuthorityFrameIdx === "function") clearPlaybackAuthorityFrameIdx();
   readPlaybackSpeedFromSelect();
   if (typeof ensurePlaybackRenderLoop === "function") ensurePlaybackRenderLoop();
+  if (typeof onPlaybackVideoPlayStateChange === "function") onPlaybackVideoPlayStateChange();
 });
 
 videoEl.addEventListener("pause", () => {
@@ -203,6 +204,7 @@ videoEl.addEventListener("pause", () => {
     });
   }
   if (typeof redrawCurrentFrame === "function") redrawCurrentFrame();
+  if (typeof onPlaybackVideoPlayStateChange === "function") onPlaybackVideoPlayStateChange();
   if (videoEl.duration && Number.isFinite(videoEl.duration)) {
     seekBar.value = String((videoEl.currentTime / videoEl.duration) * 1000);
     timeLabel.textContent = formatTime(videoEl.currentTime);

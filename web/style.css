@@ -1359,6 +1359,67 @@ main:has(#panel-playback.active) {
   color: #fecaca;
 }
 
+.playback-skeleton-features {
+  margin-top: 0.55rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid rgba(52, 211, 153, 0.22);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.5);
+  font-size: 0.82rem;
+}
+
+.playback-skeleton-features-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  max-height: 42vh;
+  overflow-y: auto;
+}
+
+.skeleton-features-person-card {
+  padding: 0.45rem 0.5rem;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 6px;
+  background: rgba(2, 6, 23, 0.35);
+}
+
+.skeleton-features-person-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.skeleton-features-kv {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.76rem;
+  margin-bottom: 0.35rem;
+}
+
+.skeleton-features-kv th {
+  text-align: left;
+  color: #94a3b8;
+  font-weight: 500;
+  padding: 0.12rem 0.3rem 0.12rem 0;
+  white-space: nowrap;
+  vertical-align: top;
+}
+
+.skeleton-features-kv td {
+  padding: 0.12rem 0;
+}
+
+.skeleton-features-gate {
+  margin-top: 0.35rem;
+  padding: 0.35rem 0.4rem;
+  border-radius: 4px;
+  background: rgba(30, 41, 59, 0.55);
+  font-size: 0.74rem;
+  line-height: 1.35;
+}
+}
+
 .playback-transport .controls {
   margin-top: 0;
 }

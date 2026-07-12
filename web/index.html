@@ -515,6 +515,10 @@
                 <input type="checkbox" id="playback-show-det-bbox" />
                 <span>检测框</span>
               </label>
+              <label class="playback-det-bbox-label toggle-row" title="暂停时在画面上显示 track / person_id">
+                <input type="checkbox" id="playback-show-feature-labels" />
+                <span>特征ID</span>
+              </label>
               <label class="playback-speed-label">
                 倍速
                 <select id="playback-speed" title="播放倍速">
@@ -574,6 +578,13 @@
                 </table>
               </div>
             </div>
+          </section>
+          <section id="playback-skeleton-features" class="playback-skeleton-features hidden" aria-live="polite">
+            <div class="playback-wrist-features-head">
+              <h3 class="playback-wrist-features-title">骨骼特征 · 帧 <span id="playback-skeleton-features-frame">—</span></h3>
+              <span id="playback-skeleton-features-meta" class="hint">暂停时显示特征参数</span>
+            </div>
+            <div id="playback-skeleton-features-body" class="playback-skeleton-features-body"></div>
           </section>
         </div>
 
@@ -714,6 +725,7 @@
   <script src="app/10-render-collision.js?v=86"></script>
   <script src="app/11-playback-controls.js?v=81"></script>
   <script src="app/12-playback-wrist-features.js?v=3"></script>
+  <script src="app/13-playback-skeleton-features.js?v=1"></script>
   <script src="annotate.js?v=17"></script>
   <script src="accuracy.js?v=14"></script>
 </body>

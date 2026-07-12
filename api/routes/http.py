@@ -1446,6 +1446,36 @@ def get_record_wrist_features(
     return JSONResponse(payload)
 
 
+@router.get("/api/records/{record_id:path}/playback-features")
+def get_record_playback_features(
+    record_id: str,
+    frame_idx: int,
+    include_wrist: bool = False,
+) -> JSONResponse:
+    """回放按帧骨骼特征：速度 + 关节角（实时计算，带进程内缓存）。
+
+    默认不含手腕 Parquet 读取，避免阻塞视频加载；需要时传 include_wrist=true。
+    """
+    from api.playback_features_service import load_playback_features_for_frame
+
+    locator = locate_record_by_id(record_id)
+    if not locator:
+        raise HTTPException(404, "记录不存在")
+    if frame_idx <= 0:
+        raise HTTPException(400, "frame_idx 须为正整数")
+    try:
+        payload = load_playback_features_for_frame(
+            locator,
+            frame_idx=int(frame_idx),
+            include_wrist=bool(include_wrist),
+        )
+    except RuntimeError as exc:
+        raise HTTPException(500, str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(500, f"特征计算失败: {exc}") from exc
+    return JSONResponse(payload)
+
+
 @router.get("/api/records/{record_id:path}/manifest.json")
 def get_record_manifest(record_id: str) -> JSONResponse:
     locator = locate_record_by_id(record_id)

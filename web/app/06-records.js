@@ -1269,6 +1269,9 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
   if (typeof loadPlaybackWristFeatures === "function") {
     void loadPlaybackWristFeatures(recordId);
   }
+  if (typeof loadPlaybackSkeletonFeatures === "function") {
+    void loadPlaybackSkeletonFeatures(recordId);
+  }
   const annHint = annResult.ok
     ? ` · 标注：${annResult.label}`
     : annResult.fromPose
@@ -1308,6 +1311,9 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
     }
     setPlaybackInfo(hint);
     redrawCurrentFrame();
+    if (typeof enablePlaybackSkeletonFeatureFetch === "function") {
+      enablePlaybackSkeletonFeatureFetch({ delayMs: 700 });
+    }
     if (!playbackEvents.length) {
       await startVideoPlayback("");
     }
@@ -1321,5 +1327,8 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
     setPlaybackInfo(`${baseHint} · 无配套视频，可上传或仅播放骨骼。`);
   }
   redrawCurrentFrame();
+  if (typeof enablePlaybackSkeletonFeatureFetch === "function") {
+    enablePlaybackSkeletonFeatureFetch({ delayMs: 700 });
+  }
   await applyPendingPlaybackAccuracyNav();
 }

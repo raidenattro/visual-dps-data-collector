@@ -583,6 +583,7 @@ function clearPlaybackEvents() {
   if (eventsPanel) eventsPanel.classList.add("hidden");
   if (typeof invalidatePlaybackAccuracyOverlay === "function") invalidatePlaybackAccuracyOverlay();
   if (typeof clearPlaybackWristFeatures === "function") clearPlaybackWristFeatures();
+  if (typeof clearPlaybackSkeletonFeatures === "function") clearPlaybackSkeletonFeatures();
   if (eventCountLabel) eventCountLabel.textContent = "—";
   setEventReviewSaveStatus("");
 }
