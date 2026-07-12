@@ -31,6 +31,22 @@ const FEATURE_ANGLE_LABELS = {
   elbow_angle_vel_max: "肘角速度max",
 };
 
+const FEATURE_LEG_POSE_LABELS = {
+  torso_leg_angle_mean: "肩髋踝mean",
+  torso_leg_angle_min: "肩髋踝min",
+  torso_leg_angle_max: "肩髋踝max",
+  center_torso_leg_angle: "肩髋踝中心",
+  left_torso_leg_angle: "左肩髋踝",
+  right_torso_leg_angle: "右肩髋踝",
+  knee_angle_mean: "膝角mean",
+  knee_angle_min: "膝角min",
+  knee_angle_max: "膝角max",
+  left_knee_angle: "左膝角",
+  right_knee_angle: "右膝角",
+  leg_span_ratio: "腿长/躯干比",
+  hip_knee_ankle_vertical_ratio: "大腿/小腿比",
+};
+
 let playbackFeaturesRecordId = "";
 let playbackFeaturesCache = new Map();
 let playbackFeaturesLoadInflight = null;
@@ -131,6 +147,23 @@ function enablePlaybackSkeletonFeatureFetch(opts = {}) {
   }, delayMs);
 }
 
+function renderPlaybackFeaturesMeta(payload) {
+  const meta = $("#playback-skeleton-features-meta");
+  if (!meta) return;
+  if (!payload || typeof payload !== "object") {
+    meta.textContent = "暂停时显示本帧特征参数";
+    return;
+  }
+  const parts = [];
+  if (payload.is_export_frame === false) {
+    parts.push("非 export 抽帧，特征仅作参考");
+  } else if (payload.is_export_frame) {
+    parts.push(`export 帧 · interval=${payload.pose_frame_interval ?? "?"}`);
+    if (payload.export_indices_source) parts.push(payload.export_indices_source);
+  }
+  meta.textContent = parts.length ? parts.join(" · ") : "暂停时显示本帧特征参数（与 export 同路径）";
+}
+
 function renderPlaybackFeaturesPlayingPlaceholder() {
   const body = $("#playback-skeleton-features-body");
   if (body) {
@@ -197,10 +230,15 @@ function renderGatePreview(gate) {
   const exemptTxt = (gate.angle_exempt_detail || [])
     .map((d) => `${d.feature}≥${d.min_threshold}: ${d.met ? "✓" : "✗"} (${fmtFeatureNum(d.value, 1)})`)
     .join("<br>");
+  const stanceTxt = gate.stance_feature
+    ? `${gate.stance_feature}≥${gate.stance_threshold}: ${gate.is_standing ? "站立✓" : "蹲姿✗"} (${fmtFeatureNum(gate.stance_value, 1)})`
+    : "";
   return `<div class="skeleton-features-gate">
-    <div><strong>门控预览</strong> · block=${escFeatureHtml(blocked)}</div>
+    <div><strong>门控预览</strong> · ankle_max@80 + triple90 + 肩髋踝≥160</div>
+    <div><strong>block</strong>=${escFeatureHtml(blocked)}</div>
     <div class="hint">${escFeatureHtml(speedTxt)}</div>
     <div class="hint">${exemptTxt || "—"}</div>
+    ${stanceTxt ? `<div class="hint">${escFeatureHtml(stanceTxt)}</div>` : ""}
   </div>`;
 }
 
@@ -214,8 +252,10 @@ function renderPersonFeatureCard(person) {
     </header>
     <h5 class="playback-wrist-features-subtitle">速度 px/s</h5>
     ${renderFeatureKvTable(person.velocity, FEATURE_VELOCITY_LABELS, "")}
-    <h5 class="playback-wrist-features-subtitle">角度 °</h5>
+    <h5 class="playback-wrist-features-subtitle">上肢角度 °</h5>
     ${renderFeatureKvTable(person.angles, FEATURE_ANGLE_LABELS, "")}
+    <h5 class="playback-wrist-features-subtitle">下肢姿态 ° / 比</h5>
+    ${renderFeatureKvTable(person.angles, FEATURE_LEG_POSE_LABELS, "")}
     <h5 class="playback-wrist-features-subtitle">手腕明细</h5>
     ${renderWristSubTable(person.wrists)}
     ${renderGatePreview(person.gate_preview)}
@@ -252,6 +292,7 @@ function applyCachedPlaybackFeatures(fi) {
   if (playbackFeaturesCache.has(fi)) {
     const cached = playbackFeaturesCache.get(fi);
     playbackFeaturesCurrentPersons = cached?.persons || [];
+    renderPlaybackFeaturesMeta(cached?.meta || null);
     if (cached?.error) renderPlaybackFeaturesBody(fi, [], { error: cached.error });
     else if (cached?.hint) renderPlaybackFeaturesBody(fi, [], { hint: cached.hint });
     else renderPlaybackFeaturesBody(fi, playbackFeaturesCurrentPersons);
@@ -305,12 +346,18 @@ async function ensurePlaybackFeaturesForFrame(frameIdx) {
       const res = await fetch(`${recordApiUrl(rid, "/playback-features")}?${qs}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const body = await res.json();
+      const meta = {
+        is_export_frame: body.is_export_frame,
+        pose_frame_interval: body.pose_frame_interval,
+        export_indices_source: body.export_indices_source,
+        export_frame_idx: body.export_frame_idx,
+      };
       if (!body.available) {
-        return { persons: [], hint: body.hint || body.error || "无特征" };
+        return { persons: [], hint: body.hint || body.error || "无特征", meta };
       }
-      return { persons: body.persons || [], hint: null };
+      return { persons: body.persons || [], hint: null, meta };
     } catch (err) {
-      return { persons: [], error: err.message };
+      return { persons: [], error: err.message, meta: null };
     } finally {
       playbackFeaturesLoadInflight = null;
     }

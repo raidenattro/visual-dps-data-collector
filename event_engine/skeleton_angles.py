@@ -29,12 +29,27 @@ WRIST_ANGLE_DEFS = (
     ("left_wrist_angle", 7, 9, 5),       # 肘-腕-肩（前臂相对上臂偏折）
     ("right_wrist_angle", 8, 10, 6),
 )
+# 膝角：髋-膝-踝内角，站立接近伸直（~150–180°），蹲姿明显变小
+KNEE_ANGLE_DEFS = (
+    ("left_knee_angle", 11, 13, 15),
+    ("right_knee_angle", 12, 14, 16),
+)
 
 ALL_ANGLE_DEFS = SHOULDER_ANGLE_DEFS + ELBOW_ANGLE_DEFS + WRIST_ANGLE_DEFS
 
 # 侧身/腰身参考：双髋中心
 HIP_LEFT = 11
 HIP_RIGHT = 12
+SHOULDER_LEFT = 5
+SHOULDER_RIGHT = 6
+ANKLE_LEFT = 15
+ANKLE_RIGHT = 16
+
+# 上半身(肩→髋)与下半身(髋→踝)整体夹角，绕髋；行走时膝弯但上下躯干夹角相对稳定
+TORSO_LEG_ANGLE_DEFS = (
+    ("left_torso_leg_angle", SHOULDER_LEFT, HIP_LEFT, ANKLE_LEFT),
+    ("right_torso_leg_angle", SHOULDER_RIGHT, HIP_RIGHT, ANKLE_RIGHT),
+)
 
 
 def _hip_center(person: dict[str, Any]) -> tuple[float, float] | None:
@@ -48,6 +63,109 @@ def _hip_center(person: dict[str, Any]) -> tuple[float, float] | None:
     if rh is None:
         return lh
     return (lh[0] + rh[0]) / 2.0, (lh[1] + rh[1]) / 2.0
+
+
+def _shoulder_center(person: dict[str, Any]) -> tuple[float, float] | None:
+    """双肩中心。"""
+    ls = _read_xy(person, SHOULDER_LEFT)
+    rs = _read_xy(person, SHOULDER_RIGHT)
+    if ls is None and rs is None:
+        return None
+    if ls is None:
+        return rs
+    if rs is None:
+        return ls
+    return (ls[0] + rs[0]) / 2.0, (ls[1] + rs[1]) / 2.0
+
+
+def _ankle_center(person: dict[str, Any]) -> tuple[float, float] | None:
+    """双踝中心。"""
+    la = _read_xy(person, ANKLE_LEFT)
+    ra = _read_xy(person, ANKLE_RIGHT)
+    if la is None and ra is None:
+        return None
+    if la is None:
+        return ra
+    if ra is None:
+        return la
+    return (la[0] + ra[0]) / 2.0, (la[1] + ra[1]) / 2.0
+
+
+def _leg_pose_geometry_for_person(person: dict[str, Any]) -> dict[str, float | None]:
+    """下肢姿态几何：上下半身夹角 + 膝角 + 腿长比。"""
+    out: dict[str, float | None] = {}
+    knee_angles: list[float] = []
+    torso_leg_angles: list[float] = []
+    leg_span_ratios: list[float] = []
+    thigh_calf_ratios: list[float] = []
+
+    for name, sh_idx, hip_idx, ankle_idx in TORSO_LEG_ANGLE_DEFS:
+        sh = _read_xy(person, sh_idx)
+        hip = _read_xy(person, hip_idx)
+        ankle = _read_xy(person, ankle_idx)
+        if sh is None or hip is None or ankle is None:
+            out[name] = None
+            continue
+        ang = _angle_at_joint(sh, hip, ankle)
+        out[name] = round(ang, 2) if ang is not None else None
+        if ang is not None:
+            torso_leg_angles.append(float(ang))
+
+    sh_c = _shoulder_center(person)
+    hip_c = _hip_center(person)
+    anc_c = _ankle_center(person)
+    if sh_c is not None and hip_c is not None and anc_c is not None:
+        ang = _angle_at_joint(sh_c, hip_c, anc_c)
+        out["center_torso_leg_angle"] = round(ang, 2) if ang is not None else None
+        if ang is not None:
+            torso_leg_angles.append(float(ang))
+
+    if torso_leg_angles:
+        out["torso_leg_angle_mean"] = round(sum(torso_leg_angles) / len(torso_leg_angles), 2)
+        out["torso_leg_angle_min"] = round(min(torso_leg_angles), 2)
+        out["torso_leg_angle_max"] = round(max(torso_leg_angles), 2)
+
+    for name, hip_idx, knee_idx, ankle_idx in KNEE_ANGLE_DEFS:
+        hip = _read_xy(person, hip_idx)
+        knee = _read_xy(person, knee_idx)
+        ankle = _read_xy(person, ankle_idx)
+        if hip is None or knee is None or ankle is None:
+            out[name] = None
+            continue
+        ang = _angle_at_joint(hip, knee, ankle)
+        out[name] = round(ang, 2) if ang is not None else None
+        if ang is not None:
+            knee_angles.append(float(ang))
+
+        calf_vert = abs(ankle[1] - knee[1])
+        if calf_vert > 1.0:
+            thigh_vert = abs(knee[1] - hip[1])
+            thigh_calf_ratios.append(thigh_vert / calf_vert)
+
+    sh_c = _shoulder_center(person)
+    hip_c = _hip_center(person)
+    if sh_c is not None and hip_c is not None:
+        torso_vert = abs(hip_c[1] - sh_c[1])
+        if torso_vert > 1.0:
+            for hip_idx, _knee_idx, ankle_idx in ((11, 13, 15), (12, 14, 16)):
+                hip = _read_xy(person, hip_idx)
+                ankle = _read_xy(person, ankle_idx)
+                if hip is None or ankle is None:
+                    continue
+                leg_vert = abs(ankle[1] - hip[1])
+                leg_span_ratios.append(leg_vert / torso_vert)
+
+    if knee_angles:
+        out["knee_angle_mean"] = round(sum(knee_angles) / len(knee_angles), 2)
+        out["knee_angle_min"] = round(min(knee_angles), 2)
+        out["knee_angle_max"] = round(max(knee_angles), 2)
+    if leg_span_ratios:
+        out["leg_span_ratio"] = round(sum(leg_span_ratios) / len(leg_span_ratios), 4)
+    if thigh_calf_ratios:
+        out["hip_knee_ankle_vertical_ratio"] = round(
+            sum(thigh_calf_ratios) / len(thigh_calf_ratios), 4
+        )
+    return out
 
 
 def _angle_from_downward(dx: float, dy: float) -> float | None:
@@ -251,11 +369,13 @@ def extract_joint_angle_rows(
             track_id = int(person.get("person_track_id") or 0)
             angles = _joint_angles_for_person(person)
             orient = _orientation_angles_for_person(person)
+            leg_pose = _leg_pose_geometry_for_person(person)
             row: dict[str, Any] = {
                 "frame_idx": frame_idx,
                 "person_track_id": track_id,
             }
             row.update(orient)
+            row.update(leg_pose)
             for name, _ia, _ib, _ic in ALL_ANGLE_DEFS:
                 row[name] = angles.get(name)
                 row[f"{name}_vel"] = None

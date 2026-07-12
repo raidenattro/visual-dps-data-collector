@@ -1025,11 +1025,11 @@ async function loadAnnotationBoxesFromFile(file) {
   loadAnnotationBoxesFromData(data);
 }
 
-/** 将 timeline 行写入 frameByTime（v2 分包回放索引用） */
+/** 将 timeline 行写入 frameByTime（v2 分包回放索引用，帧号与 export 一致） */
 function applyTimelineRowsToFrameIndex(rows, inferW, inferH) {
   frameByTime = [];
   (rows || []).forEach((row) => {
-    const fi = Number(row.frame_idx) || 0;
+    const fi = Number(row.source_frame_idx) || Number(row.frame_idx) || 0;
     if (!fi) return;
     frameByTime.push({
       t: Number(row.timestamp_sec) || 0,
@@ -1038,41 +1038,6 @@ function applyTimelineRowsToFrameIndex(rows, inferW, inferH) {
       h: Number(row.infer_height) || inferH,
     });
   });
-  frameByTime.sort((a, b) => a.t - b.t);
-}
-
-/** frame_count 已知时合成 1..N 密集时间轴（事件帧可能与稀疏 timeline 行不一致） */
-function buildSyntheticFrameIndexFromManifest() {
-  const total = Number(poseData?.frame_count) || 0;
-  const fps = Number(poseData?.fps) || 15;
-  if (!total) return false;
-
-  const inferW = poseData.infer_width || 640;
-  const inferH = poseData.infer_height || 480;
-  frameByTime = [];
-  for (let i = 1; i <= total; i += 1) {
-    frameByTime.push({
-      t: (i - 1) / fps,
-      frameIdx: i,
-      w: inferW,
-      h: inferH,
-    });
-  }
-  return frameByTime.length > 0;
-}
-
-/** 稀疏 timeline 加载后补齐 1..frame_count，避免事件 frame_idx 无对应行 */
-function densifyFrameIndexFromManifest() {
-  const total = Number(poseData?.frame_count) || 0;
-  if (!total || !frameByTime.length) return;
-  const fps = Number(poseData?.fps) || 15;
-  const inferW = poseData.infer_width || frameByTime[0]?.w || poseData.infer_width || 640;
-  const inferH = poseData.infer_height || frameByTime[0]?.h || poseData.infer_height || 480;
-  const existing = new Set(frameByTime.map((e) => e.frameIdx));
-  for (let i = 1; i <= total; i += 1) {
-    if (existing.has(i)) continue;
-    frameByTime.push({ t: (i - 1) / fps, frameIdx: i, w: inferW, h: inferH });
-  }
   frameByTime.sort((a, b) => a.t - b.t);
 }
 
@@ -1105,16 +1070,10 @@ function buildFrameIndex(recordId = null) {
     const inferW = poseData.infer_width || 640;
     const inferH = poseData.infer_height || 480;
 
-    if (buildSyntheticFrameIndexFromManifest()) {
-      if (typeof renderAccuracySeekMarkers === "function") renderAccuracySeekMarkers();
-      return Promise.resolve();
-    }
-
     return fetch(`${recordApiUrl(recordId, "/timeline")}?light=1`)
       .then((res) => (res.ok ? res.json() : { timeline: [] }))
       .then((body) => {
         applyTimelineRowsToFrameIndex(body.timeline || [], inferW, inferH);
-        densifyFrameIndexFromManifest();
         if (typeof renderAccuracySeekMarkers === "function") renderAccuracySeekMarkers();
       });
   }
@@ -1124,14 +1083,16 @@ function buildFrameIndex(recordId = null) {
     return Promise.resolve();
   }
   poseData.frames.forEach((f) => {
+    const fi = Number(f.source_frame_idx) || Number(f.frame_idx) || 0;
+    if (!fi) return;
     frameByTime.push({
       t: f.timestamp_sec ?? 0,
-      frameIdx: f.frame_idx,
+      frameIdx: fi,
       frame: f,
       w: f.infer_width || 640,
       h: f.infer_height || 480,
     });
-    if (f.frame_idx != null) frameCache.set(f.frame_idx, f);
+    frameCache.set(fi, f);
   });
   frameByTime.sort((a, b) => a.t - b.t);
   if (typeof renderAccuracySeekMarkers === "function") renderAccuracySeekMarkers();

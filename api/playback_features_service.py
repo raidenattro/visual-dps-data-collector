@@ -1,17 +1,18 @@
-"""回放按帧骨骼特征：速度 + 关节角 + 手腕速度（实时计算，与前置门控实验字段对齐）。"""
+"""回放按帧骨骼特征：与 export 同路径（export 抽帧 + export 帧号）。"""
 
 from __future__ import annotations
 
 from collections import OrderedDict
 from typing import Any
 
-from event_engine.skeleton_angles import extract_subsampled_joint_angle_from_frames
-from event_engine.skeleton_features import (
-    MAX_VELOCITY_GAP_FRAMES,
-    MEDIAN_FILTER_WINDOW,
-    extract_subsampled_velocity_from_frames,
+from event_engine.export_frame_utils import (
+    DEFAULT_EXPORT_POSE_FRAME_INTERVAL,
+    default_baseline_export_dir,
+    resolve_export_indices,
 )
-from pose_store import RecordLocator, load_frames_range, load_manifest
+from event_engine.skeleton_angles import extract_subsampled_joint_angle_from_frames
+from event_engine.skeleton_features import extract_subsampled_velocity_from_frames
+from pose_store import RecordLocator, load_all_frames, load_manifest
 
 from api.wrist_features_service import (
     _infer_size_from_frames,
@@ -49,9 +50,21 @@ ANGLE_KEYS = (
     "shoulder_angle_mean",
     "joint_open_vel_max",
     "elbow_angle_vel_max",
+    "torso_leg_angle_mean",
+    "torso_leg_angle_min",
+    "torso_leg_angle_max",
+    "center_torso_leg_angle",
+    "left_torso_leg_angle",
+    "right_torso_leg_angle",
+    "knee_angle_mean",
+    "knee_angle_min",
+    "knee_angle_max",
+    "left_knee_angle",
+    "right_knee_angle",
+    "leg_span_ratio",
+    "hip_knee_ankle_vertical_ratio",
 )
 
-# 门控预览默认阈（ankle_max@80 + triple90）
 GATE_PREVIEW = {
     "speed_feature": "ankle_max_speed",
     "speed_threshold": 80.0,
@@ -60,6 +73,8 @@ GATE_PREVIEW = {
         ("elbow_angle_mean", 150.0),
         ("wrist_elevation_angle_max", 60.0),
     ),
+    "stance_feature": "torso_leg_angle_mean",
+    "stance_threshold": 160.0,
 }
 
 
@@ -70,7 +85,7 @@ def _float_or_none(v: Any) -> float | None:
         f = float(v)
     except (TypeError, ValueError):
         return None
-    if not (f == f):  # NaN
+    if not (f == f):
         return None
     return f
 
@@ -78,14 +93,19 @@ def _float_or_none(v: Any) -> float | None:
 def _pick_keys(row: dict[str, Any], keys: tuple[str, ...]) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for k in keys:
-        val = row.get(k)
-        if val is None:
-            out[k] = None
-        elif isinstance(val, (int, float)):
-            out[k] = val
-        else:
-            out[k] = val
+        out[k] = row.get(k)
     return out
+
+
+def _is_standing(row: dict[str, Any]) -> bool:
+    feat = GATE_PREVIEW.get("stance_feature")
+    thr = float(GATE_PREVIEW.get("stance_threshold") or 0)
+    if not feat:
+        return True
+    v = _float_or_none(row.get(feat))
+    if v is None:
+        return True
+    return v >= thr
 
 
 def _gate_preview(row: dict[str, Any]) -> dict[str, Any]:
@@ -107,7 +127,11 @@ def _gate_preview(row: dict[str, Any]) -> dict[str, Any]:
             "met": ok,
         })
     triple_met = exempt_hits == len(GATE_PREVIEW["angle_exempt"])
-    would_block = speed_high and not triple_met
+    stance_feat = GATE_PREVIEW.get("stance_feature")
+    stance_thr = float(GATE_PREVIEW.get("stance_threshold") or 0)
+    stance_val = _float_or_none(row.get(stance_feat)) if stance_feat else None
+    standing = _is_standing(row)
+    would_block = speed_high and not triple_met and standing
     return {
         "speed_feature": feat,
         "speed_threshold": thr,
@@ -115,6 +139,10 @@ def _gate_preview(row: dict[str, Any]) -> dict[str, Any]:
         "speed_high": speed_high,
         "triple_and_met": triple_met,
         "angle_exempt_detail": exempt_detail,
+        "stance_feature": stance_feat,
+        "stance_threshold": stance_thr,
+        "stance_value": stance_val,
+        "is_standing": standing,
         "would_block_collision": would_block,
     }
 
@@ -138,45 +166,110 @@ def _merge_velocity_angle(
     return merged
 
 
-def _frame_indices_from_rows(frames: list[dict[str, Any]]) -> set[int]:
-    out: set[int] = set()
-    for fr in frames:
-        if not isinstance(fr, dict):
-            continue
-        fi = int(fr.get("frame_idx") or fr.get("source_frame_idx") or 0)
-        if fi > 0:
-            out.add(fi)
-    return out
+# 按记录缓存 export 路径全量特征（与 export 脚本一次算全 timeline 一致）
+_RECORD_EXPORT_CACHE: OrderedDict[str, dict[str, Any]] = OrderedDict()
+_RECORD_CACHE_MAX = 12
 
-
-# 进程内 LRU：避免同帧重复重算阻塞视频/骨架请求
+# 按帧响应缓存
 _FRAME_FEATURE_CACHE: OrderedDict[tuple[str, int, bool], dict[str, Any]] = OrderedDict()
-_CACHE_MAX_ENTRIES = 384
+_FRAME_CACHE_MAX_ENTRIES = 384
 
 
-def _cache_get(key: tuple[str, int, bool]) -> dict[str, Any] | None:
+def _record_cache_get(record_id: str) -> dict[str, Any] | None:
+    hit = _RECORD_EXPORT_CACHE.get(record_id)
+    if hit is not None:
+        _RECORD_EXPORT_CACHE.move_to_end(record_id)
+    return hit
+
+
+def _record_cache_put(record_id: str, value: dict[str, Any]) -> None:
+    _RECORD_EXPORT_CACHE[record_id] = value
+    _RECORD_EXPORT_CACHE.move_to_end(record_id)
+    while len(_RECORD_EXPORT_CACHE) > _RECORD_CACHE_MAX:
+        _RECORD_EXPORT_CACHE.popitem(last=False)
+
+
+def _frame_cache_get(key: tuple[str, int, bool]) -> dict[str, Any] | None:
     hit = _FRAME_FEATURE_CACHE.get(key)
     if hit is not None:
         _FRAME_FEATURE_CACHE.move_to_end(key)
     return hit
 
 
-def _cache_put(key: tuple[str, int, bool], value: dict[str, Any]) -> None:
+def _frame_cache_put(key: tuple[str, int, bool], value: dict[str, Any]) -> None:
     _FRAME_FEATURE_CACHE[key] = value
     _FRAME_FEATURE_CACHE.move_to_end(key)
-    while len(_FRAME_FEATURE_CACHE) > _CACHE_MAX_ENTRIES:
+    while len(_FRAME_FEATURE_CACHE) > _FRAME_CACHE_MAX_ENTRIES:
         _FRAME_FEATURE_CACHE.popitem(last=False)
 
 
 def clear_playback_features_cache(record_id: str | None = None) -> None:
-    """切换记录时可按需清理缓存。"""
     if not record_id:
         _FRAME_FEATURE_CACHE.clear()
+        _RECORD_EXPORT_CACHE.clear()
         return
     rid = str(record_id).strip()
     for key in list(_FRAME_FEATURE_CACHE.keys()):
         if key[0] == rid:
             del _FRAME_FEATURE_CACHE[key]
+    _RECORD_EXPORT_CACHE.pop(rid, None)
+
+
+def _build_record_export_context(locator: RecordLocator) -> dict[str, Any]:
+    cached = _record_cache_get(locator.record_id)
+    if cached is not None:
+        return cached
+
+    timeline_frames = load_all_frames(locator)
+    if not timeline_frames:
+        ctx = {"available": False, "hint": "记录无帧数据"}
+        _record_cache_put(locator.record_id, ctx)
+        return ctx
+
+    manifest = load_manifest(locator)
+    infer_w, infer_h = _infer_size_from_frames(timeline_frames, manifest)
+    fps = _video_fps(manifest)
+
+    # 回放特征对齐 export：优先 baseline clip；无 baseline 时用实验默认 interval=2
+    default_interval = DEFAULT_EXPORT_POSE_FRAME_INTERVAL
+    baseline_dir = default_baseline_export_dir()
+    export_indices, indices_source, pose_interval = resolve_export_indices(
+        locator.record_id,
+        timeline_frames,
+        pose_frame_interval=default_interval,
+        baseline_dir=baseline_dir,
+    )
+    if not export_indices:
+        ctx = {"available": False, "hint": "无法确定 export 抽帧索引"}
+        _record_cache_put(locator.record_id, ctx)
+        return ctx
+
+    velocity_rows = extract_subsampled_velocity_from_frames(
+        timeline_frames,
+        export_indices,
+        infer_width=infer_w,
+        infer_height=infer_h,
+        video_fps=fps,
+    )
+    angle_rows = extract_subsampled_joint_angle_from_frames(
+        timeline_frames,
+        export_indices,
+        video_fps=fps,
+    )
+    merged = _merge_velocity_angle(velocity_rows, angle_rows)
+
+    ctx = {
+        "available": True,
+        "merged": merged,
+        "export_indices": export_indices,
+        "export_indices_source": indices_source,
+        "pose_frame_interval": pose_interval,
+        "infer_width": infer_w,
+        "infer_height": infer_h,
+        "fps": fps,
+    }
+    _record_cache_put(locator.record_id, ctx)
+    return ctx
 
 
 def load_playback_features_for_frame(
@@ -185,7 +278,7 @@ def load_playback_features_for_frame(
     frame_idx: int,
     include_wrist: bool = False,
 ) -> dict[str, Any]:
-    """按帧返回所有人体 track 的速度与角度特征（带进程内 LRU 缓存）。"""
+    """按 export 帧号返回特征（与 export_prefilter 同路径）。"""
     fi = int(frame_idx)
     if fi <= 0:
         return {
@@ -195,7 +288,7 @@ def load_playback_features_for_frame(
         }
 
     cache_key = (locator.record_id, fi, bool(include_wrist))
-    cached = _cache_get(cache_key)
+    cached = _frame_cache_get(cache_key)
     if cached is not None:
         return cached
 
@@ -204,8 +297,8 @@ def load_playback_features_for_frame(
         frame_idx=fi,
         include_wrist=include_wrist,
     )
-    if result.get("available"):
-        _cache_put(cache_key, result)
+    if result.get("available") or result.get("hint"):
+        _frame_cache_put(cache_key, result)
     return result
 
 
@@ -216,46 +309,34 @@ def _compute_playback_features_for_frame(
     include_wrist: bool,
 ) -> dict[str, Any]:
     fi = int(frame_idx)
-
-    # 速度差分需要历史帧：中值窗口 + 间隔断开
-    lookback = max(12, MAX_VELOCITY_GAP_FRAMES + MEDIAN_FILTER_WINDOW + 4)
-    lo = max(1, fi - lookback)
-    try:
-        frames = load_frames_range(locator, from_frame_idx=lo, to_frame_idx=fi)
-    except (OSError, RuntimeError, ValueError) as exc:
+    ctx = _build_record_export_context(locator)
+    if not ctx.get("available"):
         return {
             "available": False,
             "record_id": locator.record_id,
             "frame_idx": fi,
-            "error": str(exc),
+            "hint": ctx.get("hint") or "特征不可用",
         }
 
-    if not frames:
+    export_indices: set[int] = ctx["export_indices"]
+    merged: dict[tuple[int, int], dict[str, Any]] = ctx["merged"]
+    is_export_frame = fi in export_indices
+
+    if not is_export_frame:
+        nearest = min(export_indices, key=lambda x: abs(x - fi)) if export_indices else None
         return {
             "available": False,
             "record_id": locator.record_id,
             "frame_idx": fi,
-            "hint": "该帧附近无骨架数据",
+            "export_frame_idx": fi,
+            "is_export_frame": False,
+            "pose_frame_interval": ctx.get("pose_frame_interval"),
+            "export_indices_source": ctx.get("export_indices_source"),
+            "hint": (
+                f"帧 {fi} 非 export 抽帧（pose_frame_interval={ctx.get('pose_frame_interval')}）；"
+                f"最近 export 帧={nearest}"
+            ),
         }
-
-    manifest = load_manifest(locator)
-    infer_w, infer_h = _infer_size_from_frames(frames, manifest)
-    fps = _video_fps(manifest)
-    indices = _frame_indices_from_rows(frames)
-
-    velocity_rows = extract_subsampled_velocity_from_frames(
-        frames,
-        indices,
-        infer_width=infer_w,
-        infer_height=infer_h,
-        video_fps=fps,
-    )
-    angle_rows = extract_subsampled_joint_angle_from_frames(
-        frames,
-        indices,
-        video_fps=fps,
-    )
-    merged = _merge_velocity_angle(velocity_rows, angle_rows)
 
     wrist_by_track: dict[int, list[dict[str, Any]]] = {}
     if include_wrist:
@@ -286,12 +367,26 @@ def _compute_playback_features_for_frame(
             "gate_preview": _gate_preview(full_row),
         })
 
+    if not persons:
+        return {
+            "available": False,
+            "record_id": locator.record_id,
+            "frame_idx": fi,
+            "export_frame_idx": fi,
+            "is_export_frame": True,
+            "hint": f"export 帧 {fi} 无有效人体特征",
+        }
+
     return {
         "available": True,
         "record_id": locator.record_id,
         "frame_idx": fi,
-        "infer_width": infer_w,
-        "infer_height": infer_h,
+        "export_frame_idx": fi,
+        "is_export_frame": True,
+        "pose_frame_interval": ctx.get("pose_frame_interval"),
+        "export_indices_source": ctx.get("export_indices_source"),
+        "infer_width": ctx.get("infer_width"),
+        "infer_height": ctx.get("infer_height"),
         "person_count": len(persons),
         "persons": persons,
         "gate_preview_defaults": {
@@ -301,5 +396,7 @@ def _compute_playback_features_for_frame(
                 {"feature": f, "min_threshold": t}
                 for f, t in GATE_PREVIEW["angle_exempt"]
             ],
+            "stance_feature": GATE_PREVIEW.get("stance_feature"),
+            "stance_threshold": GATE_PREVIEW.get("stance_threshold"),
         },
     }

@@ -566,12 +566,20 @@ def filter_frames_to_indices(
     frames: list[dict[str, Any]],
     frame_indices: set[int] | list[int],
 ) -> list[dict[str, Any]]:
-    """按 frame_idx 子集过滤并保持时间顺序（用于抽帧速度差分）。"""
-    wanted = set(int(x) for x in frame_indices)
-    out = [
-        fr for fr in sorted(frames, key=lambda f: int(f.get("frame_idx") or 0))
-        if isinstance(fr, dict) and int(fr.get("frame_idx") or 0) in wanted
-    ]
+    """按 export 帧键（source_frame_idx 优先）过滤；输出帧 frame_idx 统一为 export 键。"""
+    from event_engine.export_frame_utils import export_frame_key
+
+    wanted = {int(x) for x in frame_indices}
+    out: list[dict[str, Any]] = []
+    for fr in sorted(frames, key=lambda f: export_frame_key(f)):
+        if not isinstance(fr, dict):
+            continue
+        key = export_frame_key(fr)
+        if key <= 0 or key not in wanted:
+            continue
+        row = dict(fr)
+        row["frame_idx"] = key
+        out.append(row)
     return out
 
 
