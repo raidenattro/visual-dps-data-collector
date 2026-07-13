@@ -269,7 +269,19 @@ function getCurrentPlaybackTimeSec() {
 }
 
 function getCurrentPlaybackFrameIdx() {
-  const hit = findFrameAt(getCurrentPlaybackTimeSec());
+  const timeSec =
+    typeof playbackRenderLoopActive !== "undefined" &&
+    playbackRenderLoopActive &&
+    typeof resolvePlaybackMediaTime === "function"
+      ? resolvePlaybackMediaTime()
+      : getCurrentPlaybackTimeSec();
+  if (typeof frameIdxAtVideoTime === "function") {
+    const playback =
+      typeof playbackRenderLoopActive !== "undefined" && playbackRenderLoopActive;
+    const fi = frameIdxAtVideoTime(timeSec, { playback });
+    return fi > 0 ? fi : null;
+  }
+  const hit = findFrameAt(timeSec);
   return hit?.frameIdx ?? null;
 }
 

@@ -99,6 +99,7 @@ from api.record_service import (
     annotation_frame_size,
     annotation_path_for_record,
     attach_tags_to_summaries,
+    enrich_manifest_playback_timing,
     find_records_for_annotation_stem,
     locate_record_by_id,
     meta_path_for_record,
@@ -1487,6 +1488,7 @@ def get_record_manifest(record_id: str) -> JSONResponse:
         raise HTTPException(400, str(exc)) from exc
     header.setdefault("record_id", record_id)
     header.setdefault("frames_url", f"/api/records/{record_id}/frames")
+    header = enrich_manifest_playback_timing(record_id, header)
     return JSONResponse(header)
 
 
@@ -1533,6 +1535,7 @@ def get_record_pose(record_id: str) -> JSONResponse:
         raise HTTPException(400, str(exc)) from exc
     header.setdefault("record_id", record_id)
     header.setdefault("frames_url", f"/api/records/{record_id}/frames")
+    header = enrich_manifest_playback_timing(record_id, header)
     return JSONResponse(header)
 
 

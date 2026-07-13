@@ -56,6 +56,7 @@ from api.reflection_service import REFLECTION_OK, load_reflection_or_http, norma
 from video_transcode import (
     default_playback_transcode_height,
     ensure_preview_transcode_async,
+    probe_video_timing,
     read_video_height,
     resolve_playback_serve_path,
     transcode_preview_video,
@@ -325,6 +326,30 @@ def video_path_for_video_stem(video_stem: str) -> Path | None:
         if candidate.is_file():
             return candidate
     return None
+
+
+def enrich_manifest_playback_timing(record_id: str, manifest: dict[str, Any]) -> dict[str, Any]:
+    """补齐 manifest 中的视频时长与 PTS 偏移，供回放按浏览器时间轴对齐骨架。"""
+    has_pts = manifest.get("video_start_pts_sec") is not None
+    has_dur = manifest.get("video_duration_sec") is not None
+    if has_pts and has_dur:
+        return manifest
+    vp = video_path_for_record(record_id)
+    if not vp or not vp.is_file():
+        return manifest
+    timing = probe_video_timing(vp)
+    if not timing:
+        return manifest
+    out = dict(manifest)
+    if not has_dur and timing.get("duration_sec"):
+        out["video_duration_sec"] = round(float(timing["duration_sec"]), 6)
+    if not has_pts:
+        pts = timing.get("start_pts_sec")
+        if pts is None:
+            pts = timing.get("first_pts_sec")
+        if pts is not None and float(pts) > 0:
+            out["video_start_pts_sec"] = round(float(pts), 6)
+    return out
 
 
 def playback_video_path_for_record(record_id: str) -> Path | None:

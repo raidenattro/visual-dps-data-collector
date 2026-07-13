@@ -12,6 +12,7 @@ import cv2
 from model_assets import COCO17_KEYPOINT_NAMES, RTMPOSE_VARIANTS, VIDEO_EXTENSIONS
 from pose_store import STORAGE_V2_PARQUET, write_v2_package
 from rtmpose_infer import PoseBatch, RTMPosePipeline
+from video_transcode import probe_video_duration_sec, probe_video_timing
 
 try:
     from event_engine.annotation_boxes import (
@@ -27,6 +28,19 @@ except ImportError:
     CollisionProcessor = None  # type: ignore
 
 ProgressCallback = Callable[[int, int], None]
+
+
+def normalize_frame_timestamps(frames: list[dict[str, Any]], duration_sec: float) -> None:
+    """按容器时长均匀分配 timestamp_sec，避免 OpenCV fps 与 r_frame_rate 偏差。"""
+    if not frames or duration_sec <= 0:
+        return
+    n = len(frames)
+    if n == 1:
+        frames[0]["timestamp_sec"] = 0.0
+        return
+    span = max(0.0, float(duration_sec))
+    for i, fr in enumerate(frames):
+        fr["timestamp_sec"] = round(i * span / (n - 1), 6)
 
 
 def parse_variant(raw: str) -> str:
@@ -236,6 +250,13 @@ def collect_from_video(
     finally:
         cap.release()
 
+    duration_sec = probe_video_duration_sec(video_path)
+    video_timing = probe_video_timing(video_path)
+    if duration_sec and frames_out:
+        normalize_frame_timestamps(frames_out, duration_sec)
+        if len(frames_out) > 1:
+            fps = (len(frames_out) - 1) / duration_sec
+
     result: dict[str, Any] = {
         "schema": 1,
         "kind": "pose_collect_video",
@@ -254,6 +275,12 @@ def collect_from_video(
         "frame_count": len(frames_out),
         "frames": frames_out,
     }
+    if duration_sec and duration_sec > 0:
+        result["video_duration_sec"] = round(float(duration_sec), 6)
+    if video_timing.get("start_pts_sec") is not None:
+        result["video_start_pts_sec"] = round(float(video_timing["start_pts_sec"]), 6)
+    elif video_timing.get("first_pts_sec") is not None:
+        result["video_start_pts_sec"] = round(float(video_timing["first_pts_sec"]), 6)
     if annotation_meta is not None:
         result["annotation"] = annotation_meta
         result["collision"] = {

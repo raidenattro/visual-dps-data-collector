@@ -143,7 +143,11 @@ async function prefetchFrameChunk(from, to) {
     if (!res.ok) return;
     const body = await res.json();
     (body.frames || []).forEach((fr) => {
-      if (fr?.frame_idx != null) frameCache.set(fr.frame_idx, fr);
+      const fi = Number(fr?.frame_idx);
+      const sfi = Number(fr?.source_frame_idx);
+      if (fi > 0) frameCache.set(fi, fr);
+      // 回放索引用 source_frame_idx，缓存双键避免取不到帧
+      if (sfi > 0) frameCache.set(sfi, fr);
     });
     loadedChunkKeys.add(key);
   })().finally(() => {

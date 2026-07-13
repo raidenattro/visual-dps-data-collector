@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import re
 import shutil
 import subprocess
@@ -39,6 +40,75 @@ class TranscodeJobState:
 
 _jobs_lock = threading.Lock()
 _jobs: dict[str, TranscodeJobState] = {}
+
+
+def probe_video_timing(video_path: Path) -> dict[str, float]:
+    """用 ffprobe 读取容器时长与首帧 PTS 偏移（秒）。"""
+    out: dict[str, float] = {}
+    ff = shutil.which("ffprobe")
+    if not ff or not video_path.is_file():
+        return out
+    cmd = [
+        ff,
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "format=duration,start_time",
+        "-show_entries",
+        "stream=duration,start_time",
+        "-show_frames",
+        "-show_entries",
+        "frame=best_effort_timestamp_time",
+        "-read_intervals",
+        "%+#1",
+        "-of",
+        "json",
+        str(video_path),
+    ]
+    try:
+        payload = json.loads(subprocess.check_output(cmd, text=True))
+    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError):
+        return out
+    fmt = payload.get("format") or {}
+    streams = payload.get("streams") or []
+    stream = streams[0] if streams else {}
+    for raw in (fmt.get("duration"), stream.get("duration")):
+        if raw is None:
+            continue
+        try:
+            dur = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if dur > 0:
+            out["duration_sec"] = dur
+            break
+    for raw in (fmt.get("start_time"), stream.get("start_time")):
+        if raw is None:
+            continue
+        try:
+            st = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if st >= 0:
+            out["start_pts_sec"] = st
+            break
+    frames = payload.get("frames") or []
+    if frames:
+        raw = frames[0].get("best_effort_timestamp_time")
+        if raw is not None:
+            try:
+                out["first_pts_sec"] = float(raw)
+            except (TypeError, ValueError):
+                pass
+    return out
+
+
+def probe_video_duration_sec(video_path: Path) -> float | None:
+    timing = probe_video_timing(video_path)
+    dur = timing.get("duration_sec")
+    return dur if dur and dur > 0 else None
 
 
 def default_playback_transcode_height() -> int:
