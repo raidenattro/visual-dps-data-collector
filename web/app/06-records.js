@@ -6,7 +6,7 @@ let playbackCameraListPinned = false;
 let playbackRecordsCache = [];
 /** 回放列表当前筛选的模型数据层（rtmpose-t / rtmpose-s / rtmpose-m） */
 let playbackPoseTier = "rtmpose-t";
-/** 回放标注来源：tier=当前模型层目录，master=母本 json/annotations */
+/** 回放标注来源：tier=当前模型层目录，annotation / annotation2=基准标注目录 */
 let playbackAnnotationSource = "tier";
 /** 已知标签（来自 /api/tags） */
 let playbackKnownTags = [];
@@ -947,10 +947,10 @@ function initPlaybackRecordFilter() {
 
   if (annSrcSel && !annSrcSel.dataset.bound) {
     annSrcSel.dataset.bound = "1";
-    playbackAnnotationSource = annSrcSel.value === "master" ? "master" : "tier";
+    playbackAnnotationSource = annSrcSel.value || "tier";
     syncPlaybackAnnotationSourceOptionLabel();
     annSrcSel.addEventListener("change", () => {
-      playbackAnnotationSource = annSrcSel.value === "master" ? "master" : "tier";
+      playbackAnnotationSource = annSrcSel.value || "tier";
       void onPlaybackAnnotationSourceChanged();
     });
   }
@@ -1002,16 +1002,25 @@ function initPlaybackRecordFilter() {
 }
 
 function playbackAnnotationSourceApiParam() {
-  if (playbackAnnotationSource === "master") return "master";
+  if (playbackAnnotationSource === "annotation") return "annotation";
+  if (playbackAnnotationSource === "annotation2") return "annotation2";
+  if (playbackAnnotationSource === "master") return "annotation";
   return playbackPoseTier || "rtmpose-t";
 }
 
 function playbackAnnotationSourceLabel() {
-  if (playbackAnnotationSource === "master") {
-    return "母本 json/annotations";
+  if (playbackAnnotationSource === "annotation" || playbackAnnotationSource === "master") {
+    return "json/annotations";
+  }
+  if (playbackAnnotationSource === "annotation2") {
+    return "json/annotations2";
   }
   const tier = playbackPoseTier || "rtmpose-t";
   return `${tier} json/${tier}/annotations`;
+}
+
+function isPlaybackBaseAnnotationSource(src) {
+  return src === "annotation" || src === "annotation2" || src === "master";
 }
 
 /** 按所选来源加载记录标注；失败时回退 pose 内嵌 annotation */
@@ -1044,9 +1053,14 @@ async function applyPlaybackRecordAnnotation(recordId) {
     loadAnnotationBoxesFromData(data);
     let label = playbackAnnotationSourceLabel();
     const hasTierFile = meta.has_tier_file === true;
-    if (meta.resolved_from === "master" && src !== "master" && !hasTierFile) {
-      label += "（模型目录无文件，已用母本内容）";
-    } else if (hasTierFile && src !== "master") {
+    if (
+      (meta.resolved_from === "annotation" || meta.resolved_from === "master") &&
+      src !== "annotation" &&
+      src !== "annotation2" &&
+      !hasTierFile
+    ) {
+      label += "（模型目录无文件，已用 annotation 内容）";
+    } else if (hasTierFile && !isPlaybackBaseAnnotationSource(src)) {
       label += "（模型层）";
     }
     return { ok: true, label, meta };

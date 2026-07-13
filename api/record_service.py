@@ -10,10 +10,13 @@ from typing import Any
 from fastapi import HTTPException
 
 from annotation_store import (
+    ANNOTATION_SOURCE_ANNOTATION,
     ANNOTATION_SOURCE_MASTER,
     annotation_dir_display_rel,
     annotation_dir_for_source,
     annotation_path_for_video_stem,
+    canonical_annotation_dir,
+    is_base_annotation_source,
     load_annotation_json,
     normalize_annotation_payload,
     normalize_annotation_source,
@@ -133,8 +136,8 @@ def persist_annotation_for_video(
 
     paths = resolve_app_paths()
     norm = normalize_annotation_source(annotation_source)
-    if norm == "master":
-        raise ValueError("母本目录只读，请指定模型层 annotation_source（rtmpose-t/s/m）")
+    if is_base_annotation_source(norm):
+        raise ValueError("基准标注目录只读，请指定模型层 annotation_source（rtmpose-t/s/m）")
     ann_dir = annotation_dir_for_source(paths, norm)
     save_stem = resolve_annotation_save_stem(
         ann_dir,
@@ -887,23 +890,28 @@ def resolve_annotation_path_for_source(
     )
     if path:
         try:
-            in_tier = path.resolve().is_relative_to(ann_dir.resolve())
+            in_dir = path.resolve().is_relative_to(ann_dir.resolve())
         except AttributeError:
-            in_tier = str(path.resolve()).startswith(str(ann_dir.resolve()))
-        tag = "tier" if norm != ANNOTATION_SOURCE_MASTER and in_tier else "master"
+            in_dir = str(path.resolve()).startswith(str(ann_dir.resolve()))
+        if is_base_annotation_source(norm):
+            tag = norm
+        elif in_dir:
+            tag = "tier"
+        else:
+            tag = ANNOTATION_SOURCE_ANNOTATION
         return path, tag
 
-    if norm != ANNOTATION_SOURCE_MASTER:
+    if not is_base_annotation_source(norm):
         master_path = _resolve_annotation_in_dir(
             record_id,
             paths=paths,
-            ann_dir=paths.annotation_dir,
+            ann_dir=canonical_annotation_dir(paths),
             locator=locator,
             meta=meta,
             allow_reflection=True,
         )
         if master_path:
-            return master_path, "master"
+            return master_path, ANNOTATION_SOURCE_ANNOTATION
 
     return None, "none"
 

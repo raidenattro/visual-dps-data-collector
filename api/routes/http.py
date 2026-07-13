@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 
 from annotation_store import (
     annotation_path_for_video_stem,
+    is_base_annotation_source,
     load_annotation_for_source,
     load_annotation_json,
     normalize_annotation_source,
@@ -153,7 +154,7 @@ def _annotation_save_message(
 ) -> str:
     if preserved and saved_stem != requested_stem:
         return f"已保留原标注，另存为 {saved_stem}.json"
-    if annotation_source and annotation_source != "master":
+    if annotation_source and not is_base_annotation_source(annotation_source):
         return f"已保存至 {annotation_dir_display_rel(resolve_app_paths(), annotation_source)}/{saved_stem}.json"
     return "已覆盖保存标注"
 
@@ -700,7 +701,7 @@ def get_record_video(record_id: str, original: bool = False) -> FileResponse:
 
 @router.get("/api/records/{record_id:path}/annotation.json")
 def get_record_annotation(record_id: str, annotation_source: str = "") -> Any:
-    """读取记录关联标注。annotation_source=master 为母本；rtmpose-t/s/m 为对应模型目录（可回退母本内容）。"""
+    """读取记录关联标注。annotation_source=annotation/annotation2 为基准目录；rtmpose-t/s/m 为模型层（可回退 annotation）。"""
     locator = locate_record_by_id(record_id)
     if not locator:
         raise HTTPException(404, "记录不存在")
@@ -761,7 +762,7 @@ def get_record_annotation(record_id: str, annotation_source: str = "") -> Any:
             "annotation_path": str(ann_path),
             "annotation_dir": annotation_dir_display_rel(paths, norm),
             "has_tier_file": resolved_from == "tier" or tier_path.is_file() or resolved_in_tier,
-            "readonly": norm == "master",
+            "readonly": is_base_annotation_source(norm),
         },
     }
 
@@ -780,7 +781,7 @@ def get_record_annotation_frame(record_id: str) -> dict[str, Any]:
 @router.get("/api/annotations/by-video/{video_stem}")
 def get_annotation_by_video(
     video_stem: str,
-    annotation_source: str = "master",
+    annotation_source: str = "annotation",
     materialize: bool = False,
 ) -> dict[str, Any]:
     paths = resolve_app_paths()
@@ -801,8 +802,8 @@ def get_annotation_by_video(
             "annotation_source": norm,
             "resolved_from": resolved_from,
             "annotation_dir": annotation_dir_display_rel(paths, norm),
-            "has_tier_file": tier_path.is_file() if norm != "master" else True,
-            "readonly": norm == "master",
+            "has_tier_file": tier_path.is_file() if not is_base_annotation_source(norm) else True,
+            "readonly": is_base_annotation_source(norm),
         },
     }
 
@@ -878,8 +879,8 @@ async def put_annotation_by_video(
         norm = normalize_annotation_source(annotation_source)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    if norm == "master":
-        raise HTTPException(400, "母本目录只读，请选择模型层（rtmpose-t/s/m）后保存")
+    if is_base_annotation_source(norm):
+        raise HTTPException(400, "基准标注目录只读，请选择模型层（rtmpose-t/s/m）后保存")
     fw, fh = annotation_frame_size(body)
     try:
         path, saved_stem = persist_annotation_for_video(

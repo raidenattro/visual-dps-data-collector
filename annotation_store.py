@@ -1,4 +1,4 @@
-"""货位标注存储：母本在 localdata/json/annotations；各模型层在 json/{tier}/annotations。"""
+"""货位标注存储：annotation/json/annotations、annotation2/json/annotations2；模型层 json/{tier}/annotations。"""
 
 from __future__ import annotations
 
@@ -11,30 +11,54 @@ from config_loader import AppPaths, is_pose_model_tier, sanitize_file_stem
 from event_engine.annotation_boxes import flatten_annotation_boxes, load_annotation_config
 from pose_store import meta_sidecar_path
 
-# 母本标注目录（paths.annotation_dir），标注页保存时不写入此处
+# 只读基准标注目录（回放/对照用，标注页保存时不写入）
+ANNOTATION_SOURCE_ANNOTATION = "annotation"
+ANNOTATION_SOURCE_ANNOTATION2 = "annotation2"
+# 兼容旧 API / 前端参数，规范化后等同 annotation
 ANNOTATION_SOURCE_MASTER = "master"
 
 
+def is_base_annotation_source(source: str) -> bool:
+    """是否为只读基准标注来源（annotation / annotation2）。"""
+    norm = normalize_annotation_source(source)
+    return norm in (ANNOTATION_SOURCE_ANNOTATION, ANNOTATION_SOURCE_ANNOTATION2)
+
+
+def canonical_annotation_dir(paths: AppPaths) -> Path:
+    """默认基准标注目录：json/annotations（与 config.annotation_dir 解耦）。"""
+    return paths.json_dir / "annotations"
+
+
+def annotation2_dir(paths: AppPaths) -> Path:
+    return paths.json_dir / "annotations2"
+
+
 def normalize_annotation_source(raw: str) -> str:
-    """master / 母本 / rtmpose-t / t → 规范来源键。"""
+    """annotation / annotation2 / master / rtmpose-t / t → 规范来源键。"""
     s = str(raw or "").strip().lower().replace("_", "-")
-    if s in ("", "master", "母本", "canonical", "base"):
-        return ANNOTATION_SOURCE_MASTER
+    if s in ("", "master", "母本", "canonical", "base", "annotation", "annotations"):
+        return ANNOTATION_SOURCE_ANNOTATION
+    if s in ("annotation2", "annotations2"):
+        return ANNOTATION_SOURCE_ANNOTATION2
     if is_pose_model_tier(s):
         return s
     if s in ("t", "s", "m"):
         return f"rtmpose-{s}"
     raise ValueError(
-        f"无效 annotation_source: {raw!r}，可选 master / rtmpose-t / rtmpose-s / rtmpose-m"
+        f"无效 annotation_source: {raw!r}，"
+        f"可选 annotation / annotation2 / master / rtmpose-t / rtmpose-s / rtmpose-m"
     )
 
 
 def annotation_dir_for_source(paths: AppPaths, source: str) -> Path:
-    """母本 → paths.annotation_dir；模型层 → json_dir/{tier}/annotations。"""
+    """annotation → json/annotations；annotation2 → json/annotations2；模型层 → json/{tier}/annotations。"""
     norm = normalize_annotation_source(source)
-    if norm == ANNOTATION_SOURCE_MASTER:
-        return paths.annotation_dir
-    d = paths.json_dir / norm / "annotations"
+    if norm == ANNOTATION_SOURCE_ANNOTATION:
+        d = canonical_annotation_dir(paths)
+    elif norm == ANNOTATION_SOURCE_ANNOTATION2:
+        d = annotation2_dir(paths)
+    else:
+        d = paths.json_dir / norm / "annotations"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -42,11 +66,10 @@ def annotation_dir_for_source(paths: AppPaths, source: str) -> Path:
 def annotation_dir_display_rel(paths: AppPaths, source: str) -> str:
     """用于 API / 前端展示的路径片段。"""
     norm = normalize_annotation_source(source)
-    if norm == ANNOTATION_SOURCE_MASTER:
-        try:
-            return paths.annotation_dir.relative_to(paths.json_dir.parent).as_posix()
-        except ValueError:
-            return str(paths.annotation_dir)
+    if norm == ANNOTATION_SOURCE_ANNOTATION:
+        return f"{paths.json_dir.name}/annotations"
+    if norm == ANNOTATION_SOURCE_ANNOTATION2:
+        return f"{paths.json_dir.name}/annotations2"
     return f"{paths.json_dir.name}/{norm}/annotations"
 
 
@@ -56,16 +79,22 @@ def materialize_tier_annotation_from_master(
     paths: AppPaths,
     source: str,
 ) -> Path | None:
-    """模型目录无标注时，从母本复制到 json/{tier}/annotations/{stem}.json。"""
+    """模型目录无标注时，从 json/annotations 复制到 json/{tier}/annotations/{stem}.json。"""
     norm = normalize_annotation_source(source)
-    if norm == ANNOTATION_SOURCE_MASTER:
-        p = annotation_path_for_video_stem(video_stem, annotation_dir=paths.annotation_dir)
+    if is_base_annotation_source(norm):
+        p = annotation_path_for_video_stem(
+            video_stem,
+            annotation_dir=annotation_dir_for_source(paths, norm),
+        )
         return p if p.is_file() else None
     tier_dir = annotation_dir_for_source(paths, norm)
     tier_path = annotation_path_for_video_stem(video_stem, annotation_dir=tier_dir)
     if tier_path.is_file():
         return tier_path
-    master_path = annotation_path_for_video_stem(video_stem, annotation_dir=paths.annotation_dir)
+    master_path = annotation_path_for_video_stem(
+        video_stem,
+        annotation_dir=canonical_annotation_dir(paths),
+    )
     if not master_path.is_file():
         return None
     shutil.copy2(master_path, tier_path)
@@ -81,14 +110,15 @@ def load_annotation_for_source(
 ) -> tuple[dict[str, Any] | None, Path, str]:
     """
     按来源加载标注。
-    返回 (data, annotation_dir, resolved_from)；resolved_from: master | tier | none。
-    模型层无文件时回退母本内容；materialize=True 时复制到模型目录。
+    返回 (data, annotation_dir, resolved_from)；resolved_from: annotation | annotation2 | tier | none。
+    模型层无文件时回退 json/annotations；materialize=True 时复制到模型目录。
     """
     norm = normalize_annotation_source(source)
     stem = sanitize_file_stem(video_stem)
-    if norm == ANNOTATION_SOURCE_MASTER:
-        data = load_annotation_json(stem, annotation_dir=paths.annotation_dir)
-        return data, paths.annotation_dir, "master" if data else "none"
+    if is_base_annotation_source(norm):
+        ann_dir = annotation_dir_for_source(paths, norm)
+        data = load_annotation_json(stem, annotation_dir=ann_dir)
+        return data, ann_dir, norm if data else "none"
 
     tier_dir = annotation_dir_for_source(paths, norm)
     tier_path = annotation_path_for_video_stem(stem, annotation_dir=tier_dir)
@@ -96,7 +126,10 @@ def load_annotation_for_source(
         data = load_annotation_json(stem, annotation_dir=tier_dir)
         return data, tier_dir, "tier" if data else "none"
 
-    master_path = annotation_path_for_video_stem(stem, annotation_dir=paths.annotation_dir)
+    master_path = annotation_path_for_video_stem(
+        stem,
+        annotation_dir=canonical_annotation_dir(paths),
+    )
     if not master_path.is_file():
         return None, tier_dir, "none"
 
@@ -105,8 +138,8 @@ def load_annotation_for_source(
         data = load_annotation_json(stem, annotation_dir=tier_dir)
         return data, tier_dir, "tier" if data else "none"
 
-    data = load_annotation_json(stem, annotation_dir=paths.annotation_dir)
-    return data, tier_dir, "master"
+    data = load_annotation_json(stem, annotation_dir=canonical_annotation_dir(paths))
+    return data, tier_dir, ANNOTATION_SOURCE_ANNOTATION
 
 
 def annotation_path_for_video_stem(video_stem: str, *, annotation_dir: Path) -> Path:
