@@ -1,4 +1,7 @@
-/** 回放：暂停时显示骨骼特征参数（速度 + 角度 + 门控预览） */
+/** 回放：暂停时显示骨骼特征参数（速度 + 角度 + 门控预览 + 手腕置信度） */
+
+const KPT_LEFT_WRIST = 9;
+const KPT_RIGHT_WRIST = 10;
 
 const FEATURE_VELOCITY_LABELS = {
   torso_speed: "躯干速度",
@@ -186,9 +189,6 @@ function onPlaybackVideoPlayStateChange() {
     const fi = currentPlaybackFeaturesFrameIdx();
     if (fi > 0) updatePlaybackSkeletonFeaturesUi(fi);
   }
-  if (typeof onPlaybackWristFeaturesPlayStateChange === "function") {
-    onPlaybackWristFeaturesPlayStateChange();
-  }
 }
 
 function renderFeatureKvTable(obj, labels, unit) {
@@ -203,22 +203,149 @@ function renderFeatureKvTable(obj, labels, unit) {
   return `<table class="skeleton-features-kv">${rows}</table>`;
 }
 
-function renderWristSubTable(wrists) {
-  const list = Array.isArray(wrists) ? wrists : [];
-  if (!list.length) return '<p class="hint">无手腕速度（默认跳过手腕 Parquet）</p>';
+function findFramePerson(frame, personTrackId, personId) {
+  const persons = frame?.persons || [];
+  if (!persons.length) return null;
+  const tid = Number(personTrackId);
+  if (Number.isFinite(tid) && tid > 0) {
+    const hit = persons.find((p) => Number(p.person_track_id) === tid);
+    if (hit) return hit;
+  }
+  const pid = Number(personId);
+  if (Number.isFinite(pid)) {
+    const hit = persons.find((p) => Number(p.person_id) === pid);
+    if (hit) return hit;
+  }
+  return persons.length === 1 ? persons[0] : null;
+}
+
+function readWristScoresFromFrame(frameIdx, personTrackId, personId) {
+  const fi = parseInt(frameIdx, 10) || 0;
+  if (fi <= 0 || typeof frameCache === "undefined") {
+    return { left: null, right: null };
+  }
+  const frame = frameCache.get(fi);
+  const person = findFramePerson(frame, personTrackId, personId);
+  if (!person?.keypoints?.length) {
+    return { left: null, right: null };
+  }
+  const kpts = person.keypoints;
+  const readScore = (idx) => {
+    const kp = kpts[idx];
+    if (!Array.isArray(kp) || kp.length < 3) return null;
+    if (kp[0] == null || kp[1] == null) return null;
+    const n = Number(kp[2]);
+    return Number.isFinite(n) ? n : null;
+  };
+  return {
+    left: readScore(KPT_LEFT_WRIST),
+    right: readScore(KPT_RIGHT_WRIST),
+  };
+}
+
+function resolveWristConfidence(person, frameIdx) {
+  const wc = person?.wrist_confidence;
+  if (wc && typeof wc === "object") {
+    return {
+      left: wc.left_wrist ?? null,
+      right: wc.right_wrist ?? null,
+      scoreMin: wc.score_min,
+      leftValid: wc.left_valid,
+      rightValid: wc.right_valid,
+    };
+  }
+  const scores = readWristScoresFromFrame(
+    frameIdx,
+    person?.person_track_id,
+    person?.person_id
+  );
+  const thr = typeof SCORE_MIN === "number" ? SCORE_MIN : 0.3;
+  return {
+    left: scores.left,
+    right: scores.right,
+    scoreMin: thr,
+    leftValid: scores.left != null && scores.left >= thr,
+    rightValid: scores.right != null && scores.right >= thr,
+  };
+}
+
+function formatWristConfidence(score) {
+  const n = Number(score);
+  if (!Number.isFinite(n)) return { text: "—", valid: false };
+  return { text: n.toFixed(4), valid: null };
+}
+
+function renderWristConfidenceTable(person, frameIdx) {
+  const conf = resolveWristConfidence(person, frameIdx);
+  const thr = conf.scoreMin ?? (typeof SCORE_MIN === "number" ? SCORE_MIN : 0.3);
+  const rows = [
+    { label: "左手腕", score: conf.left, valid: conf.leftValid },
+    { label: "右手腕", score: conf.right, valid: conf.rightValid },
+  ];
+  const bodyRows = rows
+    .map(({ label, score, valid }) => {
+      const { text } = formatWristConfidence(score);
+      const isValid = valid != null ? valid : (score != null && score >= thr);
+      const status =
+        score == null
+          ? '<span class="hint">无数据</span>'
+          : isValid
+            ? `<span class="hint">≥${thr}</span>`
+            : `<span class="hint">&lt;${thr}</span>`;
+      return `<tr>
+        <td>${escFeatureHtml(label)}</td>
+        <td><code>${escFeatureHtml(text)}</code></td>
+        <td>${status}</td>
+      </tr>`;
+    })
+    .join("");
   return `<table class="wrist-features-table">
-    <thead><tr><th>手腕</th><th>speed</th><th>vx</th><th>vy</th></tr></thead>
-    <tbody>${list
-      .map((w) => {
-        const name = w.wrist === "left_wrist" ? "左" : w.wrist === "right_wrist" ? "右" : w.wrist;
-        return `<tr>
-          <td>${escFeatureHtml(name)}</td>
-          <td>${w.velocity_valid ? fmtFeatureNum(w.speed, 1) : "—"}</td>
-          <td>${w.velocity_valid ? fmtFeatureNum(w.vx, 1) : "—"}</td>
-          <td>${w.velocity_valid ? fmtFeatureNum(w.vy, 1) : "—"}</td>
-        </tr>`;
-      })
-      .join("")}</tbody></table>`;
+    <thead><tr><th>手腕</th><th>置信度</th><th>阈值</th></tr></thead>
+    <tbody>${bodyRows}</tbody></table>`;
+}
+
+const STANCE_PREVIEW_LABELS = {
+  stance160: "stance160",
+  stance120: "stance120",
+};
+
+function renderStancePreviewItem(item) {
+  if (!item || typeof item !== "object") {
+    return '<p class="hint">无 stance 数据</p>';
+  }
+  const feat = item.stance_feature || "—";
+  const thr = item.stance_threshold ?? "—";
+  const val = item.stance_value;
+  const featLabel = FEATURE_LEG_POSE_LABELS[feat] || feat;
+  const valTxt = val != null ? `${fmtFeatureNum(val, 1)}°` : "—";
+  const verdict =
+    val == null
+      ? '<span class="hint">无效</span>'
+      : item.is_standing
+        ? '<span class="hint">站立 ✓</span>'
+        : '<span class="hint">蹲姿 ✗</span>';
+  return `<table class="skeleton-features-kv">
+    <tr><th>特征</th><td><code>${escFeatureHtml(featLabel)}</code> <span class="hint">(${escFeatureHtml(feat)})</span></td></tr>
+    <tr><th>值</th><td><code>${escFeatureHtml(valTxt)}</code></td></tr>
+    <tr><th>阈值</th><td><code>≥${escFeatureHtml(String(thr))}°</code></td></tr>
+    <tr><th>stance</th><td>${verdict}</td></tr>
+  </table>`;
+}
+
+function renderStanceSection(gate) {
+  const items = Array.isArray(gate?.stance_previews) ? gate.stance_previews : [];
+  if (!items.length) {
+    return renderStancePreviewItem(gate);
+  }
+  return items
+    .map((item) => {
+      const tag = STANCE_PREVIEW_LABELS[item.label] || item.label || item.stance_feature || "stance";
+      return `<div class="skeleton-features-stance-block">
+        <h6 class="playback-wrist-features-subtitle">${escFeatureHtml(tag)}</h6>
+        ${renderStancePreviewItem(item)}
+      </div>`;
+    })
+    .join("");
 }
 
 function renderGatePreview(gate) {
@@ -230,19 +357,15 @@ function renderGatePreview(gate) {
   const exemptTxt = (gate.angle_exempt_detail || [])
     .map((d) => `${d.feature}≥${d.min_threshold}: ${d.met ? "✓" : "✗"} (${fmtFeatureNum(d.value, 1)})`)
     .join("<br>");
-  const stanceTxt = gate.stance_feature
-    ? `${gate.stance_feature}≥${gate.stance_threshold}: ${gate.is_standing ? "站立✓" : "蹲姿✗"} (${fmtFeatureNum(gate.stance_value, 1)})`
-    : "";
   return `<div class="skeleton-features-gate">
-    <div><strong>门控预览</strong> · ankle_max@80 + triple90 + 肩髋踝≥160</div>
+    <div><strong>门控预览</strong> · ankle_max@80 + triple90 + stance160/stance120</div>
     <div><strong>block</strong>=${escFeatureHtml(blocked)}</div>
     <div class="hint">${escFeatureHtml(speedTxt)}</div>
     <div class="hint">${exemptTxt || "—"}</div>
-    ${stanceTxt ? `<div class="hint">${escFeatureHtml(stanceTxt)}</div>` : ""}
   </div>`;
 }
 
-function renderPersonFeatureCard(person) {
+function renderPersonFeatureCard(person, frameIdx) {
   const tid = person.person_track_id ?? "—";
   const pid = person.person_id != null ? person.person_id : "—";
   return `<article class="skeleton-features-person-card" data-track-id="${escFeatureHtml(tid)}">
@@ -250,14 +373,16 @@ function renderPersonFeatureCard(person) {
       <strong>track #${escFeatureHtml(tid)}</strong>
       <span class="hint">person_id #${escFeatureHtml(pid)}</span>
     </header>
+    <h5 class="playback-wrist-features-subtitle">手腕置信度</h5>
+    ${renderWristConfidenceTable(person, frameIdx)}
+    <h5 class="playback-wrist-features-subtitle">Stance 姿态</h5>
+    ${renderStanceSection(person.gate_preview)}
     <h5 class="playback-wrist-features-subtitle">速度 px/s</h5>
     ${renderFeatureKvTable(person.velocity, FEATURE_VELOCITY_LABELS, "")}
     <h5 class="playback-wrist-features-subtitle">上肢角度 °</h5>
     ${renderFeatureKvTable(person.angles, FEATURE_ANGLE_LABELS, "")}
     <h5 class="playback-wrist-features-subtitle">下肢姿态 ° / 比</h5>
     ${renderFeatureKvTable(person.angles, FEATURE_LEG_POSE_LABELS, "")}
-    <h5 class="playback-wrist-features-subtitle">手腕明细</h5>
-    ${renderWristSubTable(person.wrists)}
     ${renderGatePreview(person.gate_preview)}
   </article>`;
 }
@@ -285,7 +410,7 @@ function renderPlaybackFeaturesBody(frameIdx, persons, opts = {}) {
     body.innerHTML = `<p class="hint">帧 ${fi} 无有效人体特征（可能无人或关键点置信度低）</p>`;
     return;
   }
-  body.innerHTML = list.map(renderPersonFeatureCard).join("");
+  body.innerHTML = list.map((p) => renderPersonFeatureCard(p, fi)).join("");
 }
 
 function applyCachedPlaybackFeatures(fi) {

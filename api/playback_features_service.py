@@ -11,7 +11,11 @@ from event_engine.export_frame_utils import (
     resolve_export_indices,
 )
 from event_engine.skeleton_angles import extract_subsampled_joint_angle_from_frames
-from event_engine.skeleton_features import extract_subsampled_velocity_from_frames
+from event_engine.skeleton_features import (
+    extract_subsampled_velocity_from_frames,
+    filter_frames_to_indices,
+)
+from event_engine.wrist_features import assign_person_tracks_to_frames
 from pose_store import RecordLocator, load_all_frames, load_manifest
 
 from api.wrist_features_service import (
@@ -77,6 +81,16 @@ GATE_PREVIEW = {
     "stance_threshold": 160.0,
 }
 
+# 回放侧栏展示多组 stance（与 export 实验命名一致）
+STANCE_PREVIEW_CONFIGS: tuple[tuple[str, str, float], ...] = (
+    ("stance160", "torso_leg_angle_mean", 160.0),
+    ("stance120", "knee_angle_mean", 120.0),
+)
+
+KPT_LEFT_WRIST = 9
+KPT_RIGHT_WRIST = 10
+WRIST_KPT_SCORE_MIN = 0.3
+
 
 def _float_or_none(v: Any) -> float | None:
     if v is None:
@@ -97,9 +111,62 @@ def _pick_keys(row: dict[str, Any], keys: tuple[str, ...]) -> dict[str, Any]:
     return out
 
 
-def _is_standing(row: dict[str, Any]) -> bool:
-    feat = GATE_PREVIEW.get("stance_feature")
-    thr = float(GATE_PREVIEW.get("stance_threshold") or 0)
+def _kpt_score(person: dict[str, Any], idx: int) -> float | None:
+    kpts = person.get("keypoints") or []
+    if idx >= len(kpts):
+        return None
+    kp = kpts[idx]
+    if not isinstance(kp, (list, tuple)) or len(kp) < 3:
+        return None
+    if kp[0] is None or kp[1] is None:
+        return None
+    return _float_or_none(kp[2])
+
+
+def _wrist_confidence_for_person(person: dict[str, Any]) -> dict[str, Any]:
+    left = _kpt_score(person, KPT_LEFT_WRIST)
+    right = _kpt_score(person, KPT_RIGHT_WRIST)
+    thr = WRIST_KPT_SCORE_MIN
+    return {
+        "left_wrist": left,
+        "right_wrist": right,
+        "score_min": thr,
+        "left_valid": left is not None and left >= thr,
+        "right_valid": right is not None and right >= thr,
+    }
+
+
+def _build_wrist_confidence_map(
+    timeline_frames: list[dict[str, Any]],
+    export_indices: set[int],
+    *,
+    video_fps: float,
+) -> dict[tuple[int, int], dict[str, Any]]:
+    """(frame_idx, person_track_id) -> wrist_confidence；track 与速度特征同源。"""
+    subsampled = filter_frames_to_indices(timeline_frames, export_indices)
+    if not subsampled:
+        return {}
+    tracked = assign_person_tracks_to_frames(subsampled, video_fps=video_fps)
+    out: dict[tuple[int, int], dict[str, Any]] = {}
+    for fr in tracked:
+        if not isinstance(fr, dict):
+            continue
+        fi = int(fr.get("frame_idx") or 0)
+        if fi <= 0:
+            continue
+        for person in fr.get("persons") or []:
+            if not isinstance(person, dict):
+                continue
+            track_id = int(person.get("person_track_id") or 0)
+            if track_id <= 0:
+                continue
+            out[(fi, track_id)] = _wrist_confidence_for_person(person)
+    return out
+
+
+def _is_standing(row: dict[str, Any], *, feature: str | None = None, threshold: float | None = None) -> bool:
+    feat = feature or GATE_PREVIEW.get("stance_feature")
+    thr = float(threshold if threshold is not None else (GATE_PREVIEW.get("stance_threshold") or 0))
     if not feat:
         return True
     v = _float_or_none(row.get(feat))
@@ -108,11 +175,28 @@ def _is_standing(row: dict[str, Any]) -> bool:
     return v >= thr
 
 
+def _stance_preview_item(
+    row: dict[str, Any],
+    *,
+    label: str,
+    feature: str,
+    threshold: float,
+) -> dict[str, Any]:
+    val = _float_or_none(row.get(feature))
+    return {
+        "label": label,
+        "stance_feature": feature,
+        "stance_threshold": threshold,
+        "stance_value": val,
+        "is_standing": _is_standing(row, feature=feature, threshold=threshold),
+    }
+
+
 def _gate_preview(row: dict[str, Any]) -> dict[str, Any]:
-    feat = GATE_PREVIEW["speed_feature"]
-    thr = float(GATE_PREVIEW["speed_threshold"])
-    speed = _float_or_none(row.get(feat))
-    speed_high = speed is not None and speed > thr
+    speed_feat = GATE_PREVIEW["speed_feature"]
+    speed_thr = float(GATE_PREVIEW["speed_threshold"])
+    speed = _float_or_none(row.get(speed_feat))
+    speed_high = speed is not None and speed > speed_thr
     exempt_hits = 0
     exempt_detail: list[dict[str, Any]] = []
     for angle_key, min_thr in GATE_PREVIEW["angle_exempt"]:
@@ -127,14 +211,19 @@ def _gate_preview(row: dict[str, Any]) -> dict[str, Any]:
             "met": ok,
         })
     triple_met = exempt_hits == len(GATE_PREVIEW["angle_exempt"])
-    stance_feat = GATE_PREVIEW.get("stance_feature")
-    stance_thr = float(GATE_PREVIEW.get("stance_threshold") or 0)
-    stance_val = _float_or_none(row.get(stance_feat)) if stance_feat else None
-    standing = _is_standing(row)
+    stance_previews = [
+        _stance_preview_item(row, label=label, feature=stance_feat, threshold=stance_thr)
+        for label, stance_feat, stance_thr in STANCE_PREVIEW_CONFIGS
+    ]
+    primary = stance_previews[0] if stance_previews else {}
+    stance_feat = primary.get("stance_feature")
+    stance_thr = float(primary.get("stance_threshold") or 0)
+    stance_val = primary.get("stance_value")
+    standing = bool(primary.get("is_standing"))
     would_block = speed_high and not triple_met and standing
     return {
-        "speed_feature": feat,
-        "speed_threshold": thr,
+        "speed_feature": speed_feat,
+        "speed_threshold": speed_thr,
         "speed_value": speed,
         "speed_high": speed_high,
         "triple_and_met": triple_met,
@@ -143,6 +232,7 @@ def _gate_preview(row: dict[str, Any]) -> dict[str, Any]:
         "stance_threshold": stance_thr,
         "stance_value": stance_val,
         "is_standing": standing,
+        "stance_previews": stance_previews,
         "would_block_collision": would_block,
     }
 
@@ -257,10 +347,16 @@ def _build_record_export_context(locator: RecordLocator) -> dict[str, Any]:
         video_fps=fps,
     )
     merged = _merge_velocity_angle(velocity_rows, angle_rows)
+    wrist_conf_map = _build_wrist_confidence_map(
+        timeline_frames,
+        export_indices,
+        video_fps=fps,
+    )
 
     ctx = {
         "available": True,
         "merged": merged,
+        "wrist_conf_map": wrist_conf_map,
         "export_indices": export_indices,
         "export_indices_source": indices_source,
         "pose_frame_interval": pose_interval,
@@ -351,6 +447,8 @@ def _compute_playback_features_for_frame(
         except (OSError, RuntimeError):
             pass
 
+    wrist_conf_map: dict[tuple[int, int], dict[str, Any]] = ctx.get("wrist_conf_map") or {}
+
     persons: list[dict[str, Any]] = []
     for (row_fi, track_id), row in sorted(merged.items(), key=lambda x: x[0][1]):
         if row_fi != fi or track_id <= 0:
@@ -364,6 +462,8 @@ def _compute_playback_features_for_frame(
             "velocity": _pick_keys(full_row, VELOCITY_KEYS),
             "angles": _pick_keys(full_row, ANGLE_KEYS),
             "wrists": wrist_by_track.get(track_id) or [],
+            "wrist_confidence": wrist_conf_map.get((fi, track_id))
+            or {"left_wrist": None, "right_wrist": None, "score_min": WRIST_KPT_SCORE_MIN},
             "gate_preview": _gate_preview(full_row),
         })
 
@@ -398,5 +498,9 @@ def _compute_playback_features_for_frame(
             ],
             "stance_feature": GATE_PREVIEW.get("stance_feature"),
             "stance_threshold": GATE_PREVIEW.get("stance_threshold"),
+            "stance_previews": [
+                {"label": label, "stance_feature": feat, "stance_threshold": thr}
+                for label, feat, thr in STANCE_PREVIEW_CONFIGS
+            ],
         },
     }

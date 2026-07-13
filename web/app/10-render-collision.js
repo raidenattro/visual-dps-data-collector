@@ -1836,9 +1836,6 @@ async function renderFrameEntry(hit, renderGen) {
   }
   const skipFeatureUi =
     playbackRenderLoopActive && videoEl && !videoEl.paused;
-  if (!skipFeatureUi && typeof updatePlaybackWristFeaturesUi === "function") {
-    updatePlaybackWristFeaturesUi(hit.frameIdx);
-  }
   if (!skipFeatureUi && typeof updatePlaybackSkeletonFeaturesUi === "function") {
     updatePlaybackSkeletonFeaturesUi(hit.frameIdx);
   }

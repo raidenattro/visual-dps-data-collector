@@ -1266,9 +1266,6 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
   });
   const annResult = await applyPlaybackRecordAnnotation(recordId);
   const eventsPromise = loadPlaybackEvents(recordId);
-  if (typeof loadPlaybackWristFeatures === "function") {
-    void loadPlaybackWristFeatures(recordId);
-  }
   if (typeof loadPlaybackSkeletonFeatures === "function") {
     void loadPlaybackSkeletonFeatures(recordId);
   }
