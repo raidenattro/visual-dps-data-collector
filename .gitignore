@@ -90,3 +90,5 @@ config.*.local.json
 
 localdata/
 *.svg
+# 日志
+logs/
