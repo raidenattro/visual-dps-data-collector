@@ -48,6 +48,7 @@ from config_loader import (
     camera_storage_slug_for_folder,
     default_pose_json_path,
     json_bucket_dir,
+    load_config_file,
     parse_camera_folder_name,
     pose_model_tier_from_backend,
     resolve_app_paths,
@@ -449,7 +450,8 @@ def main(argv: list[str] | None = None) -> int:
             "save_video": save_video_cli,
         },
     )
-    paths = resolve_app_paths()
+    cfg_path = resolve_config_path(args.config)
+    paths = resolve_app_paths(load_config_file(cfg_path), base=cfg_path.parent)
 
     try:
         videos = iter_videos_recursive(root)
@@ -504,6 +506,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"📁 根目录: {root}")
     print(f"🎬 视频数: {total}（扩展名: {', '.join(sorted(VIDEO_EXTENSIONS))}）")
     print(f"📦 姿态: {settings.backend} · 检测: {settings.det_backend} · 数据层: {pose_tier}/")
+    print(f"🏷️ 标注目录: {paths.annotation_dir}")
     print(f"⏱️ 采集节拍 frame_rate={settings.frame_rate}（0=全速）")
     if settings.save_video:
         print("💾 保存配套视频: 是（复制到 localdata/video，不移动源文件）")

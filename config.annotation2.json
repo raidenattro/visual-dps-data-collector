@@ -1,0 +1,45 @@
+{
+    "paths": {
+        "base_localdata_dir": "localdata",
+        "json_dir": "localdata/json",
+        "video_dir": "localdata/video",
+        "upload_dir": "localdata/upload",
+        "models_onnx_dir": "localdata/models/onnx",
+        "annotation_dir": "localdata/json/annotations2",
+        "review_dir": "localdata/review"
+    },
+    "storage": {
+        "save_video": true
+    },
+    "video": {
+        "transcode_height": 0,
+        "capture_height": 480
+    },
+    "models": {
+        "backend": "rtmpose_m",
+        "det_variant": "m",
+        "use_gpu": true,
+        "rtmpose_onnx_device": "cpu",
+        "rtmpose_onnx_device_gpu": "cuda",
+        "rtmpose_onnx_ort_backend": "onnxruntime"
+    },
+    "inference": {
+        "frame_rate": 0,
+        "height": 480,
+        "pose_frame_interval": 1,
+        "max_pose_frames": 0,
+        "alarm_min_consecutive_frames": 3,
+        "alarm_cooldown_frames": 6
+    },
+    "source": {
+        "enabled": false,
+        "video": ""
+    },
+    "server": {
+        "host": "127.0.0.1",
+        "port": 8765
+    },
+    "reflection": {
+        "path": "reflection.json"
+    }
+}
