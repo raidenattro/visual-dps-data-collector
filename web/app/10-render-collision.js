@@ -1182,6 +1182,32 @@ function frameIdxFromVideoDuration(timeSec, opts = {}) {
   return Math.min(total, Math.max(1, idx));
 }
 
+/** 由帧号反查视频 currentTime（与 frameIdxFromVideoDuration 互逆，暂停逐帧跳转用） */
+function videoTimeForFrameIdx(frameIdx, opts = {}) {
+  const fi = Math.max(1, parseInt(frameIdx, 10) || 0);
+  const total = Number(poseData?.frame_count) || frameByTime.length || 0;
+  const dur = playbackDurationSec();
+  if (!fi || !total) return 0;
+  if (!(dur > 0 && videoEl?.src)) {
+    const hit =
+      typeof frameEntryByIdx === "function"
+        ? frameEntryByIdx(fi)
+        : frameByTime?.find((e) => e.frameIdx === fi) || null;
+    if (hit) return Math.max(0, Number(hit.t) || 0);
+    const fps = Number(poseData?.fps) || 25;
+    return Math.max(0, (fi - 1) / fps);
+  }
+  const offset = playbackStartPtsSec();
+  const contentDur = Math.max(1e-6, dur - offset);
+  const effFps = Math.max(1, Math.round((total - 1) / contentDur));
+  let tContent = (fi - 1) / effFps;
+  if (opts.centerFrame) tContent += 0.5 / effFps;
+  if (opts.playback && total > 1) {
+    tContent += contentDur / (2 * total);
+  }
+  return Math.min(dur, Math.max(0, offset + tContent));
+}
+
 function syncCanvasSize(opts = {}) {
   const force = opts.force === true;
   if (!force && playbackRenderLoopActive && frozenPlaybackCanvasCss) {

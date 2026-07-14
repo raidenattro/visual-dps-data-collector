@@ -79,7 +79,11 @@ async function realignPlaybackToPinnedEvent() {
   setPlaybackAuthorityFrameIdx(fi);
   await renderExplicitPlaybackFrame(fi);
   if (videoEl.duration && Number.isFinite(videoEl.duration) && videoEl.duration > 0) {
-    videoEl.currentTime = Math.min(hit.t, videoEl.duration);
+    const seekT =
+      typeof videoTimeForFrameIdx === "function"
+        ? videoTimeForFrameIdx(fi)
+        : hit.t;
+    videoEl.currentTime = Math.min(seekT, videoEl.duration);
     if (seekBar) seekBar.value = String((videoEl.currentTime / videoEl.duration) * 1000);
     if (timeLabel) timeLabel.textContent = formatTime(videoEl.currentTime);
   }
@@ -491,7 +495,11 @@ async function seekToTimestamp(timeSec, frameIdx = null, opts = {}) {
   resetPlaybackCollisionTracker();
   const targetFi = frameIdx != null ? parseInt(frameIdx, 10) || 0 : 0;
   const hitByIdx = targetFi > 0 ? frameEntryByIdx(targetFi) : null;
-  const t = hitByIdx?.t ?? Math.max(0, Number(timeSec) || 0);
+  const t = hitByIdx
+    ? (typeof videoTimeForFrameIdx === "function"
+        ? videoTimeForFrameIdx(hitByIdx.frameIdx)
+        : hitByIdx.t)
+    : Math.max(0, Number(timeSec) || 0);
   if (hitByIdx) setPlaybackAuthorityFrameIdx(hitByIdx.frameIdx);
   if (videoEl.duration && Number.isFinite(videoEl.duration) && videoEl.duration > 0) {
     videoEl.currentTime = Math.min(t, videoEl.duration);
