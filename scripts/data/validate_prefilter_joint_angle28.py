@@ -271,9 +271,13 @@ def _recompute_with_row_gate(
     ctx: dict[str, Any],
     *,
     gate_fn,
+    exclude_bottom_row_when_standing: bool = False,
+    stance_feature: str = "",
+    stance_threshold: float = 160.0,
 ) -> list[dict[str, Any]]:
     """按预计算行门控重算 upload 帧（对齐 export 抽帧）。"""
     from event_engine.collision import PersonTrackAssigner
+    from scripts.data.analyze_skeleton_velocity_discrimination import _float_or_none
 
     boxes = ctx["boxes"]
     record_id = ctx["record_id"]
@@ -281,6 +285,20 @@ def _recompute_with_row_gate(
     by_idx = build_timeline_frame_index(ctx["timeline_frames"])
     merged = ctx["merged_rows"]
     fps = ctx["fps"]
+    stance_feat = str(stance_feature or "").strip()
+
+    def _person_is_standing(row: dict[str, Any]) -> bool:
+        if not stance_feat:
+            return False
+        val = _float_or_none(row.get(stance_feat))
+        if val is None:
+            return True
+        return val >= float(stance_threshold)
+
+    def _collision_boxes_for_row(row: dict[str, Any]) -> list[dict[str, Any]]:
+        if not exclude_bottom_row_when_standing or not _person_is_standing(row):
+            return boxes
+        return [b for b in boxes if not b.get("is_bottom_row")]
 
     assigner = PersonTrackAssigner(max_match_dist=220.0, stale_sec=1.2)
     box_consecutive: dict[str, int] = {}
@@ -325,6 +343,7 @@ def _recompute_with_row_gate(
             if gate_fn(row):
                 continue
 
+            row_boxes = _collision_boxes_for_row(row)
             for kpt_idx in (9, 10):
                 if len(keypoints) <= kpt_idx:
                     continue
@@ -332,7 +351,7 @@ def _recompute_with_row_gate(
                 if len(kp) < 3 or float(kp[2]) <= 0.3:
                     continue
                 wx, wy = float(kp[0]), float(kp[1])
-                for box in boxes:
+                for box in row_boxes:
                     contour = box.get("orig_contour")
                     if contour is None:
                         continue

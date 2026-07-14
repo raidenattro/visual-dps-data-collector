@@ -288,6 +288,34 @@ def _load_boxes_for_wrist_features(
     return boxes, ann_path, source
 
 
+def load_annotation_config_for_export(
+    locator: RecordLocator,
+    manifest: dict[str, Any],
+    *,
+    annotation_path: Path | None = None,
+) -> dict[str, Any] | None:
+    """与 _load_boxes_for_wrist_features 同源，返回标注 dict（含 shelves / grid_shape）。"""
+    from event_engine.annotation_boxes import flatten_annotation_boxes, load_annotation_config
+
+    ann_path = resolve_annotation_path_for_wrist_features(
+        locator,
+        manifest,
+        annotation_path=annotation_path,
+    )
+    embedded = _manifest_embedded_annotation(manifest)
+    embedded_count = _embedded_annotation_box_count(manifest)
+
+    file_config: dict[str, Any] | None = None
+    file_box_count = 0
+    if ann_path and ann_path.is_file():
+        file_config = load_annotation_config(ann_path)
+        file_box_count = len(flatten_annotation_boxes(file_config))
+
+    if embedded and embedded_count > file_box_count:
+        return embedded
+    return file_config
+
+
 def _patch_features_manifest_v2(
     record_dir: Path,
     *,

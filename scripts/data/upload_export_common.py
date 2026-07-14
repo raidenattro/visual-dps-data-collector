@@ -13,7 +13,13 @@ from pose_store import load_all_frames, load_manifest
 
 from api.inference_eval_service import load_inference_json_file
 from api.record_service import locate_record_by_id
-from api.wrist_features_service import _infer_size_from_frames, _load_boxes_for_wrist_features, _video_fps
+from api.wrist_features_service import (
+    _infer_size_from_frames,
+    _load_boxes_for_wrist_features,
+    _video_fps,
+    load_annotation_config_for_export,
+)
+from event_engine.shelf_grid import summarize_bottom_rows, tag_bottom_row_on_boxes
 
 MANIFEST_NAME = "_manifest.json"
 
@@ -101,6 +107,19 @@ def process_record_upload_export(
     if not boxes:
         return {"record_id": record_id, "status": "error", "error": "无货框标注"}
 
+    bottom_row_summary: list[dict[str, Any]] | None = None
+    if recompute_kwargs.get("exclude_bottom_row_when_standing"):
+        ann_cfg = load_annotation_config_for_export(loc, manifest)
+        if ann_cfg:
+            boxes = tag_bottom_row_on_boxes(boxes, ann_cfg)
+            bottom_row_summary = summarize_bottom_rows(ann_cfg)
+        else:
+            return {
+                "record_id": record_id,
+                "status": "error",
+                "error": "末行排除需要标注 config（shelves/grid_shape/layer）",
+            }
+
     export_indices = export_indices_for_record(
         entry,
         baseline_dir=baseline_dir,
@@ -130,7 +149,7 @@ def process_record_upload_export(
     out_path.write_text(json.dumps(upload_rows, ensure_ascii=False, indent=2), encoding="utf-8")
 
     picking_count = sum(1 for r in upload_rows if r.get("is_picking"))
-    return {
+    result: dict[str, Any] = {
         "status": "ok",
         "record_id": record_id,
         "clip_name": entry.get("clip_name") or out_path.stem,
@@ -151,6 +170,9 @@ def process_record_upload_export(
             "infer_size_record_dir",
         ) if k in entry},
     }
+    if bottom_row_summary is not None:
+        result["bottom_row_shelves"] = bottom_row_summary
+    return result
 
 
 def build_output_manifest(

@@ -105,6 +105,10 @@ ANKLE_TRIPLE90_STANCE_OUTPUT = (
 ANKLE_STANCE_ONLY_OUTPUT = (
     ROOT / "localdata/export/rule-speed-prefilter-ankle-max80-torso160-prod-test"
 )
+ANKLE_TRIPLE90_TORSO160_EXCL_BOTTOMROW_OUTPUT = (
+    ROOT
+    / "localdata/export/rule-speed-prefilter-ankle-max80-triple90-torso160-excl-bottomrow-prod-test"
+)
 
 
 def _is_standing_row(row: dict[str, Any], *, stance_feat: str, stance_thr: float) -> bool:
@@ -217,6 +221,7 @@ def recompute_triple_and_prefilter_upload_frames(
     stance_threshold: float = DEFAULT_STANCE_THRESHOLD,
     triple_exempt: bool = True,
     angle_exempt_conds: list[tuple[str, float]] | None = None,
+    exclude_bottom_row_when_standing: bool = False,
     **_extra: Any,
 ) -> list[dict[str, Any]]:
     """速度门控 + 可选角度 AND 豁免；可选站立姿态约束。"""
@@ -265,7 +270,13 @@ def recompute_triple_and_prefilter_upload_frames(
             stance_feature=stance_feat,
             stance_threshold=float(stance_threshold),
         )
-    return _recompute_with_row_gate(ctx, gate_fn=gate_fn)
+    return _recompute_with_row_gate(
+        ctx,
+        gate_fn=gate_fn,
+        exclude_bottom_row_when_standing=bool(exclude_bottom_row_when_standing),
+        stance_feature=stance_feat,
+        stance_threshold=float(stance_threshold),
+    )
 
 
 def main() -> int:
@@ -299,6 +310,11 @@ def main() -> int:
         "--pair-angle-exempt",
         choices=sorted(PAIR_ANGLE_EXEMPT.keys()),
         help="启用双角度 AND 豁免：cond12=条件1+2 / cond23=条件2+3",
+    )
+    parser.add_argument(
+        "--exclude-bottom-row-standing",
+        action="store_true",
+        help="站立时跳过每个货架末行（layer==grid_rows）货位的手腕碰撞",
     )
     parser.add_argument("--pose-frame-interval", type=int, default=POSE_FRAME_INTERVAL)
     parser.add_argument("--alarm-min", type=int, default=ALARM_MIN_CONSECUTIVE)
@@ -360,6 +376,8 @@ def main() -> int:
         rule_label += f" + exempt({_format_angle_conds_label(angle_conds)})"
     if stance_feature:
         rule_label += f" + block_only_if_standing({stance_feature}≥{stance_threshold:.0f})"
+    if args.exclude_bottom_row_standing:
+        rule_label += " + skip_bottom_row_when_standing"
 
     if args.dry_run:
         print(f"将处理 {len(records)} 条记录")
@@ -376,6 +394,7 @@ def main() -> int:
         "stance_threshold": stance_threshold,
         "triple_exempt": use_triple,
         "angle_exempt_conds": list(angle_conds) if custom_angle else None,
+        "exclude_bottom_row_when_standing": bool(args.exclude_bottom_row_standing),
     }
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -415,6 +434,14 @@ def main() -> int:
         speed_filter_params["stance_required"] = {
             "feature": stance_feature,
             "min_threshold": stance_threshold,
+        }
+    if args.exclude_bottom_row_standing:
+        speed_filter_params["bottom_row_exclusion"] = {
+            "enabled": True,
+            "when": "standing_only",
+            "stance_feature": stance_feature or DEFAULT_STANCE_FEATURE,
+            "stance_min_threshold": stance_threshold,
+            "layer_rule": "layer == max(annotated layer) per shelf",
         }
 
     out_manifest = build_output_manifest(
