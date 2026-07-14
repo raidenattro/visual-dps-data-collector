@@ -44,6 +44,14 @@ SHOULDER_LEFT = 5
 SHOULDER_RIGHT = 6
 ANKLE_LEFT = 15
 ANKLE_RIGHT = 16
+KNEE_LEFT = 13
+KNEE_RIGHT = 14
+
+# 肩-髋-膝夹角（顶点在髋）：∠(肩,髋,膝)，蹲姿时髋屈曲变小
+SHOULDER_HIP_KNEE_ANGLE_DEFS = (
+    ("left_shoulder_hip_knee_angle", SHOULDER_LEFT, HIP_LEFT, KNEE_LEFT),
+    ("right_shoulder_hip_knee_angle", SHOULDER_RIGHT, HIP_RIGHT, KNEE_RIGHT),
+)
 
 # 上半身(肩→髋)与下半身(髋→踝)整体夹角，绕髋；行走时膝弯但上下躯干夹角相对稳定
 TORSO_LEG_ANGLE_DEFS = (
@@ -91,11 +99,25 @@ def _ankle_center(person: dict[str, Any]) -> tuple[float, float] | None:
     return (la[0] + ra[0]) / 2.0, (la[1] + ra[1]) / 2.0
 
 
+def _knee_center(person: dict[str, Any]) -> tuple[float, float] | None:
+    """双膝中心。"""
+    lk = _read_xy(person, KNEE_LEFT)
+    rk = _read_xy(person, KNEE_RIGHT)
+    if lk is None and rk is None:
+        return None
+    if lk is None:
+        return rk
+    if rk is None:
+        return lk
+    return (lk[0] + rk[0]) / 2.0, (lk[1] + rk[1]) / 2.0
+
+
 def _leg_pose_geometry_for_person(person: dict[str, Any]) -> dict[str, float | None]:
     """下肢姿态几何：上下半身夹角 + 膝角 + 腿长比。"""
     out: dict[str, float | None] = {}
     knee_angles: list[float] = []
     torso_leg_angles: list[float] = []
+    shoulder_hip_knee_angles: list[float] = []
     leg_span_ratios: list[float] = []
     thigh_calf_ratios: list[float] = []
 
@@ -124,6 +146,34 @@ def _leg_pose_geometry_for_person(person: dict[str, Any]) -> dict[str, float | N
         out["torso_leg_angle_mean"] = round(sum(torso_leg_angles) / len(torso_leg_angles), 2)
         out["torso_leg_angle_min"] = round(min(torso_leg_angles), 2)
         out["torso_leg_angle_max"] = round(max(torso_leg_angles), 2)
+
+    for name, sh_idx, hip_idx, knee_idx in SHOULDER_HIP_KNEE_ANGLE_DEFS:
+        sh = _read_xy(person, sh_idx)
+        hip = _read_xy(person, hip_idx)
+        knee = _read_xy(person, knee_idx)
+        if sh is None or hip is None or knee is None:
+            out[name] = None
+            continue
+        ang = _angle_at_joint(sh, hip, knee)
+        out[name] = round(ang, 2) if ang is not None else None
+        if ang is not None:
+            shoulder_hip_knee_angles.append(float(ang))
+
+    sh_c = _shoulder_center(person)
+    hip_c = _hip_center(person)
+    kn_c = _knee_center(person)
+    if sh_c is not None and hip_c is not None and kn_c is not None:
+        ang = _angle_at_joint(sh_c, hip_c, kn_c)
+        out["center_shoulder_hip_knee_angle"] = round(ang, 2) if ang is not None else None
+        if ang is not None:
+            shoulder_hip_knee_angles.append(float(ang))
+
+    if shoulder_hip_knee_angles:
+        out["shoulder_hip_knee_angle_mean"] = round(
+            sum(shoulder_hip_knee_angles) / len(shoulder_hip_knee_angles), 2
+        )
+        out["shoulder_hip_knee_angle_min"] = round(min(shoulder_hip_knee_angles), 2)
+        out["shoulder_hip_knee_angle_max"] = round(max(shoulder_hip_knee_angles), 2)
 
     for name, hip_idx, knee_idx, ankle_idx in KNEE_ANGLE_DEFS:
         hip = _read_xy(person, hip_idx)
