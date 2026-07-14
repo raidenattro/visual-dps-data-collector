@@ -66,6 +66,7 @@ let playbackEventsFrameIndex = new Map();
 /** renderAtTime 合并：避免慢绘制时叠多个 in-flight 请求 */
 let renderAtTimeInflight = false;
 let renderAtTimePendingTime = null;
+let renderAtTimePendingOpts = null;
 /** 上次已同步到事件栏的骨架帧号 */
 let lastEventSyncFrameIdx = -1;
 let rafId = null;

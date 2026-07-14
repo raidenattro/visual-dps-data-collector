@@ -313,35 +313,26 @@ function initEventReviewControls() {
 }
 
 videoEl.addEventListener("seeked", () => {
-  if (playbackRenderLoopActive && !videoEl.paused) return;
-  const pinnedEventNav = playbackEventLinkExact && activeEventKey;
-  const pinnedFi =
-    pinnedEventNav && typeof pinnedEventFrameIdx === "function" ? pinnedEventFrameIdx() : null;
-
-  const explicitFi =
-    typeof getExplicitSeekFrameIdx === "function" ? getExplicitSeekFrameIdx() : null;
-  const authorityFi =
-    typeof getPlaybackAuthorityFrameIdx === "function" ? getPlaybackAuthorityFrameIdx() : null;
-  const targetFi = pinnedFi || authorityFi || explicitFi;
-  if (targetFi && typeof renderExplicitPlaybackFrame === "function") {
-    void renderExplicitPlaybackFrame(targetFi).then((ok) => {
-      if (!ok) return;
-      if (!pinnedEventNav && typeof syncActiveEventFromPlaybackPosition === "function") {
-        syncActiveEventFromPlaybackPosition({
-          timeSec: videoEl.currentTime,
-          frameIdx: targetFi,
-          skipRedraw: true,
-        });
-      } else if (pinnedEventNav && lastRenderedFrameIdx !== targetFi) {
-        void realignPlaybackToPinnedEvent();
-      }
-      if (typeof updateEventReviewFrameNavUi === "function") updateEventReviewFrameNavUi();
-    });
+  if (typeof isExplicitFrameSeekInFlight === "function" && isExplicitFrameSeekInFlight()) {
     return;
   }
+  if (playbackRenderLoopActive && !videoEl.paused) return;
 
-  if (pinnedEventNav) {
-    void realignPlaybackToPinnedEvent();
+  const pinnedEventNav = playbackEventLinkExact && activeEventKey;
+  const syncAfterSeek = (fi) => {
+    if (!fi) return;
+    if (!pinnedEventNav && typeof syncActiveEventFromPlaybackPosition === "function") {
+      syncActiveEventFromPlaybackPosition({
+        timeSec: videoEl.currentTime,
+        frameIdx: fi,
+        skipRedraw: true,
+      });
+    }
+    if (typeof updateEventReviewFrameNavUi === "function") updateEventReviewFrameNavUi();
+  };
+
+  if (typeof renderSkeletonSyncedToVideo === "function" && videoEl.readyState >= 2) {
+    void renderSkeletonSyncedToVideo({ playback: true, setAuthority: true }).then(syncAfterSeek);
     return;
   }
 

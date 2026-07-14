@@ -1143,10 +1143,27 @@ function findFrameNearest(timeSec, opts = {}) {
   return Math.abs(t - left.t) <= Math.abs(right.t - t) ? left : right;
 }
 
+/** timeline 首帧 timestamp 是否已从 0 起算（采集时 normalize_frame_timestamps） */
+function timelineUsesZeroBase() {
+  const t0 = frameByTime?.[0]?.t;
+  return t0 != null && Number(t0) < 0.1;
+}
+
+function containerPtsOffsetSec() {
+  const v = Number(poseData?.video_start_pts_sec);
+  return Number.isFinite(v) && v > 0 ? v : 0;
+}
+
 /** 播放中用于骨架对齐的媒体时间（优先 VideoFrameCallback.mediaTime） */
 function resolvePlaybackMediaTime(mediaTime) {
   if (mediaTime != null && Number.isFinite(Number(mediaTime))) {
-    return Math.max(0, Number(mediaTime));
+    let t = Math.max(0, Number(mediaTime));
+    // mediaTime 可能含容器首帧 PTS（如 1.761s），映射回与 timeline 一致的 0 起点
+    if (timelineUsesZeroBase()) {
+      const pts = containerPtsOffsetSec();
+      if (pts > 0) t = Math.max(0, t - pts);
+    }
+    return t;
   }
   return Math.max(0, Number(videoEl?.currentTime) || 0);
 }
@@ -1161,8 +1178,9 @@ function playbackDurationSec() {
 }
 
 function playbackStartPtsSec() {
-  const v = Number(poseData?.video_start_pts_sec);
-  return Number.isFinite(v) && v > 0 ? v : 0;
+  // timeline 已从 0 均匀分配时，currentTime 与 timestamp_sec 同轴，勿再减 PTS
+  if (timelineUsesZeroBase()) return 0;
+  return containerPtsOffsetSec();
 }
 
 function frameIdxFromVideoDuration(timeSec, opts = {}) {
@@ -1171,7 +1189,7 @@ function frameIdxFromVideoDuration(timeSec, opts = {}) {
   const dur = playbackDurationSec();
   if (!(dur > 0 && videoEl?.src)) return 0;
   const offset = playbackStartPtsSec();
-  const contentDur = Math.max(1e-6, dur - offset);
+  const contentDur = Math.max(1e-6, dur);
   let t = Math.max(0, Number(timeSec) - offset);
   if (opts.playback && total > 1) {
     t = Math.max(0, t - contentDur / (2 * total));
@@ -1182,23 +1200,25 @@ function frameIdxFromVideoDuration(timeSec, opts = {}) {
   return Math.min(total, Math.max(1, idx));
 }
 
-/** 由帧号反查视频 currentTime（与 frameIdxFromVideoDuration 互逆，暂停逐帧跳转用） */
+/** 由帧号反查视频 currentTime（优先 timeline timestamp_sec） */
 function videoTimeForFrameIdx(frameIdx, opts = {}) {
   const fi = Math.max(1, parseInt(frameIdx, 10) || 0);
+  if (!fi) return 0;
+  const hit =
+    typeof frameEntryByIdx === "function"
+      ? frameEntryByIdx(fi)
+      : frameByTime?.find((e) => e.frameIdx === fi) || null;
+  if (hit && Number.isFinite(Number(hit.t))) return Math.max(0, Number(hit.t));
+
   const total = Number(poseData?.frame_count) || frameByTime.length || 0;
   const dur = playbackDurationSec();
-  if (!fi || !total) return 0;
+  if (!total) return 0;
   if (!(dur > 0 && videoEl?.src)) {
-    const hit =
-      typeof frameEntryByIdx === "function"
-        ? frameEntryByIdx(fi)
-        : frameByTime?.find((e) => e.frameIdx === fi) || null;
-    if (hit) return Math.max(0, Number(hit.t) || 0);
     const fps = Number(poseData?.fps) || 25;
     return Math.max(0, (fi - 1) / fps);
   }
   const offset = playbackStartPtsSec();
-  const contentDur = Math.max(1e-6, dur - offset);
+  const contentDur = Math.max(1e-6, dur);
   const effFps = Math.max(1, Math.round((total - 1) / contentDur));
   let tContent = (fi - 1) / effFps;
   if (opts.centerFrame) tContent += 0.5 / effFps;
@@ -1621,25 +1641,87 @@ function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null, review
   });
 }
 
-/** 由视频时间解析骨架帧号；有视频时按 duration 线性映射，避免 25/25.011 类偏差 */
+/** 由视频时间解析骨架帧号；优先 timeline，duration 线性映射作兜底 */
 function frameIdxAtVideoTime(timeSec, opts = {}) {
   const t = Math.max(0, Number(timeSec) || 0);
   const total = Number(poseData?.frame_count) || frameByTime.length || 0;
   if (!total) return 0;
-
-  const fromDuration = frameIdxFromVideoDuration(t, opts);
-  if (fromDuration > 0) return fromDuration;
+  const playback =
+    opts.playback ?? !!(videoEl?.src && Number(videoEl.duration) > 0);
 
   if (frameByTime?.length) {
-    const hit = opts.playback
+    const hit = playback
       ? findFrameNearest(t, { playback: true })
       : findFrameAt(t);
     if (hit?.frameIdx) return hit.frameIdx;
   }
 
+  const fromDuration = frameIdxFromVideoDuration(t, { playback });
+  if (fromDuration > 0) return fromDuration;
+
   const fps = Number(poseData?.fps) || 25;
   const idx = Math.floor(t * fps) + 1;
   return Math.min(total, Math.max(1, idx));
+}
+
+/** 等待暂停 seek 后视频真正呈现的一帧（与播放时 requestVideoFrameCallback 同源） */
+function waitPresentedVideoFrame(el, timeoutMs = 600) {
+  return new Promise((resolve) => {
+    if (!el || el.readyState < 2) {
+      resolve(null);
+      return;
+    }
+    let settled = false;
+    const finish = (mediaTime) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(mediaTime);
+    };
+    const timer = setTimeout(() => finish(null), timeoutMs);
+    if (typeof el.requestVideoFrameCallback === "function") {
+      el.requestVideoFrameCallback((_now, metadata) => {
+        finish(metadata?.mediaTime ?? null);
+      });
+    } else {
+      finish(null);
+    }
+  });
+}
+
+/**
+ * 按视频呈现时间绘制骨架（播放/暂停/seek 共用入口）
+ * 与 playbackRenderLoop 一致：resolvePlaybackMediaTime + frameIdxAtVideoTime(playback:true)
+ */
+async function renderSkeletonSyncedToVideo(opts = {}) {
+  const playback = opts.playback !== false;
+  const mediaTime =
+    opts.mediaTime != null && Number.isFinite(Number(opts.mediaTime))
+      ? Number(opts.mediaTime)
+      : opts.waitPresented !== false && videoEl?.paused
+        ? await waitPresentedVideoFrame(videoEl)
+        : null;
+  const timeSec =
+    typeof resolvePlaybackMediaTime === "function"
+      ? resolvePlaybackMediaTime(mediaTime)
+      : Math.max(0, Number(videoEl?.currentTime) || 0);
+  const fi = frameIdxAtVideoTime(timeSec, { playback });
+  if (!fi) return 0;
+  const hit =
+    typeof frameEntryByIdx === "function"
+      ? frameEntryByIdx(fi)
+      : frameByTime?.find((e) => e.frameIdx === fi) || null;
+  if (!hit) return 0;
+  if (opts.setAuthority !== false && typeof setPlaybackAuthorityFrameIdx === "function") {
+    setPlaybackAuthorityFrameIdx(fi);
+  }
+  lastRenderedFrameIdx = -1;
+  tickPoseFrameIdx = -1;
+  tickVideoFrameIdx = -1;
+  lastEventSyncFrameIdx = -1;
+  resetPlaybackCollisionTracker();
+  await renderFrameEntry(hit);
+  return fi;
 }
 
 /** 取指定帧的推理分辨率（与 timeline / manifest 对齐） */
@@ -1792,51 +1874,25 @@ function redrawCurrentFrame() {
   if (playbackRenderLoopActive && videoEl && !videoEl.paused) return;
   renderGeneration++;
   const gen = renderGeneration;
-  const pinnedFi =
-    typeof pinnedEventFrameIdx === "function" ? pinnedEventFrameIdx() : null;
-  const authorityFi =
-    typeof getPlaybackAuthorityFrameIdx === "function" ? getPlaybackAuthorityFrameIdx() : null;
-  // 保留刚通过 frame_idx 精确渲染的帧，避免预览视频 seek 差帧把画面拉回
-  const heldFi = lastRenderedFrameIdx >= 1 ? lastRenderedFrameIdx : null;
+  if (videoEl?.src && videoEl.readyState >= 2) {
+    void renderSkeletonSyncedToVideo({ playback: true, setAuthority: true }).then((fi) => {
+      if (gen !== renderGeneration) return;
+      if (fi > 0) return;
+      if (frameByTime.length) void renderFrameEntry(frameByTime[0], gen);
+    });
+    return;
+  }
   lastRenderedFrameIdx = -1;
   tickPoseFrameIdx = -1;
   tickVideoFrameIdx = -1;
   lastEventSyncFrameIdx = -1;
-  const targetFi = pinnedFi || authorityFi || heldFi;
-  if (targetFi && frameByTime?.length) {
-    const hit =
-      typeof ensureFrameIndexEntry === "function"
-        ? ensureFrameIndexEntry(targetFi)
-        : typeof frameEntryByIdx === "function"
-          ? frameEntryByIdx(targetFi)
-          : frameByTime.find((item) => item.frameIdx === targetFi) || null;
-    if (hit) {
-      void renderFrameEntry(hit, gen);
-      return;
-    }
-  }
-  if (videoEl.src && videoEl.readyState >= 1) {
-    void renderAtTime(videoEl.currentTime);
-  } else if (frameByTime.length) {
+  if (frameByTime.length) {
     void renderFrameEntry(frameByTime[0], gen);
   }
 }
 
 async function renderFrameEntry(hit, renderGen) {
   if (!hit) return;
-  const authorityFi =
-    typeof getPlaybackAuthorityFrameIdx === "function" ? getPlaybackAuthorityFrameIdx() : null;
-  // 丢弃/纠正落后于权威帧的异步渲染，避免 pause/seeked 竞态把画面拉回
-  if (authorityFi != null && authorityFi > 0 && hit.frameIdx !== authorityFi) {
-    const authHit =
-      typeof ensureFrameIndexEntry === "function"
-        ? ensureFrameIndexEntry(authorityFi)
-        : typeof frameEntryByIdx === "function"
-          ? frameEntryByIdx(authorityFi)
-          : frameByTime.find((e) => e.frameIdx === authorityFi) || null;
-    if (!authHit) return;
-    hit = authHit;
-  }
   const requestedFi = hit.frameIdx;
   let frame = hit.frame || (await ensureFrame(requestedFi));
   if (!frame && typeof findNearestCachedFrameEntry === "function") {
@@ -1868,8 +1924,20 @@ async function renderFrameEntry(hit, renderGen) {
   if (typeof updateEventReviewFrameNavUi === "function") updateEventReviewFrameNavUi();
 }
 
-async function renderAtTimeCore(timeSec) {
-  const hit = findFrameAt(timeSec);
+async function renderAtTimeCore(timeSec, opts = {}) {
+  const t = Math.max(0, Number(timeSec) || 0);
+  const playback = opts.playback ?? !!(videoEl?.src && Number(videoEl.duration) > 0);
+  const fi = frameIdxAtVideoTime(t, { playback });
+  if (!fi) {
+    lastRenderedFrameIdx = -1;
+    const { cw, ch } = syncCanvasSize();
+    ctx.clearRect(0, 0, cw, ch);
+    return;
+  }
+  const hit =
+    typeof frameEntryByIdx === "function"
+      ? frameEntryByIdx(fi)
+      : frameByTime?.find((e) => e.frameIdx === fi) || null;
   if (!hit) {
     lastRenderedFrameIdx = -1;
     const { cw, ch } = syncCanvasSize();
@@ -1896,33 +1964,24 @@ async function renderAtTimeCore(timeSec) {
   }
 }
 
-async function renderAtTime(timeSec) {
-  const authorityFi =
-    typeof getPlaybackAuthorityFrameIdx === "function" ? getPlaybackAuthorityFrameIdx() : null;
-  if (authorityFi != null && authorityFi > 0) {
-    const hit =
-      typeof ensureFrameIndexEntry === "function"
-        ? ensureFrameIndexEntry(authorityFi)
-        : typeof frameEntryByIdx === "function"
-          ? frameEntryByIdx(authorityFi)
-          : frameByTime.find((e) => e.frameIdx === authorityFi) || null;
-    if (hit) {
-      await renderFrameEntry(hit);
-      return;
-    }
-  }
+async function renderAtTime(timeSec, opts = {}) {
   if (renderAtTimeInflight) {
     renderAtTimePendingTime = timeSec;
+    renderAtTimePendingOpts = opts;
     return;
   }
   renderAtTimeInflight = true;
   renderAtTimePendingTime = null;
+  renderAtTimePendingOpts = null;
   try {
     let nextTime = timeSec;
+    let nextOpts = opts;
     do {
       renderAtTimePendingTime = null;
-      await renderAtTimeCore(nextTime);
+      renderAtTimePendingOpts = null;
+      await renderAtTimeCore(nextTime, nextOpts);
       nextTime = renderAtTimePendingTime;
+      nextOpts = renderAtTimePendingOpts || opts;
     } while (renderAtTimePendingTime != null);
   } finally {
     renderAtTimeInflight = false;

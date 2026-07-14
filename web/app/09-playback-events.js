@@ -6,6 +6,38 @@ let playbackAuthorityFrameIdx = null;
 /** 按 frame_idx 精确 seek 时的目标帧（与权威帧同步，供 seeked 回调读取） */
 let explicitSeekFrameIdx = null;
 
+/** seekToTimestamp 正在等待 seeked 并完成渲染时，避免 seeked 监听器重复绘制 */
+let explicitFrameSeekInFlight = false;
+
+function isExplicitFrameSeekInFlight() {
+  return explicitFrameSeekInFlight;
+}
+
+/** 等待视频 seek 完成（暂停逐帧跳转须在 seeked 后再绘骨架，否则会超前于画面） */
+function waitVideoSeeked(el, timeoutMs = 600) {
+  return new Promise((resolve) => {
+    if (!el) {
+      resolve(false);
+      return;
+    }
+    let settled = false;
+    const finish = (ok) => {
+      if (settled) return;
+      settled = true;
+      el.removeEventListener("seeked", onSeeked);
+      clearTimeout(timer);
+      resolve(ok);
+    };
+    const onSeeked = () => finish(true);
+    el.addEventListener("seeked", onSeeked);
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    // seeking 可能在本帧稍后置位，先等一帧再判断
+    requestAnimationFrame(() => {
+      if (!el.seeking) finish(true);
+    });
+  });
+}
+
 function setPlaybackAuthorityFrameIdx(frameIdx) {
   const fi = parseInt(frameIdx, 10) || 0;
   playbackAuthorityFrameIdx = fi > 0 ? fi : null;
@@ -77,21 +109,42 @@ async function realignPlaybackToPinnedEvent() {
   const hit = frameEntryByIdx(fi);
   if (!hit) return false;
   setPlaybackAuthorityFrameIdx(fi);
-  await renderExplicitPlaybackFrame(fi);
   if (videoEl.duration && Number.isFinite(videoEl.duration) && videoEl.duration > 0) {
     const seekT =
       typeof videoTimeForFrameIdx === "function"
         ? videoTimeForFrameIdx(fi)
         : hit.t;
-    videoEl.currentTime = Math.min(seekT, videoEl.duration);
+    explicitFrameSeekInFlight = true;
+    try {
+      videoEl.currentTime = Math.min(seekT, videoEl.duration);
+      await waitVideoSeeked(videoEl);
+      if (typeof renderSkeletonSyncedToVideo === "function") {
+        await renderSkeletonSyncedToVideo({ playback: true, setAuthority: true });
+      } else {
+        await renderExplicitPlaybackFrame(fi);
+      }
+    } finally {
+      explicitFrameSeekInFlight = false;
+    }
     if (seekBar) seekBar.value = String((videoEl.currentTime / videoEl.duration) * 1000);
     if (timeLabel) timeLabel.textContent = formatTime(videoEl.currentTime);
+  } else {
+    await renderExplicitPlaybackFrame(fi);
   }
   return lastRenderedFrameIdx === fi;
 }
 
-/** 按显式目标帧渲染（供 seeked / pause 回调与逐帧步进复用） */
+/** 按视频呈现时间渲染骨架（与播放循环共用逻辑） */
 async function renderExplicitPlaybackFrame(frameIdx) {
+  if (
+    typeof renderSkeletonSyncedToVideo === "function" &&
+    videoEl?.src &&
+    videoEl.readyState >= 2 &&
+    Number(videoEl.duration) > 0
+  ) {
+    const fi = await renderSkeletonSyncedToVideo({ playback: true, setAuthority: true });
+    return fi > 0;
+  }
   const fi = parseInt(frameIdx, 10) || 0;
   if (!fi || !frameByTime?.length) return false;
   const hit = frameEntryByIdx(fi);
@@ -273,16 +326,13 @@ function getCurrentPlaybackTimeSec() {
 }
 
 function getCurrentPlaybackFrameIdx() {
+  const hasVideo = !!(videoEl?.src && Number(videoEl.duration) > 0);
   const timeSec =
-    typeof playbackRenderLoopActive !== "undefined" &&
-    playbackRenderLoopActive &&
-    typeof resolvePlaybackMediaTime === "function"
+    hasVideo && typeof resolvePlaybackMediaTime === "function"
       ? resolvePlaybackMediaTime()
       : getCurrentPlaybackTimeSec();
   if (typeof frameIdxAtVideoTime === "function") {
-    const playback =
-      typeof playbackRenderLoopActive !== "undefined" && playbackRenderLoopActive;
-    const fi = frameIdxAtVideoTime(timeSec, { playback });
+    const fi = frameIdxAtVideoTime(timeSec, { playback: hasVideo });
     return fi > 0 ? fi : null;
   }
   const hit = findFrameAt(timeSec);
@@ -449,9 +499,15 @@ function syncActiveEventFromPlaybackPosition(opts = {}) {
         typeof eventDisplayFrameIdx === "function"
           ? eventDisplayFrameIdx(pinned)
           : parseInt(pinned.frame_idx, 10) || 0;
-      const fi = frameIdx != null ? parseInt(frameIdx, 10) || 0 : null;
-      if (pinnedFi > 0 && fi != null && fi > 0 && fi !== pinnedFi) {
-        void realignPlaybackToPinnedEvent();
+      if (pinnedFi > 0) {
+        const expectedT =
+          typeof videoTimeForFrameIdx === "function"
+            ? videoTimeForFrameIdx(pinnedFi)
+            : Number(pinned.timestamp_sec) || 0;
+        const fps = Number(poseData?.fps) || 25;
+        if (Math.abs(timeSec - expectedT) > 0.5 / fps) {
+          void realignPlaybackToPinnedEvent();
+        }
       }
     }
     return;
@@ -502,12 +558,24 @@ async function seekToTimestamp(timeSec, frameIdx = null, opts = {}) {
     : Math.max(0, Number(timeSec) || 0);
   if (hitByIdx) setPlaybackAuthorityFrameIdx(hitByIdx.frameIdx);
   if (videoEl.duration && Number.isFinite(videoEl.duration) && videoEl.duration > 0) {
+    const prevTime = videoEl.currentTime;
     videoEl.currentTime = Math.min(t, videoEl.duration);
     seekBar.value = String((videoEl.currentTime / videoEl.duration) * 1000);
     timeLabel.textContent = formatTime(videoEl.currentTime);
-    // 有目标帧时强制按 frame_idx 渲染，避免预览视频 seek 吸附关键帧导致差 1 帧
     if (hitByIdx) {
-      await renderFrameEntry(hitByIdx);
+      explicitFrameSeekInFlight = true;
+      try {
+        if (videoEl.seeking || Math.abs(prevTime - videoEl.currentTime) > 1e-4) {
+          await waitVideoSeeked(videoEl);
+        }
+        if (typeof renderSkeletonSyncedToVideo === "function") {
+          await renderSkeletonSyncedToVideo({ playback: true, setAuthority: true });
+        } else {
+          await renderExplicitPlaybackFrame(hitByIdx.frameIdx);
+        }
+      } finally {
+        explicitFrameSeekInFlight = false;
+      }
     } else {
       await renderAtTime(videoEl.currentTime);
     }
@@ -562,22 +630,23 @@ async function seekToEvent(ev, { keepReviewBack = false } = {}) {
   updateEventMarkerActiveState();
   if (typeof updateStageBoxPickMode === "function") updateStageBoxPickMode();
   updateEventReviewFrameNavUi();
-  // 异步 seeked 可能把画面漂移：终态与下一帧任务各校验一次
+  // 仅当视频时间偏离事件帧时重新 seek（骨架已与视频同步，不再强制 event frame_idx）
   const ensurePinnedAligned = async () => {
     if (activeEventKey !== key || !playbackEventLinkExact || !targetFi) return;
-    if (lastRenderedFrameIdx !== targetFi || getPlaybackAuthorityFrameIdx() !== targetFi) {
+    const expectedT =
+      typeof videoTimeForFrameIdx === "function"
+        ? videoTimeForFrameIdx(targetFi)
+        : Number(ev.timestamp_sec) || 0;
+    const fps = Number(poseData?.fps) || 25;
+    if (Math.abs(videoEl.currentTime - expectedT) > 0.5 / fps) {
       await realignPlaybackToPinnedEvent();
       activeEventKey = key;
       playbackEventLinkExact = true;
-      setPlaybackAuthorityFrameIdx(targetFi);
       updateEventReviewFrameNavUi();
     }
   };
-  if (targetFi > 0 && lastRenderedFrameIdx !== targetFi) {
-    await ensurePinnedAligned();
-  } else if (targetFi > 0) {
+  if (targetFi > 0) {
     queueMicrotask(() => void ensurePinnedAligned());
-    window.setTimeout(() => void ensurePinnedAligned(), 80);
   }
 }
 
