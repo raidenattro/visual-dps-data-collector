@@ -1,21 +1,16 @@
 #!/usr/bin/env python3
-"""对比两个 export 目录的误报/漏报差异，生成 Markdown 报告。
-
-数据来源：各目录 accuracy_report.json
-  - 误报：clips[].diagnostics.false_alarms
-  - 漏报：clips[].diagnostics.missed_segments
+"""对比两个 export 目录 accuracy_report.json 的误报/漏报差异。
 
 用法（项目根目录）:
   python scripts/data/compare_export_false_alarms.py \\
     --baseline localdata/export/rule-baseline-prod-test \\
-    --experiment localdata/export/rule-speed-prefilter-prod-test
+    --experiment localdata/export/rule-speed-lower60-prod-test
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -26,133 +21,231 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+DEFAULT_REPORT_NAME = "accuracy_report.json"
+
 
 def _load_report(dir_path: Path) -> dict[str, Any]:
-    path = dir_path / "accuracy_report.json"
-    if not path.is_file():
-        raise FileNotFoundError(f"缺少 accuracy_report.json: {path}")
-    return json.loads(path.read_text(encoding="utf-8"))
+    report_path = dir_path / DEFAULT_REPORT_NAME
+    if not report_path.is_file():
+        raise FileNotFoundError(f"缺少 {report_path}")
+    return json.loads(report_path.read_text(encoding="utf-8"))
 
 
-def _fp_key(row: dict[str, Any]) -> tuple[str, int, str]:
-    return (
-        str(row.get("upload_file") or row.get("clip") or ""),
-        int(row.get("frame_idx") or 0),
-        str(row.get("box_token") or "").strip(),
-    )
+def _clip_meta(clip: dict[str, Any]) -> dict[str, str]:
+    return {
+        "record_id": str(clip.get("record_id") or "").strip(),
+        "upload_file": str(clip.get("upload_file") or clip.get("clip") or "").strip(),
+        "camera_slug": str(clip.get("camera_slug") or "").strip(),
+    }
 
 
-def _fn_key(row: dict[str, Any], clip_row: dict[str, Any]) -> tuple[str, int, int, str]:
-    tokens = row.get("gt_tokens") or []
-    tok = ",".join(sorted(str(t) for t in tokens))
-    return (
-        str(clip_row.get("upload_file") or clip_row.get("clip") or ""),
-        int(row.get("frame_start") or 0),
-        int(row.get("frame_end") or 0),
-        tok,
-    )
-
-
-def _collect_fps(report: dict[str, Any]) -> dict[tuple[str, int, str], dict[str, Any]]:
+def _extract_false_alarms(report: dict[str, Any]) -> dict[tuple[str, int, str], dict[str, Any]]:
+    """提取误报集合，键为 (record_id, frame_idx, box_token)。"""
     out: dict[tuple[str, int, str], dict[str, Any]] = {}
     for clip in report.get("clips") or []:
-        if not isinstance(clip, dict):
+        if not isinstance(clip, dict) or clip.get("status") != "ok":
             continue
-        cam = str(clip.get("camera_slug") or "")
-        upload = str(clip.get("upload_file") or clip.get("clip") or "")
-        for fa in (clip.get("diagnostics") or {}).get("false_alarms") or []:
-            if not isinstance(fa, dict):
+        meta = _clip_meta(clip)
+        record_id = meta["record_id"]
+        if not record_id:
+            continue
+        diag = clip.get("diagnostics") or {}
+        for row in diag.get("false_alarms") or []:
+            if not isinstance(row, dict):
                 continue
-            row = {
-                "upload_file": upload,
-                "camera_slug": cam,
-                "frame_idx": int(fa.get("frame_idx") or 0),
-                "box_token": str(fa.get("box_token") or "").strip(),
-                "seek_frame": fa.get("seek_frame"),
-                "label": fa.get("label"),
+            frame_idx = int(row.get("frame_idx") or row.get("seek_frame") or 0)
+            box_token = str(row.get("box_token") or "").strip()
+            if frame_idx <= 0:
+                continue
+            key = (record_id, frame_idx, box_token)
+            out[key] = {
+                **meta,
+                "frame_idx": frame_idx,
+                "box_token": box_token,
+                "label": str(row.get("label") or f"误报 · {box_token} · 帧 {frame_idx}"),
             }
-            out[_fp_key(row)] = row
     return out
 
 
-def _collect_fns(report: dict[str, Any]) -> dict[tuple[str, int, int, str], dict[str, Any]]:
-    out: dict[tuple[str, int, int, str], dict[str, Any]] = {}
+def _missed_segment_key(record_id: str, row: dict[str, Any]) -> tuple[str, int, int, tuple[str, ...]]:
+    frame_start = int(row.get("frame_start") or row.get("seek_frame") or 0)
+    frame_end = int(row.get("frame_end") or frame_start)
+    gt_tokens = tuple(sorted(str(t).strip() for t in (row.get("gt_tokens") or []) if str(t).strip()))
+    return record_id, frame_start, frame_end, gt_tokens
+
+
+def _extract_missed_segments(report: dict[str, Any]) -> dict[tuple[str, int, int, tuple[str, ...]], dict[str, Any]]:
+    """提取漏报段集合，键为 (record_id, frame_start, frame_end, gt_tokens)。"""
+    out: dict[tuple[str, int, int, tuple[str, ...]], dict[str, Any]] = {}
     for clip in report.get("clips") or []:
-        if not isinstance(clip, dict):
+        if not isinstance(clip, dict) or clip.get("status") != "ok":
             continue
-        cam = str(clip.get("camera_slug") or "")
-        upload = str(clip.get("upload_file") or clip.get("clip") or "")
-        for ms in (clip.get("diagnostics") or {}).get("missed_segments") or []:
-            if not isinstance(ms, dict):
+        meta = _clip_meta(clip)
+        record_id = meta["record_id"]
+        if not record_id:
+            continue
+        diag = clip.get("diagnostics") or {}
+        for row in diag.get("missed_segments") or []:
+            if not isinstance(row, dict):
                 continue
-            row = {
-                "upload_file": upload,
-                "camera_slug": cam,
-                "frame_start": int(ms.get("frame_start") or 0),
-                "frame_end": int(ms.get("frame_end") or 0),
-                "seek_frame": ms.get("seek_frame"),
-                "gt_tokens": list(ms.get("gt_tokens") or []),
-                "label": ms.get("label"),
+            frame_start = int(row.get("frame_start") or row.get("seek_frame") or 0)
+            frame_end = int(row.get("frame_end") or frame_start)
+            if frame_start <= 0:
+                continue
+            gt_tokens = [str(t).strip() for t in (row.get("gt_tokens") or []) if str(t).strip()]
+            key = _missed_segment_key(record_id, row)
+            out[key] = {
+                **meta,
+                "frame_start": frame_start,
+                "frame_end": frame_end,
+                "seek_frame": int(row.get("seek_frame") or frame_start),
+                "gt_tokens": gt_tokens,
+                "label": str(
+                    row.get("label")
+                    or f"漏报 · {', '.join(gt_tokens) or '—'} · 帧 {frame_start}–{frame_end}"
+                ),
             }
-            out[_fn_key(row, clip)] = row
     return out
 
 
-def _fmt_tokens(tokens: list[str]) -> str:
-    items = [str(t).strip() for t in tokens if str(t).strip()]
+def _sort_fp_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        rows,
+        key=lambda r: (
+            str(r.get("record_id") or ""),
+            int(r.get("frame_idx") or 0),
+            str(r.get("box_token") or ""),
+        ),
+    )
+
+
+def _sort_fn_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        rows,
+        key=lambda r: (
+            str(r.get("record_id") or ""),
+            int(r.get("frame_start") or 0),
+            int(r.get("frame_end") or 0),
+            ",".join(r.get("gt_tokens") or []),
+        ),
+    )
+
+
+def _group_by_record_fp(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        grouped[str(row.get("record_id") or "")].append(row)
+    for rid in grouped:
+        grouped[rid] = sorted(grouped[rid], key=lambda r: int(r.get("frame_idx") or 0))
+    return dict(grouped)
+
+
+def _group_by_record_fn(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        grouped[str(row.get("record_id") or "")].append(row)
+    for rid in grouped:
+        grouped[rid] = sorted(grouped[rid], key=lambda r: int(r.get("frame_start") or 0))
+    return dict(grouped)
+
+
+def _short_record_id(record_id: str) -> str:
+    return record_id.split("/")[-1] if record_id else record_id
+
+
+def _format_gt_tokens(tokens: list[str] | tuple[str, ...] | None) -> str:
+    items = [str(t).strip() for t in (tokens or []) if str(t).strip()]
     return ", ".join(f"`{t}`" for t in items) if items else "—"
 
 
-def _group_fp_summary(rows: list[dict[str, Any]]) -> list[str]:
-    by_clip: dict[str, list[int]] = defaultdict(list)
-    for r in rows:
-        by_clip[str(r.get("upload_file") or "")].append(int(r.get("frame_idx") or 0))
-    lines: list[str] = []
-    for clip in sorted(by_clip.keys()):
-        frames = sorted(set(by_clip[clip]))
-        frame_txt = ", ".join(str(f) for f in frames)
-        lines.append(f"- `{clip}`：{len(frames)} 次 · 帧 {frame_txt}")
+def _render_fp_section(title: str, rows: list[dict[str, Any]]) -> list[str]:
+    lines = [f"## {title}", ""]
+    if not rows:
+        lines.append("_无_")
+        return lines
+    grouped = _group_by_record_fp(rows)
+    lines.extend(["| 记录 | 机位 | 帧 | 货框 |", "|------|------|-----|------|"])
+    for rid in sorted(grouped):
+        group = grouped[rid]
+        upload_file = group[0].get("upload_file") or _short_record_id(rid)
+        camera = group[0].get("camera_slug") or "—"
+        for row in group:
+            lines.append(
+                f"| `{upload_file}` | {camera} | {row['frame_idx']} | `{row['box_token']}` |"
+            )
+    lines.extend(["", "### 按记录汇总", ""])
+    for rid in sorted(grouped):
+        group = grouped[rid]
+        frames = ", ".join(str(r["frame_idx"]) for r in group)
+        lines.append(
+            f"- `{group[0].get('upload_file') or _short_record_id(rid)}`：{len(group)} 次 · 帧 {frames}"
+        )
     return lines
 
 
-def _group_fn_summary(rows: list[dict[str, Any]]) -> list[str]:
-    lines: list[str] = []
-    for r in sorted(rows, key=lambda x: (x.get("upload_file"), x.get("frame_start"))):
-        clip = r.get("upload_file")
-        a = r.get("frame_start")
-        b = r.get("frame_end")
-        toks = _fmt_tokens(r.get("gt_tokens") or [])
-        lines.append(f"- `{clip}`：1 段 · 帧 {a}–{b} ({toks})")
+def _render_fn_section(title: str, rows: list[dict[str, Any]]) -> list[str]:
+    lines = [f"## {title}", ""]
+    if not rows:
+        lines.append("_无_")
+        return lines
+    grouped = _group_by_record_fn(rows)
+    lines.extend(
+        [
+            "| 记录 | 机位 | 帧区间 | seek_frame | 标真货框 |",
+            "|------|------|--------|------------|----------|",
+        ]
+    )
+    for rid in sorted(grouped):
+        group = grouped[rid]
+        upload_file = group[0].get("upload_file") or _short_record_id(rid)
+        camera = group[0].get("camera_slug") or "—"
+        for row in group:
+            frame_range = (
+                str(row["frame_start"])
+                if row["frame_start"] == row["frame_end"]
+                else f"{row['frame_start']}–{row['frame_end']}"
+            )
+            lines.append(
+                f"| `{upload_file}` | {camera} | {frame_range} | {row['seek_frame']} | "
+                f"{_format_gt_tokens(row.get('gt_tokens'))} |"
+            )
+    lines.extend(["", "### 按记录汇总", ""])
+    for rid in sorted(grouped):
+        group = grouped[rid]
+        parts = []
+        for row in group:
+            if row["frame_start"] == row["frame_end"]:
+                parts.append(f"帧 {row['frame_start']} ({', '.join(row.get('gt_tokens') or [])})")
+            else:
+                parts.append(
+                    f"帧 {row['frame_start']}–{row['frame_end']} ({', '.join(row.get('gt_tokens') or [])})"
+                )
+        lines.append(
+            f"- `{group[0].get('upload_file') or _short_record_id(rid)}`：{len(group)} 段 · {'; '.join(parts)}"
+        )
     return lines
 
 
-def render_compare_markdown(
+def _render_markdown(
+    *,
     baseline_dir: Path,
     experiment_dir: Path,
-    *,
     baseline_report: dict[str, Any],
     experiment_report: dict[str, Any],
+    reduced_fp: list[dict[str, Any]],
+    added_fp: list[dict[str, Any]],
+    reduced_fn: list[dict[str, Any]],
+    added_fn: list[dict[str, Any]],
 ) -> str:
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     b_sum = baseline_report.get("summary") or {}
     e_sum = experiment_report.get("summary") or {}
-
-    b_fps = _collect_fps(baseline_report)
-    e_fps = _collect_fps(experiment_report)
-    b_fns = _collect_fns(baseline_report)
-    e_fns = _collect_fns(experiment_report)
-
-    removed_fp = [b_fps[k] for k in b_fps if k not in e_fps]
-    added_fp = [e_fps[k] for k in e_fps if k not in b_fps]
-    removed_fn = [b_fns[k] for k in b_fns if k not in e_fns]
-    added_fn = [e_fns[k] for k in e_fns if k not in b_fns]
-
-    removed_fp.sort(key=lambda r: (r.get("upload_file"), r.get("frame_idx")))
-    added_fp.sort(key=lambda r: (r.get("upload_file"), r.get("frame_idx")))
-    added_fn.sort(key=lambda r: (r.get("upload_file"), r.get("frame_start")))
-
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    exp_name = experiment_dir.name
-    out_name = f"compare_{exp_name}_vs_{baseline_dir.name}.md"
+    b_fp = int(b_sum.get("false_alarms") or 0)
+    e_fp = int(e_sum.get("false_alarms") or 0)
+    b_fn = int(b_sum.get("missed") or 0)
+    e_fn = int(e_sum.get("missed") or 0)
+    fp_delta = e_fp - b_fp
+    fn_delta = e_fn - b_fn
 
     lines = [
         "# 误报 / 漏报对比报告",
@@ -167,300 +260,147 @@ def render_compare_markdown(
         "",
         "| 指标 | 基准 | 实验 | 变化 (实验−基准) |",
         "|------|------|------|------------------|",
-        f"| 误报总数（FP） | {b_sum.get('false_alarms', 0)} | {e_sum.get('false_alarms', 0)} | "
-        f"{int(e_sum.get('false_alarms') or 0) - int(b_sum.get('false_alarms') or 0):+d} |",
-        f"| 减少的误报（仅基准有） | — | — | {len(removed_fp)} |",
+        f"| 误报总数（FP） | {b_fp} | {e_fp} | {fp_delta:+d} |",
+        f"| 减少的误报（仅基准有） | — | — | {len(reduced_fp)} |",
         f"| 新增的误报（仅实验有） | — | — | {len(added_fp)} |",
-        f"| 漏报段总数（FN） | {b_sum.get('missed', 0)} | {e_sum.get('missed', 0)} | "
-        f"{int(e_sum.get('missed') or 0) - int(b_sum.get('missed') or 0):+d} |",
-        f"| 减少的漏报（仅基准有） | — | — | {len(removed_fn)} |",
+        f"| 漏报段总数（FN） | {b_fn} | {e_fn} | {fn_delta:+d} |",
+        f"| 减少的漏报（仅基准有） | — | — | {len(reduced_fn)} |",
         f"| 新增的漏报（仅实验有） | — | — | {len(added_fn)} |",
-        f"| 召回率 | {b_sum.get('recall')} | {e_sum.get('recall')} | — |",
-        f"| 基准 eval_id | `{b_sum.get('eval_id')}` | — | — |",
-        f"| 实验 eval_id | — | `{e_sum.get('eval_id')}` | — |",
-        "",
-        f"- 误报净变化 {int(e_sum.get('false_alarms') or 0) - int(b_sum.get('false_alarms') or 0):+d} 次"
-        f"（{b_sum.get('false_alarms')} → {e_sum.get('false_alarms')}）。",
-        f"- 漏报净变化 {int(e_sum.get('missed') or 0) - int(b_sum.get('missed') or 0):+d} 段"
-        f"（{b_sum.get('missed')} → {e_sum.get('missed')}）。",
-        "",
-        "## 减少的误报（基准有、实验无）",
+        f"| 召回率 | {b_sum.get('recall', '—')} | {e_sum.get('recall', '—')} | — |",
+        f"| 基准 eval_id | `{b_sum.get('eval_id', '')}` | — | — |",
+        f"| 实验 eval_id | — | `{e_sum.get('eval_id', '')}` | — |",
         "",
     ]
 
-    if removed_fp:
-        lines += [
-            "| 记录 | 机位 | 帧 | 货框 |",
-            "|------|------|-----|------|",
-        ]
-        for r in removed_fp:
-            lines.append(
-                f"| `{r.get('upload_file')}` | {r.get('camera_slug') or '—'} | "
-                f"{r.get('frame_idx')} | `{r.get('box_token')}` |"
-            )
-        lines += ["", "### 按记录汇总", ""] + _group_fp_summary(removed_fp)
+    if fp_delta < 0:
+        lines.append(f"- 误报净减少 {abs(fp_delta)} 次（{b_fp} → {e_fp}）。")
+    elif fp_delta > 0:
+        lines.append(f"- 误报净增加 {fp_delta} 次（{b_fp} → {e_fp}）。")
     else:
-        lines.append("_无_")
+        lines.append(f"- 误报总数不变（{b_fp}），帧级替换 {len(reduced_fp)} 消失 / {len(added_fp)} 新增。")
 
-    lines += ["", "## 新增的误报（实验有、基准无）", ""]
-    if added_fp:
-        lines += [
-            "| 记录 | 机位 | 帧 | 货框 |",
-            "|------|------|-----|------|",
-        ]
-        for r in added_fp:
-            lines.append(
-                f"| `{r.get('upload_file')}` | {r.get('camera_slug') or '—'} | "
-                f"{r.get('frame_idx')} | `{r.get('box_token')}` |"
-            )
-        lines += ["", "### 按记录汇总", ""] + _group_fp_summary(added_fp)
+    if fn_delta < 0:
+        lines.append(f"- 漏报净减少 {abs(fn_delta)} 段（{b_fn} → {e_fn}）。")
+    elif fn_delta > 0:
+        lines.append(f"- 漏报净增加 {fn_delta} 段（{b_fn} → {e_fn}）。")
     else:
-        lines.append("_无_")
+        lines.append(f"- 漏报段数不变（{b_fn}），段级替换 {len(reduced_fn)} 消失 / {len(added_fn)} 新增。")
+    lines.append("")
 
-    lines += ["", "## 减少的漏报（基准有、实验无）", ""]
-    if removed_fn:
-        lines += [
-            "| 记录 | 机位 | 帧区间 | seek_frame | 标真货框 |",
-            "|------|------|--------|------------|----------|",
-        ]
-        for r in removed_fn:
-            lines.append(
-                f"| `{r.get('upload_file')}` | {r.get('camera_slug') or '—'} | "
-                f"{r.get('frame_start')}–{r.get('frame_end')} | {r.get('seek_frame')} | "
-                f"{_fmt_tokens(r.get('gt_tokens') or [])} |"
-            )
-        lines += ["", "### 按记录汇总", ""] + _group_fn_summary(removed_fn)
-    else:
-        lines.append("_无_")
-
-    lines += ["", "## 新增的漏报（实验有、基准无）", ""]
-    if added_fn:
-        lines += [
-            "| 记录 | 机位 | 帧区间 | seek_frame | 标真货框 |",
-            "|------|------|--------|------------|----------|",
-        ]
-        for r in added_fn:
-            label = str(r.get("label") or "")
-            extra = ""
-            if "(" in label:
-                m = re.search(r"\(([^)]+)\)", label)
-                if m:
-                    extra = f"({m.group(1)})"
-            lines.append(
-                f"| `{r.get('upload_file')}` | {r.get('camera_slug') or '—'} | "
-                f"{r.get('frame_start')}–{r.get('frame_end')}{extra} | {r.get('seek_frame')} | "
-                f"{_fmt_tokens(r.get('gt_tokens') or [])} |"
-            )
-        lines += ["", "### 按记录汇总", ""] + _group_fn_summary(added_fn)
-    else:
-        lines.append("_无_")
-
-    lines += [
-        "",
-        "## 方法说明",
-        "",
-        "- 数据来源：各目录内 `accuracy_report.json`",
-        "  - 误报：`clips[].diagnostics.false_alarms`",
-        "  - 漏报：`clips[].diagnostics.missed_segments`",
-        f"- 脚本：`scripts/data/compare_export_false_alarms.py`",
-        f"- 输出文件：`{out_name}`",
-    ]
-    return "\n".join(lines) + "\n"
-
-
-def _ordinal_map(report: dict[str, Any]) -> dict[str, dict[tuple[int, str], int]]:
-    """每条 clip 的 (frame, box) → 误报序号（1-based，按帧排序）。"""
-    out: dict[str, dict[tuple[int, str], int]] = {}
-    for clip in report.get("clips") or []:
-        if not isinstance(clip, dict):
-            continue
-        upload = str(clip.get("upload_file") or clip.get("clip") or "")
-        fps = list((clip.get("diagnostics") or {}).get("false_alarms") or [])
-        fps.sort(key=lambda x: int(x.get("frame_idx") or 0))
-        mapping: dict[tuple[int, str], int] = {}
-        for i, fa in enumerate(fps, start=1):
-            mapping[(int(fa.get("frame_idx") or 0), str(fa.get("box_token") or "").strip())] = i
-        out[upload] = mapping
-    return out
-
-
-def _strike_numbers_in_cell(cell: str, strike_ordinals: set[int]) -> str:
-    """将单元格中的序号加上删除线。"""
-    if not cell or not strike_ordinals:
-        return cell
-
-    # 先去掉旧删除线，统一按数字处理
-    text = re.sub(r"~~(\d+)~~", r"\1", cell)
-
-    def _fmt_num(n: int) -> str:
-        return f"~~{n}~~" if n in strike_ordinals else str(n)
-
-    def _replace_range(m: re.Match) -> str:
-        a, b = int(m.group(1)), int(m.group(2))
-        suffix = m.group(3) or ""
-        if a > b:
-            a, b = b, a
-        if b - a >= 6:
-            # 长区间：若全消除则整体删除线，否则保留原文
-            if all(n in strike_ordinals for n in range(a, b + 1)):
-                return f"~~{a}-{b}~~{suffix}"
-            return m.group(0)
-        parts = [_fmt_num(n) for n in range(a, b + 1)]
-        return "，".join(parts) + suffix
-
-    text = re.sub(r"(\d+)-(\d+)([^，\d]|$)", _replace_range, text)
-
-    def _replace_single(m: re.Match) -> str:
-        n = int(m.group(1))
-        return _fmt_num(n)
-
-    # 不匹配区间内的数字（如 4-62 中的 4 和 62）
-    text = re.sub(r"(?<![\d-])(\d+)(?![\d-])", _replace_single, text)
-    return text
-
-
-def render_fp_fn_situation_markdown(
-    template_path: Path,
-    baseline_dir: Path,
-    experiment_dir: Path,
-    *,
-    baseline_report: dict[str, Any],
-    experiment_report: dict[str, Any],
-) -> str:
-    """基于 baseline 误报漏报模板，用实验消除的误报序号标注删除线。"""
-    template = template_path.read_text(encoding="utf-8") if template_path.is_file() else ""
-    # 去掉已有删除线，以 baseline 原始序号为准
-    base_clean = re.sub(r"~~(\d+)~~", r"\1", template)
-    base_clean = re.sub(
-        r"说明：.*?\n\n",
-        "",
-        base_clean,
-        count=1,
-        flags=re.DOTALL,
-    )
-
-    b_fps = _collect_fps(baseline_report)
-    e_fps = _collect_fps(experiment_report)
-    b_ord = _ordinal_map(baseline_report)
-
-    strike_by_clip: dict[str, set[int]] = defaultdict(set)
-    for key, row in b_fps.items():
-        if key in e_fps:
-            continue
-        upload = str(row.get("upload_file") or "")
-        ord_map = b_ord.get(upload) or {}
-        ordinal = ord_map.get((int(row.get("frame_idx") or 0), str(row.get("box_token") or "").strip()))
-        if ordinal:
-            strike_by_clip[upload].add(ordinal)
-
-    exp_name = experiment_dir.name
-    header = (
-        f"说明：每个表格的数字表明是第几个错误事件；"
-        f"~~删除线~~ 表示该误报已被 `{exp_name}` 消除（相对 `{baseline_dir.name}`）。\n\n"
-    )
-
-    lines = base_clean.splitlines()
-    out_lines: list[str] = [header.rstrip(), ""]
-    in_fp_table = False
-    for line in lines:
-        if line.startswith("## 误报"):
-            in_fp_table = True
-            out_lines.append(line)
-            continue
-        if line.startswith("## ") and in_fp_table:
-            in_fp_table = False
-        if in_fp_table and line.startswith("| rtmpose-m/"):
-            parts = line.split("|")
-            if len(parts) >= 3:
-                record_cell = parts[1].strip()
-                clip_guess = None
-                if "/" in record_cell:
-                    slug = record_cell.split("/")[-1].strip()
-                    clip_guess = f"{slug}.json" if not slug.endswith(".json") else slug
-                strikes = set()
-                if clip_guess:
-                    strikes = strike_by_clip.get(clip_guess, set())
-                    if not strikes:
-                        for k, v in strike_by_clip.items():
-                            if slug in k:
-                                strikes = v
-                                break
-                for i in range(2, len(parts) - 1):
-                    parts[i] = " " + _strike_numbers_in_cell(parts[i].strip(), strikes) + " "
-                line = "|".join(parts)
-        out_lines.append(line)
-
-    # 追加：相对实验的新增漏报
-    b_fns = _collect_fns(baseline_report)
-    e_fns = _collect_fns(experiment_report)
-    added_fn = [e_fns[k] for k in e_fns if k not in b_fns]
-    if added_fn:
-        out_lines += [
+    lines.extend(_render_fp_section("减少的误报（基准有、实验无）", reduced_fp))
+    lines.append("")
+    lines.extend(_render_fp_section("新增的误报（实验有、基准无）", added_fp))
+    lines.append("")
+    lines.extend(_render_fn_section("减少的漏报（基准有、实验无）", reduced_fn))
+    lines.append("")
+    lines.extend(_render_fn_section("新增的漏报（实验有、基准无）", added_fn))
+    lines.extend(
+        [
             "",
-            f"## 补充：{exp_name} 新增漏报（相对 baseline）",
+            "## 方法说明",
             "",
-            "| 记录 | 机位 | 帧区间 | 标真货框 |",
-            "|------|------|--------|----------|",
+            "- 数据来源：各目录内 `accuracy_report.json`",
+            "  - 误报：`clips[].diagnostics.false_alarms`",
+            "  - 漏报：`clips[].diagnostics.missed_segments`",
+            "- 脚本：`scripts/data/compare_export_false_alarms.py`",
+            "",
         ]
-        for r in sorted(added_fn, key=lambda x: (x.get("upload_file"), x.get("frame_start"))):
-            out_lines.append(
-                f"| `{r.get('upload_file')}` | {r.get('camera_slug') or '—'} | "
-                f"{r.get('frame_start')}–{r.get('frame_end')} | "
-                f"{_fmt_tokens(r.get('gt_tokens') or [])} |"
-            )
-
-    out_lines += [
-        "",
-        f"速度：前置过滤 `{exp_name}` 在走过货位类误报上与段级后置过滤思路一致，"
-        f"在手腕进框前按帧级 `lower_mean_speed` 门控。",
-        "",
-        f"对比明细：`compare_{exp_name}_vs_{baseline_dir.name}.md`",
-    ]
-    return "\n".join(out_lines) + "\n"
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser(description="对比 export 目录误报/漏报")
-    parser.add_argument("--baseline", type=Path, required=True)
-    parser.add_argument("--experiment", type=Path, required=True)
-    parser.add_argument(
-        "--template",
-        type=Path,
-        default=ROOT / "localdata/export/rule-baseline-prod-test误报漏报情况.md",
-        help="误报漏报人工分类模板（无删除线或含旧删除线均可）",
     )
-    parser.add_argument("--output-dir", type=Path, default=None)
-    args = parser.parse_args()
+    return "\n".join(lines)
 
-    baseline_dir = args.baseline.resolve()
-    experiment_dir = args.experiment.resolve()
-    output_dir = (args.output_dir or ROOT / "localdata/export").resolve()
 
+def compare_reports(baseline_dir: Path, experiment_dir: Path) -> dict[str, Any]:
     baseline_report = _load_report(baseline_dir)
     experiment_report = _load_report(experiment_dir)
 
-    compare_md = render_compare_markdown(
-        baseline_dir,
-        experiment_dir,
-        baseline_report=baseline_report,
-        experiment_report=experiment_report,
-    )
-    compare_name = f"compare_{experiment_dir.name}_vs_{baseline_dir.name}.md"
-    compare_path = output_dir / compare_name
-    compare_path.write_text(compare_md, encoding="utf-8")
-    print(f"对比报告: {compare_path}")
+    baseline_fps = _extract_false_alarms(baseline_report)
+    experiment_fps = _extract_false_alarms(experiment_report)
+    reduced_fp = _sort_fp_rows([baseline_fps[k] for k in set(baseline_fps) - set(experiment_fps)])
+    added_fp = _sort_fp_rows([experiment_fps[k] for k in set(experiment_fps) - set(baseline_fps)])
 
-    situation_name = f"{experiment_dir.name}误报漏报情况.md"
-    situation_path = output_dir / situation_name
-    situation_md = render_fp_fn_situation_markdown(
-        args.template.resolve(),
-        baseline_dir,
-        experiment_dir,
-        baseline_report=baseline_report,
-        experiment_report=experiment_report,
+    baseline_fns = _extract_missed_segments(baseline_report)
+    experiment_fns = _extract_missed_segments(experiment_report)
+    reduced_fn = _sort_fn_rows([baseline_fns[k] for k in set(baseline_fns) - set(experiment_fns)])
+    added_fn = _sort_fn_rows([experiment_fns[k] for k in set(experiment_fns) - set(baseline_fns)])
+
+    return {
+        "baseline_dir": str(baseline_dir),
+        "experiment_dir": str(experiment_dir),
+        "baseline_summary": baseline_report.get("summary") or {},
+        "experiment_summary": experiment_report.get("summary") or {},
+        "reduced_false_alarms": reduced_fp,
+        "added_false_alarms": added_fp,
+        "reduced_missed_segments": reduced_fn,
+        "added_missed_segments": added_fn,
+        "counts": {
+            "baseline_fp": len(baseline_fps),
+            "experiment_fp": len(experiment_fps),
+            "reduced_fp": len(reduced_fp),
+            "added_fp": len(added_fp),
+            "net_fp_delta": len(experiment_fps) - len(baseline_fps),
+            "baseline_fn": len(baseline_fns),
+            "experiment_fn": len(experiment_fns),
+            "reduced_fn": len(reduced_fn),
+            "added_fn": len(added_fn),
+            "net_fn_delta": len(experiment_fns) - len(baseline_fns),
+        },
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="对比两个 export 目录的误报/漏报差异")
+    parser.add_argument("--baseline", required=True, help="基准目录（含 accuracy_report.json）")
+    parser.add_argument("--experiment", required=True, help="实验目录（含 accuracy_report.json）")
+    parser.add_argument(
+        "--out-dir",
+        default=str(ROOT / "localdata" / "export" / "compare"),
+        help="报告输出目录（默认 localdata/export/compare）",
     )
-    situation_path.write_text(situation_md, encoding="utf-8")
-    print(f"误报漏报: {situation_path}")
+    parser.add_argument("--stem", default="", help="报告文件名前缀（默认 compare_{实验}_vs_{基准}）")
+    args = parser.parse_args()
+
+    baseline_dir = Path(args.baseline)
+    experiment_dir = Path(args.experiment)
+    if not baseline_dir.is_dir():
+        print(f"基准目录不存在: {baseline_dir}", file=sys.stderr)
+        return 1
+    if not experiment_dir.is_dir():
+        print(f"实验目录不存在: {experiment_dir}", file=sys.stderr)
+        return 1
+
+    payload = compare_reports(baseline_dir, experiment_dir)
+    stem = args.stem.strip() or f"compare_{experiment_dir.name}_vs_{baseline_dir.name}"
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    md_path = out_dir / f"{stem}.md"
+    json_path = out_dir / f"{stem}.json"
+
+    md_path.write_text(
+        _render_markdown(
+            baseline_dir=baseline_dir,
+            experiment_dir=experiment_dir,
+            baseline_report=_load_report(baseline_dir),
+            experiment_report=_load_report(experiment_dir),
+            reduced_fp=payload["reduced_false_alarms"],
+            added_fp=payload["added_false_alarms"],
+            reduced_fn=payload["reduced_missed_segments"],
+            added_fn=payload["added_missed_segments"],
+        ),
+        encoding="utf-8",
+    )
+    json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    c = payload["counts"]
+    print(
+        f"误报：基准 {c['baseline_fp']} → 实验 {c['experiment_fp']} "
+        f"(净变化 {c['net_fp_delta']:+d})，减少 {c['reduced_fp']} / 新增 {c['added_fp']}"
+    )
+    print(
+        f"漏报：基准 {c['baseline_fn']} → 实验 {c['experiment_fn']} "
+        f"(净变化 {c['net_fn_delta']:+d})，减少 {c['reduced_fn']} / 新增 {c['added_fn']}"
+    )
+    print(f"报告: {md_path}")
+    print(f"JSON: {json_path}")
     return 0
 
 

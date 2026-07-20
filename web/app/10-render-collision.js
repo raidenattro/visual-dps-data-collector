@@ -1025,11 +1025,11 @@ async function loadAnnotationBoxesFromFile(file) {
   loadAnnotationBoxesFromData(data);
 }
 
-/** 将 timeline 行写入 frameByTime（v2 分包回放索引用） */
+/** 将 timeline 行写入 frameByTime（v2 分包回放索引用，帧号与 export 一致） */
 function applyTimelineRowsToFrameIndex(rows, inferW, inferH) {
   frameByTime = [];
   (rows || []).forEach((row) => {
-    const fi = Number(row.frame_idx) || 0;
+    const fi = Number(row.source_frame_idx) || Number(row.frame_idx) || 0;
     if (!fi) return;
     frameByTime.push({
       t: Number(row.timestamp_sec) || 0,
@@ -1038,41 +1038,6 @@ function applyTimelineRowsToFrameIndex(rows, inferW, inferH) {
       h: Number(row.infer_height) || inferH,
     });
   });
-  frameByTime.sort((a, b) => a.t - b.t);
-}
-
-/** frame_count 已知时合成 1..N 密集时间轴（事件帧可能与稀疏 timeline 行不一致） */
-function buildSyntheticFrameIndexFromManifest() {
-  const total = Number(poseData?.frame_count) || 0;
-  const fps = Number(poseData?.fps) || 15;
-  if (!total) return false;
-
-  const inferW = poseData.infer_width || 640;
-  const inferH = poseData.infer_height || 480;
-  frameByTime = [];
-  for (let i = 1; i <= total; i += 1) {
-    frameByTime.push({
-      t: (i - 1) / fps,
-      frameIdx: i,
-      w: inferW,
-      h: inferH,
-    });
-  }
-  return frameByTime.length > 0;
-}
-
-/** 稀疏 timeline 加载后补齐 1..frame_count，避免事件 frame_idx 无对应行 */
-function densifyFrameIndexFromManifest() {
-  const total = Number(poseData?.frame_count) || 0;
-  if (!total || !frameByTime.length) return;
-  const fps = Number(poseData?.fps) || 15;
-  const inferW = poseData.infer_width || frameByTime[0]?.w || poseData.infer_width || 640;
-  const inferH = poseData.infer_height || frameByTime[0]?.h || poseData.infer_height || 480;
-  const existing = new Set(frameByTime.map((e) => e.frameIdx));
-  for (let i = 1; i <= total; i += 1) {
-    if (existing.has(i)) continue;
-    frameByTime.push({ t: (i - 1) / fps, frameIdx: i, w: inferW, h: inferH });
-  }
   frameByTime.sort((a, b) => a.t - b.t);
 }
 
@@ -1105,16 +1070,10 @@ function buildFrameIndex(recordId = null) {
     const inferW = poseData.infer_width || 640;
     const inferH = poseData.infer_height || 480;
 
-    if (buildSyntheticFrameIndexFromManifest()) {
-      if (typeof renderAccuracySeekMarkers === "function") renderAccuracySeekMarkers();
-      return Promise.resolve();
-    }
-
     return fetch(`${recordApiUrl(recordId, "/timeline")}?light=1`)
       .then((res) => (res.ok ? res.json() : { timeline: [] }))
       .then((body) => {
         applyTimelineRowsToFrameIndex(body.timeline || [], inferW, inferH);
-        densifyFrameIndexFromManifest();
         if (typeof renderAccuracySeekMarkers === "function") renderAccuracySeekMarkers();
       });
   }
@@ -1124,14 +1083,16 @@ function buildFrameIndex(recordId = null) {
     return Promise.resolve();
   }
   poseData.frames.forEach((f) => {
+    const fi = Number(f.source_frame_idx) || Number(f.frame_idx) || 0;
+    if (!fi) return;
     frameByTime.push({
       t: f.timestamp_sec ?? 0,
-      frameIdx: f.frame_idx,
+      frameIdx: fi,
       frame: f,
       w: f.infer_width || 640,
       h: f.infer_height || 480,
     });
-    if (f.frame_idx != null) frameCache.set(f.frame_idx, f);
+    frameCache.set(fi, f);
   });
   frameByTime.sort((a, b) => a.t - b.t);
   if (typeof renderAccuracySeekMarkers === "function") renderAccuracySeekMarkers();
@@ -1154,6 +1115,117 @@ function findFrameAt(timeSec) {
     else hi = mid - 1;
   }
   return frameByTime[Math.max(0, hi)];
+}
+
+/** 取时间轴上与 t 最近的帧；播放时可偏向较早帧，减轻骨架超前 */
+function findFrameNearest(timeSec, opts = {}) {
+  if (!frameByTime.length) return null;
+  const t = Math.max(0, Number(timeSec) || 0);
+  if (t <= frameByTime[0].t) return frameByTime[0];
+  const last = frameByTime[frameByTime.length - 1];
+  if (t >= last.t) return last;
+  let lo = 0;
+  let hi = frameByTime.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (frameByTime[mid].t < t) lo = mid + 1;
+    else hi = mid - 1;
+  }
+  const right = frameByTime[Math.min(frameByTime.length - 1, lo)];
+  const left = frameByTime[Math.max(0, lo - 1)];
+  if (!left) return right;
+  if (!right || left.frameIdx === right.frameIdx) return left;
+  if (opts.playback) {
+    // currentTime 常领先已呈现画面；分界略靠右，优先取较早骨架帧
+    const midT = left.t + (right.t - left.t) * 0.58;
+    return t <= midT ? left : right;
+  }
+  return Math.abs(t - left.t) <= Math.abs(right.t - t) ? left : right;
+}
+
+/** timeline 首帧 timestamp 是否已从 0 起算（采集时 normalize_frame_timestamps） */
+function timelineUsesZeroBase() {
+  const t0 = frameByTime?.[0]?.t;
+  return t0 != null && Number(t0) < 0.1;
+}
+
+function containerPtsOffsetSec() {
+  const v = Number(poseData?.video_start_pts_sec);
+  return Number.isFinite(v) && v > 0 ? v : 0;
+}
+
+/** 播放中用于骨架对齐的媒体时间（优先 VideoFrameCallback.mediaTime） */
+function resolvePlaybackMediaTime(mediaTime) {
+  if (mediaTime != null && Number.isFinite(Number(mediaTime))) {
+    let t = Math.max(0, Number(mediaTime));
+    // mediaTime 可能含容器首帧 PTS（如 1.761s），映射回与 timeline 一致的 0 起点
+    if (timelineUsesZeroBase()) {
+      const pts = containerPtsOffsetSec();
+      if (pts > 0) t = Math.max(0, t - pts);
+    }
+    return t;
+  }
+  return Math.max(0, Number(videoEl?.currentTime) || 0);
+}
+
+/** 有配套视频时，按 duration 将 currentTime 线性映射到帧号（与浏览器墙钟对齐） */
+function playbackDurationSec() {
+  const fromVideo = Number(videoEl?.duration);
+  if (fromVideo > 0 && Number.isFinite(fromVideo)) return fromVideo;
+  const fromManifest = Number(poseData?.video_duration_sec);
+  if (fromManifest > 0 && Number.isFinite(fromManifest)) return fromManifest;
+  return 0;
+}
+
+function playbackStartPtsSec() {
+  // timeline 已从 0 均匀分配时，currentTime 与 timestamp_sec 同轴，勿再减 PTS
+  if (timelineUsesZeroBase()) return 0;
+  return containerPtsOffsetSec();
+}
+
+function frameIdxFromVideoDuration(timeSec, opts = {}) {
+  const total = Number(poseData?.frame_count) || frameByTime.length || 0;
+  if (!total) return 0;
+  const dur = playbackDurationSec();
+  if (!(dur > 0 && videoEl?.src)) return 0;
+  const offset = playbackStartPtsSec();
+  const contentDur = Math.max(1e-6, dur);
+  let t = Math.max(0, Number(timeSec) - offset);
+  if (opts.playback && total > 1) {
+    t = Math.max(0, t - contentDur / (2 * total));
+  }
+  if (total <= 1) return 1;
+  const effFps = Math.max(1, Math.round((total - 1) / contentDur));
+  const idx = Math.floor(t * effFps + 1e-6) + 1;
+  return Math.min(total, Math.max(1, idx));
+}
+
+/** 由帧号反查视频 currentTime（优先 timeline timestamp_sec） */
+function videoTimeForFrameIdx(frameIdx, opts = {}) {
+  const fi = Math.max(1, parseInt(frameIdx, 10) || 0);
+  if (!fi) return 0;
+  const hit =
+    typeof frameEntryByIdx === "function"
+      ? frameEntryByIdx(fi)
+      : frameByTime?.find((e) => e.frameIdx === fi) || null;
+  if (hit && Number.isFinite(Number(hit.t))) return Math.max(0, Number(hit.t));
+
+  const total = Number(poseData?.frame_count) || frameByTime.length || 0;
+  const dur = playbackDurationSec();
+  if (!total) return 0;
+  if (!(dur > 0 && videoEl?.src)) {
+    const fps = Number(poseData?.fps) || 25;
+    return Math.max(0, (fi - 1) / fps);
+  }
+  const offset = playbackStartPtsSec();
+  const contentDur = Math.max(1e-6, dur);
+  const effFps = Math.max(1, Math.round((total - 1) / contentDur));
+  let tContent = (fi - 1) / effFps;
+  if (opts.centerFrame) tContent += 0.5 / effFps;
+  if (opts.playback && total > 1) {
+    tContent += contentDur / (2 * total);
+  }
+  return Math.min(dur, Math.max(0, offset + tContent));
 }
 
 function syncCanvasSize(opts = {}) {
@@ -1375,6 +1447,75 @@ function drawDetBboxes(frame, inferW, inferH) {
   ctx.restore();
 }
 
+/** 骨骼特征 track 标签（锚点跟随当前帧骨架，不依赖 API 缓存坐标） */
+function resolvePersonLabelAnchor(person) {
+  const kpts = person?.keypoints || [];
+  if (kpts.length >= 7) {
+    const ls = kpts[5];
+    const rs = kpts[6];
+    if (ls && rs && ls[2] > 0.2 && rs[2] > 0.2) {
+      return { ax: (ls[0] + rs[0]) / 2, ay: (ls[1] + rs[1]) / 2 };
+    }
+  }
+  const bbox = person?.bbox;
+  if (Array.isArray(bbox) && bbox.length >= 4) {
+    return { ax: (bbox[0] + bbox[2]) / 2, ay: bbox[1] };
+  }
+  return { ax: NaN, ay: NaN };
+}
+
+function drawPersonFeatureTrackLabels(frame, inferW, inferH) {
+  if (typeof isPlaybackFeatureTrackLabelsEnabled === "function") {
+    if (!isPlaybackFeatureTrackLabelsEnabled()) return;
+  }
+
+  const framePersons = frame?.persons || [];
+  if (!framePersons.length) return;
+
+  const gateByTrack =
+    typeof getPlaybackFeatureGateByTrack === "function"
+      ? getPlaybackFeatureGateByTrack()
+      : new Map();
+
+  const layout = getDisplayLayout();
+
+  ctx.save();
+  ctx.font = "bold 13px system-ui, sans-serif";
+
+  framePersons.forEach((person, idx) => {
+    const trackId =
+      person.person_track_id != null && person.person_track_id !== ""
+        ? person.person_track_id
+        : idx + 1;
+    const pid = person.person_id != null ? person.person_id : idx;
+    const { ax, ay } = resolvePersonLabelAnchor(person);
+    if (!Number.isFinite(ax) || !Number.isFinite(ay)) return;
+
+    const [dx, dy] = mapInferToDisplay(ax, ay, inferW, inferH, layout);
+    const text = `T${trackId} · P${pid}`;
+    const padX = 5;
+    const padY = 3;
+    const metrics = ctx.measureText(text);
+    const boxW = metrics.width + padX * 2;
+    const boxH = 18;
+    const left = dx + 6;
+    const top = dy - 28;
+    const gate = gateByTrack.get(Number(trackId));
+
+    ctx.fillStyle = "rgba(15, 23, 42, 0.82)";
+    ctx.fillRect(left, top, boxW, boxH);
+    ctx.strokeStyle = gate?.would_block_collision
+      ? "rgba(248, 113, 113, 0.95)"
+      : "rgba(52, 211, 153, 0.95)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(left, top, boxW, boxH);
+    ctx.fillStyle = "#f8fafc";
+    ctx.fillText(text, left + padX, top + boxH - padY - 2);
+  });
+
+  ctx.restore();
+}
+
 function collisionSetsForPlaybackFrame(frame, inferW, inferH) {
   const fi = Number(frame?.frame_idx) || Number(frame?.source_frame_idx) || 0;
   const evalSets = getEvalCollisionSetsForFrame(fi);
@@ -1500,13 +1641,100 @@ function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null, review
   });
 }
 
-/** 由视频时间直接换算帧号（与 manifest fps 对齐，O(1)） */
-function frameIdxAtVideoTime(timeSec) {
-  const fps = Number(poseData?.fps) || 25;
+/** 由视频时间解析骨架帧号；优先 timeline，duration 线性映射作兜底 */
+function frameIdxAtVideoTime(timeSec, opts = {}) {
+  const t = Math.max(0, Number(timeSec) || 0);
   const total = Number(poseData?.frame_count) || frameByTime.length || 0;
   if (!total) return 0;
-  const idx = Math.floor(Math.max(0, Number(timeSec) || 0) * fps) + 1;
+  const playback =
+    opts.playback ?? !!(videoEl?.src && Number(videoEl.duration) > 0);
+
+  if (frameByTime?.length) {
+    const hit = playback
+      ? findFrameNearest(t, { playback: true })
+      : findFrameAt(t);
+    if (hit?.frameIdx) return hit.frameIdx;
+  }
+
+  const fromDuration = frameIdxFromVideoDuration(t, { playback });
+  if (fromDuration > 0) return fromDuration;
+
+  const fps = Number(poseData?.fps) || 25;
+  const idx = Math.floor(t * fps) + 1;
   return Math.min(total, Math.max(1, idx));
+}
+
+/** 等待暂停 seek 后视频真正呈现的一帧（与播放时 requestVideoFrameCallback 同源） */
+function waitPresentedVideoFrame(el, timeoutMs = 600) {
+  return new Promise((resolve) => {
+    if (!el || el.readyState < 2) {
+      resolve(null);
+      return;
+    }
+    let settled = false;
+    const finish = (mediaTime) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(mediaTime);
+    };
+    const timer = setTimeout(() => finish(null), timeoutMs);
+    if (typeof el.requestVideoFrameCallback === "function") {
+      el.requestVideoFrameCallback((_now, metadata) => {
+        finish(metadata?.mediaTime ?? null);
+      });
+    } else {
+      finish(null);
+    }
+  });
+}
+
+/**
+ * 按视频呈现时间绘制骨架（播放/暂停/seek 共用入口）
+ * 与 playbackRenderLoop 一致：resolvePlaybackMediaTime + frameIdxAtVideoTime(playback:true)
+ */
+async function renderSkeletonSyncedToVideo(opts = {}) {
+  const playback = opts.playback !== false;
+  const mediaTime =
+    opts.mediaTime != null && Number.isFinite(Number(opts.mediaTime))
+      ? Number(opts.mediaTime)
+      : opts.waitPresented !== false && videoEl?.paused
+        ? await waitPresentedVideoFrame(videoEl)
+        : null;
+  const timeSec =
+    typeof resolvePlaybackMediaTime === "function"
+      ? resolvePlaybackMediaTime(mediaTime)
+      : Math.max(0, Number(videoEl?.currentTime) || 0);
+  const fi = frameIdxAtVideoTime(timeSec, { playback });
+  if (!fi) return 0;
+  const hit =
+    typeof frameEntryByIdx === "function"
+      ? frameEntryByIdx(fi)
+      : frameByTime?.find((e) => e.frameIdx === fi) || null;
+  if (!hit) return 0;
+  if (opts.setAuthority !== false && typeof setPlaybackAuthorityFrameIdx === "function") {
+    setPlaybackAuthorityFrameIdx(fi);
+  }
+  lastRenderedFrameIdx = -1;
+  tickPoseFrameIdx = -1;
+  tickVideoFrameIdx = -1;
+  lastEventSyncFrameIdx = -1;
+  resetPlaybackCollisionTracker();
+  await renderFrameEntry(hit);
+  return fi;
+}
+
+/** 取指定帧的推理分辨率（与 timeline / manifest 对齐） */
+function inferSizeForFrameIdx(frameIdx) {
+  const fi = Number(frameIdx) || 0;
+  const entry =
+    typeof frameEntryByIdx === "function"
+      ? frameEntryByIdx(fi)
+      : frameByTime?.find((e) => e.frameIdx === fi) || null;
+  return {
+    w: entry?.w || poseData?.infer_width || frameByTime?.[0]?.w || 640,
+    h: entry?.h || poseData?.infer_height || frameByTime?.[0]?.h || 480,
+  };
 }
 
 function playbackInferSize() {
@@ -1576,6 +1804,7 @@ function drawSkeletonPlaybackOnly(frame, inferW, inferH) {
     });
   });
   ctx.stroke();
+  drawPersonFeatureTrackLabels(frame, inferW, inferH);
 }
 
 function clearFrozenPlaybackLayout() {
@@ -1620,57 +1849,50 @@ function drawSkeleton(frame, inferW, inferH, collisionSets = null) {
       ctx.fill();
     });
   });
+  drawPersonFeatureTrackLabels(frame, inferW, inferH);
+}
+
+/** 特征异步加载后仅重绘 track 标签，避免整帧 redraw 风暴 */
+function repaintFeatureTrackLabelsOnly() {
+  if (playbackRenderLoopActive && videoEl && !videoEl.paused) return;
+  const fi =
+    typeof lastRenderedFrameIdx === "number" && lastRenderedFrameIdx > 0
+      ? lastRenderedFrameIdx
+      : typeof getCurrentPlaybackFrameIdx === "function"
+        ? getCurrentPlaybackFrameIdx()
+        : 0;
+  if (fi <= 0) return;
+  const hit =
+    typeof frameEntryByIdx === "function"
+      ? frameEntryByIdx(fi)
+      : frameByTime?.find((e) => e.frameIdx === fi) || null;
+  if (!hit?.frame) return;
+  drawPersonFeatureTrackLabels(hit.frame, hit.w, hit.h);
 }
 
 function redrawCurrentFrame() {
   if (playbackRenderLoopActive && videoEl && !videoEl.paused) return;
   renderGeneration++;
   const gen = renderGeneration;
-  const pinnedFi =
-    typeof pinnedEventFrameIdx === "function" ? pinnedEventFrameIdx() : null;
-  const authorityFi =
-    typeof getPlaybackAuthorityFrameIdx === "function" ? getPlaybackAuthorityFrameIdx() : null;
-  // 保留刚通过 frame_idx 精确渲染的帧，避免预览视频 seek 差帧把画面拉回
-  const heldFi = lastRenderedFrameIdx >= 1 ? lastRenderedFrameIdx : null;
+  if (videoEl?.src && videoEl.readyState >= 2) {
+    void renderSkeletonSyncedToVideo({ playback: true, setAuthority: true }).then((fi) => {
+      if (gen !== renderGeneration) return;
+      if (fi > 0) return;
+      if (frameByTime.length) void renderFrameEntry(frameByTime[0], gen);
+    });
+    return;
+  }
   lastRenderedFrameIdx = -1;
   tickPoseFrameIdx = -1;
   tickVideoFrameIdx = -1;
   lastEventSyncFrameIdx = -1;
-  const targetFi = pinnedFi || authorityFi || heldFi;
-  if (targetFi && frameByTime?.length) {
-    const hit =
-      typeof ensureFrameIndexEntry === "function"
-        ? ensureFrameIndexEntry(targetFi)
-        : typeof frameEntryByIdx === "function"
-          ? frameEntryByIdx(targetFi)
-          : frameByTime.find((item) => item.frameIdx === targetFi) || null;
-    if (hit) {
-      void renderFrameEntry(hit, gen);
-      return;
-    }
-  }
-  if (videoEl.src && videoEl.readyState >= 1) {
-    void renderAtTime(videoEl.currentTime);
-  } else if (frameByTime.length) {
+  if (frameByTime.length) {
     void renderFrameEntry(frameByTime[0], gen);
   }
 }
 
 async function renderFrameEntry(hit, renderGen) {
   if (!hit) return;
-  const authorityFi =
-    typeof getPlaybackAuthorityFrameIdx === "function" ? getPlaybackAuthorityFrameIdx() : null;
-  // 丢弃/纠正落后于权威帧的异步渲染，避免 pause/seeked 竞态把画面拉回
-  if (authorityFi != null && authorityFi > 0 && hit.frameIdx !== authorityFi) {
-    const authHit =
-      typeof ensureFrameIndexEntry === "function"
-        ? ensureFrameIndexEntry(authorityFi)
-        : typeof frameEntryByIdx === "function"
-          ? frameEntryByIdx(authorityFi)
-          : frameByTime.find((e) => e.frameIdx === authorityFi) || null;
-    if (!authHit) return;
-    hit = authHit;
-  }
   const requestedFi = hit.frameIdx;
   let frame = hit.frame || (await ensureFrame(requestedFi));
   if (!frame && typeof findNearestCachedFrameEntry === "function") {
@@ -1694,14 +1916,28 @@ async function renderFrameEntry(hit, renderGen) {
   } else {
     timeLabel.title = annotationBoxes.length ? "无碰撞" : "";
   }
-  if (typeof updatePlaybackWristFeaturesUi === "function") {
-    updatePlaybackWristFeaturesUi(hit.frameIdx);
+  const skipFeatureUi =
+    playbackRenderLoopActive && videoEl && !videoEl.paused;
+  if (!skipFeatureUi && typeof updatePlaybackSkeletonFeaturesUi === "function") {
+    updatePlaybackSkeletonFeaturesUi(hit.frameIdx);
   }
   if (typeof updateEventReviewFrameNavUi === "function") updateEventReviewFrameNavUi();
 }
 
-async function renderAtTimeCore(timeSec) {
-  const hit = findFrameAt(timeSec);
+async function renderAtTimeCore(timeSec, opts = {}) {
+  const t = Math.max(0, Number(timeSec) || 0);
+  const playback = opts.playback ?? !!(videoEl?.src && Number(videoEl.duration) > 0);
+  const fi = frameIdxAtVideoTime(t, { playback });
+  if (!fi) {
+    lastRenderedFrameIdx = -1;
+    const { cw, ch } = syncCanvasSize();
+    ctx.clearRect(0, 0, cw, ch);
+    return;
+  }
+  const hit =
+    typeof frameEntryByIdx === "function"
+      ? frameEntryByIdx(fi)
+      : frameByTime?.find((e) => e.frameIdx === fi) || null;
   if (!hit) {
     lastRenderedFrameIdx = -1;
     const { cw, ch } = syncCanvasSize();
@@ -1728,33 +1964,24 @@ async function renderAtTimeCore(timeSec) {
   }
 }
 
-async function renderAtTime(timeSec) {
-  const authorityFi =
-    typeof getPlaybackAuthorityFrameIdx === "function" ? getPlaybackAuthorityFrameIdx() : null;
-  if (authorityFi != null && authorityFi > 0) {
-    const hit =
-      typeof ensureFrameIndexEntry === "function"
-        ? ensureFrameIndexEntry(authorityFi)
-        : typeof frameEntryByIdx === "function"
-          ? frameEntryByIdx(authorityFi)
-          : frameByTime.find((e) => e.frameIdx === authorityFi) || null;
-    if (hit) {
-      await renderFrameEntry(hit);
-      return;
-    }
-  }
+async function renderAtTime(timeSec, opts = {}) {
   if (renderAtTimeInflight) {
     renderAtTimePendingTime = timeSec;
+    renderAtTimePendingOpts = opts;
     return;
   }
   renderAtTimeInflight = true;
   renderAtTimePendingTime = null;
+  renderAtTimePendingOpts = null;
   try {
     let nextTime = timeSec;
+    let nextOpts = opts;
     do {
       renderAtTimePendingTime = null;
-      await renderAtTimeCore(nextTime);
+      renderAtTimePendingOpts = null;
+      await renderAtTimeCore(nextTime, nextOpts);
       nextTime = renderAtTimePendingTime;
+      nextOpts = renderAtTimePendingOpts || opts;
     } while (renderAtTimePendingTime != null);
   } finally {
     renderAtTimeInflight = false;
@@ -1762,20 +1989,29 @@ async function renderAtTime(timeSec) {
 }
 
 /** 播放热路径：全量缓存就绪后仅同步绘制 */
-function syncRenderPlaybackFrame(timeSec) {
-  const targetIdx = frameIdxAtVideoTime(timeSec);
+function syncRenderPlaybackFrame(timeSec, opts = {}) {
+  const playback = opts.playback === true;
+  const targetIdx = frameIdxAtVideoTime(timeSec, { playback });
   if (!targetIdx) return;
 
-  const frame = frameCache.get(targetIdx);
+  let frame = frameCache.get(targetIdx);
+  if (!frame && typeof frameEntryByIdx === "function") {
+    const cachedEntry = frameEntryByIdx(targetIdx);
+    if (cachedEntry?.frame) frame = cachedEntry.frame;
+  }
   if (!frame) {
+    void ensureFrameChunkLoaded(targetIdx);
     if (!playbackSkeletonReady) {
       const nearest = findNearestCachedFrameEntry(targetIdx);
       if (!nearest) return;
+      const lag = targetIdx - nearest.frameIdx;
+      // 骨架分块未就绪时，最多展示落后 1 帧的缓存，避免与画面严重错位
+      if (lag < 0 || lag > 1) return;
       const nearFrame = frameCache.get(nearest.frameIdx);
       if (!nearFrame || nearest.frameIdx === lastRenderedFrameIdx) return;
       lastRenderedFrameIdx = nearest.frameIdx;
       tickPoseFrameIdx = nearest.frameIdx;
-      const { w, h } = playbackInferSize();
+      const { w, h } = inferSizeForFrameIdx(nearest.frameIdx);
       drawSkeletonPlaybackOnly(nearFrame, w, h);
     }
     return;
@@ -1785,7 +2021,7 @@ function syncRenderPlaybackFrame(timeSec) {
 
   lastRenderedFrameIdx = targetIdx;
   tickPoseFrameIdx = targetIdx;
-  const { w, h } = playbackInferSize();
+  const { w, h } = inferSizeForFrameIdx(targetIdx);
   drawSkeletonPlaybackOnly(frame, w, h);
 }
 
@@ -1821,7 +2057,7 @@ function ensurePlaybackRenderLoop() {
   playbackRenderLoop();
 }
 
-function playbackRenderLoop() {
+function playbackRenderLoop(now, metadata) {
   if (!playbackRenderLoopActive || videoEl.paused || videoEl.ended) {
     playbackRenderLoopActive = false;
     clearFrozenPlaybackLayout();
@@ -1829,17 +2065,17 @@ function playbackRenderLoop() {
   }
 
   if (videoEl.readyState >= 2) {
-    const timeSec = videoEl.currentTime;
-    const nextIdx = frameIdxAtVideoTime(timeSec);
+    const timeSec = resolvePlaybackMediaTime(metadata?.mediaTime);
+    const nextIdx = frameIdxAtVideoTime(timeSec, { playback: true });
     if (nextIdx > 0 && nextIdx !== tickVideoFrameIdx) {
       tickVideoFrameIdx = nextIdx;
-      syncRenderPlaybackFrame(timeSec);
+      syncRenderPlaybackFrame(timeSec, { playback: true });
     }
   }
 
-  const now = performance.now();
-  if (now - lastPlaybackUiSyncMs >= 120) {
-    lastPlaybackUiSyncMs = now;
+  const perfNow = typeof now === "number" && Number.isFinite(now) ? now : performance.now();
+  if (perfNow - lastPlaybackUiSyncMs >= 120) {
+    lastPlaybackUiSyncMs = perfNow;
     if (videoEl.duration && Number.isFinite(videoEl.duration)) {
       seekBar.value = String((videoEl.currentTime / videoEl.duration) * 1000);
       timeLabel.textContent = formatTime(videoEl.currentTime);
@@ -1848,11 +2084,9 @@ function playbackRenderLoop() {
 
   if (!videoEl.paused && videoEl.readyState >= 2) {
     if (typeof videoEl.requestVideoFrameCallback === "function") {
-      videoFrameCallbackHandle = videoEl.requestVideoFrameCallback(() => {
-        playbackRenderLoop();
-      });
+      videoFrameCallbackHandle = videoEl.requestVideoFrameCallback(playbackRenderLoop);
     } else {
-      rafId = requestAnimationFrame(playbackRenderLoop);
+      rafId = requestAnimationFrame(() => playbackRenderLoop());
     }
   } else {
     playbackRenderLoopActive = false;

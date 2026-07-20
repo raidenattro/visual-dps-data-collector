@@ -1,0 +1,188 @@
+{
+  "generated_at": "2026-07-20T05:13:37.266414+00:00",
+  "pixel_reference": {
+    "detected": 146,
+    "missed": 10,
+    "false_alarms": 311,
+    "recall": 0.9359,
+    "note": "历史 export 为 FP=310；本次重算为 311，差异 1 次"
+  },
+  "theoretical_norm_thresholds": {
+    "852x480": 0.081807,
+    "853x480": 0.081734
+  },
+  "distribution": {
+    "frame_pairs": 34905,
+    "px_over_norm_p50": 977.908,
+    "px_over_norm_min": 973.684,
+    "px_over_norm_max": 1000.0,
+    "ankle_max_speed_p50": 8.574,
+    "ankle_max_speed_norm_p50": 0.008768
+  },
+  "pixel_rerun": {
+    "detected": 146,
+    "missed": 10,
+    "false_alarms": 311,
+    "recall": 0.9359
+  },
+  "best_norm_threshold": {
+    "threshold": 0.08177,
+    "detected": 146,
+    "missed": 10,
+    "false_alarms": 311,
+    "recall": 0.9359
+  },
+  "matching_threshold_count": 4,
+  "scan_table": [
+    {
+      "threshold": 0.08077,
+      "detected": 146,
+      "missed": 10,
+      "false_alarms": 309,
+      "recall": 0.9359
+    },
+    {
+      "threshold": 0.081734,
+      "detected": 146,
+      "missed": 10,
+      "false_alarms": 311,
+      "recall": 0.9359
+    },
+    {
+      "threshold": 0.08177,
+      "detected": 146,
+      "missed": 10,
+      "false_alarms": 311,
+      "recall": 0.9359
+    },
+    {
+      "threshold": 0.081807,
+      "detected": 146,
+      "missed": 10,
+      "false_alarms": 311,
+      "recall": 0.9359
+    },
+    {
+      "threshold": 0.08277,
+      "detected": 146,
+      "missed": 10,
+      "false_alarms": 311,
+      "recall": 0.9359
+    },
+    {
+      "threshold": 0.08377,
+      "detected": 146,
+      "missed": 10,
+      "false_alarms": 312,
+      "recall": 0.9359
+    }
+  ],
+  "full_scan": [
+    {
+      "threshold": 0.07577,
+      "detected": 146,
+      "missed": 10,
+      "false_alarms": 306,
+      "recall": 0.9359
+    },
+    {
+      "threshold": 0.07677,
+      "detected": 146,
+      "missed": 10,
+      "false_alarms": 307,
+      "recall": 0.9359
+    },
+    {
+      "threshold": 0.07777,
+      "detected": 146,
+      "missed": 10,
+      "false_alarms": 307,
+      "recall": 0.9359
+    },
+    {
+      "threshold": 0.07877,
+      "detected": 146,
+      "missed": 10,
+      "false_alarms": 307,
+      "recall": 0.9359
+    },
+    {
+      "threshold": 0.07977,
+      "detected": 146,
+      "missed": 10,
+      "false_alarms": 309,
+      "recall": 0.9359
+    },
+    {
+      "threshold": 0.08077,
+      "detected": 146,
+      "missed": 10,
+      "false_alarms": 309,
+      "recall": 0.9359
+    },
+    {
+      "threshold": 0.081734,
+      "detected": 146,
+      "missed": 10,
+      "false_alarms": 311,
+      "recall": 0.9359
+    },
+    {
+      "threshold": 0.08177,
+      "detected": 146,
+      "missed": 10,
+      "false_alarms": 311,
+      "recall": 0.9359
+    },
+    {
+      "threshold": 0.081807,
+      "detected": 146,
+      "missed": 10,
+      "false_alarms": 311,
+      "recall": 0.9359
+    },
+    {
+      "threshold": 0.08277,
+      "detected": 146,
+      "missed": 10,
+      "false_alarms": 311,
+      "recall": 0.9359
+    },
+    {
+      "threshold": 0.08377,
+      "detected": 146,
+      "missed": 10,
+      "false_alarms": 312,
+      "recall": 0.9359
+    },
+    {
+      "threshold": 0.08477,
+      "detected": 146,
+      "missed": 10,
+      "false_alarms": 312,
+      "recall": 0.9359
+    },
+    {
+      "threshold": 0.08577,
+      "detected": 146,
+      "missed": 10,
+      "false_alarms": 312,
+      "recall": 0.9359
+    },
+    {
+      "threshold": 0.086771,
+      "detected": 146,
+      "missed": 10,
+      "false_alarms": 313,
+      "recall": 0.9359
+    },
+    {
+      "threshold": 0.087771,
+      "detected": 146,
+      "missed": 10,
+      "false_alarms": 315,
+      "recall": 0.9359
+    }
+  ],
+  "conclusion": "推荐 **`ankle_max_speed_norm > 0.081770`**，段级指标 TP=146 FN=10 FP=311，与 `ankle_max@80 + triple90 + shknee140` 完全一致。理论换算均值 0.081770，最优阈值偏差 0.000001。"
+}

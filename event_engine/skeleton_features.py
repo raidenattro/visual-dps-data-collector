@@ -202,6 +202,7 @@ def extract_keypoint_velocity_rows(
             }
 
             kpt_speeds: dict[int, float | None] = {}
+            kpt_speeds_norm: dict[int, float | None] = {}
             for kpt_idx in range(KPT_COUNT):
                 key = (track_id, kpt_idx)
                 buf = buffers.setdefault(key, _TrackKptBuffer())
@@ -218,6 +219,7 @@ def extract_keypoint_velocity_rows(
 
                 if pt is None:
                     kpt_speeds[kpt_idx] = None
+                    kpt_speeds_norm[kpt_idx] = None
                     continue
 
                 x, y, score = pt
@@ -235,6 +237,7 @@ def extract_keypoint_velocity_rows(
                 filtered = _filtered_xy(buf)
                 if filtered is None:
                     kpt_speeds[kpt_idx] = None
+                    kpt_speeds_norm[kpt_idx] = None
                     continue
 
                 fx, fy = filtered
@@ -261,8 +264,10 @@ def extract_keypoint_velocity_rows(
                         f"{prefix}_velocity_valid": vel["velocity_valid"],
                     })
                     kpt_speeds[kpt_idx] = vel["speed"] if vel["velocity_valid"] else None
+                    kpt_speeds_norm[kpt_idx] = vel["speed_norm"] if vel["velocity_valid"] else None
                 else:
                     kpt_speeds[kpt_idx] = None
+                    kpt_speeds_norm[kpt_idx] = None
 
                 buf.prev_filtered = (fx, fy)
                 buf.prev_meta = _KptState(frame_idx=frame_idx, timestamp_sec=ts, x=fx, y=fy, score=score)
@@ -323,6 +328,7 @@ def extract_keypoint_velocity_rows(
             lower_speeds = [kpt_speeds.get(i) for i in LOWER_KPT_INDICES]
             knee_ankle_speeds = [kpt_speeds.get(i) for i in KNEE_ANKLE_KPT_INDICES]
             ankle_speeds = [kpt_speeds.get(i) for i in FOOT_ANKLE_INDICES]
+            ankle_norm_speeds = [kpt_speeds_norm.get(i) for i in FOOT_ANKLE_INDICES]
             wrist_speeds = [kpt_speeds.get(i) for i in WRIST_INDICES]
             elbow_speeds = [kpt_speeds.get(i) for i in ELBOW_INDICES]
             all_speeds = [kpt_speeds.get(i) for i in range(KPT_COUNT)]
@@ -334,6 +340,7 @@ def extract_keypoint_velocity_rows(
             knee_ankle_mean = _mean_of_speeds(knee_ankle_speeds)
             ankle_mean = _mean_of_speeds(ankle_speeds)
             ankle_max = _max_of_speeds(ankle_speeds)
+            ankle_max_norm = _max_of_speeds(ankle_norm_speeds)
             wrist_max = _max_of_speeds(wrist_speeds)
             elbow_max = _max_of_speeds(elbow_speeds)
 
@@ -344,6 +351,7 @@ def extract_keypoint_velocity_rows(
             row["knee_ankle_mean_speed"] = round(knee_ankle_mean, 3) if knee_ankle_mean is not None else None
             row["ankle_mean_speed"] = round(ankle_mean, 3) if ankle_mean is not None else None
             row["ankle_max_speed"] = round(ankle_max, 3) if ankle_max is not None else None
+            row["ankle_max_speed_norm"] = round(ankle_max_norm, 6) if ankle_max_norm is not None else None
             row["wrist_max_speed"] = round(wrist_max, 3) if wrist_max is not None else None
             row["elbow_max_speed"] = round(elbow_max, 3) if elbow_max is not None else None
 
@@ -389,6 +397,7 @@ def extract_aggregate_velocity_rows(
         "knee_ankle_mean_speed",
         "ankle_mean_speed",
         "ankle_max_speed",
+        "ankle_max_speed_norm",
         "wrist_max_speed",
         "elbow_max_speed",
         "wrist_torso_ratio",
@@ -410,6 +419,7 @@ class AggregateVelocitySnapshot:
     knee_ankle_mean_speed: float | None = None
     ankle_mean_speed: float | None = None
     ankle_max_speed: float | None = None
+    ankle_max_speed_norm: float | None = None
     torso_speed: float | None = None
     body_mean_speed: float | None = None
     upper_mean_speed: float | None = None
@@ -445,12 +455,14 @@ class IncrementalAggregateVelocityTracker:
             ts = frame_idx / self.fps
 
         kpt_speeds: dict[int, float | None] = {}
+        kpt_speeds_norm: dict[int, float | None] = {}
         for kpt_idx in range(KPT_COUNT):
             key = (track_id, kpt_idx)
             buf = self._kpt_buffers.setdefault(key, _TrackKptBuffer())
             pt = _read_kpt(person, kpt_idx)
             if pt is None:
                 kpt_speeds[kpt_idx] = None
+                kpt_speeds_norm[kpt_idx] = None
                 continue
 
             x, y, score = pt
@@ -464,10 +476,12 @@ class IncrementalAggregateVelocityTracker:
             filtered = _filtered_xy(buf)
             if filtered is None:
                 kpt_speeds[kpt_idx] = None
+                kpt_speeds_norm[kpt_idx] = None
                 continue
 
             fx, fy = filtered
             speed_val: float | None = None
+            speed_norm_val: float | None = None
             if buf.prev_filtered is not None and buf.prev_meta is not None:
                 prev_state = _KptState(
                     frame_idx=buf.prev_meta.frame_idx,
@@ -485,7 +499,9 @@ class IncrementalAggregateVelocityTracker:
                 )
                 if vel["velocity_valid"]:
                     speed_val = vel["speed"]
+                    speed_norm_val = vel["speed_norm"]
             kpt_speeds[kpt_idx] = speed_val
+            kpt_speeds_norm[kpt_idx] = speed_norm_val
             buf.prev_filtered = (fx, fy)
             buf.prev_meta = _KptState(frame_idx=frame_idx, timestamp_sec=ts, x=fx, y=fy, score=score)
 
@@ -535,6 +551,7 @@ class IncrementalAggregateVelocityTracker:
         lower_speeds = [kpt_speeds.get(i) for i in LOWER_KPT_INDICES]
         knee_ankle_speeds = [kpt_speeds.get(i) for i in KNEE_ANKLE_KPT_INDICES]
         ankle_speeds = [kpt_speeds.get(i) for i in FOOT_ANKLE_INDICES]
+        ankle_norm_speeds = [kpt_speeds_norm.get(i) for i in FOOT_ANKLE_INDICES]
         upper_speeds = [kpt_speeds.get(i) for i in UPPER_KPT_INDICES]
         wrist_speeds = [kpt_speeds.get(i) for i in WRIST_INDICES]
         all_speeds = [kpt_speeds.get(i) for i in range(KPT_COUNT)]
@@ -542,6 +559,7 @@ class IncrementalAggregateVelocityTracker:
         knee_ankle_mean = _mean_of_speeds(knee_ankle_speeds)
         ankle_mean = _mean_of_speeds(ankle_speeds)
         ankle_max = _max_of_speeds(ankle_speeds)
+        ankle_max_norm = _max_of_speeds(ankle_norm_speeds)
         upper_mean = _mean_of_speeds(upper_speeds)
         wrist_max = _max_of_speeds(wrist_speeds)
         body_mean = _mean_of_speeds(all_speeds)
@@ -554,6 +572,7 @@ class IncrementalAggregateVelocityTracker:
             knee_ankle_mean_speed=round(knee_ankle_mean, 3) if knee_ankle_mean is not None else None,
             ankle_mean_speed=round(ankle_mean, 3) if ankle_mean is not None else None,
             ankle_max_speed=round(ankle_max, 3) if ankle_max is not None else None,
+            ankle_max_speed_norm=round(ankle_max_norm, 6) if ankle_max_norm is not None else None,
             torso_speed=round(torso_speed, 3) if torso_speed is not None else None,
             body_mean_speed=round(body_mean, 3) if body_mean is not None else None,
             upper_mean_speed=round(upper_mean, 3) if upper_mean is not None else None,
@@ -566,12 +585,20 @@ def filter_frames_to_indices(
     frames: list[dict[str, Any]],
     frame_indices: set[int] | list[int],
 ) -> list[dict[str, Any]]:
-    """按 frame_idx 子集过滤并保持时间顺序（用于抽帧速度差分）。"""
-    wanted = set(int(x) for x in frame_indices)
-    out = [
-        fr for fr in sorted(frames, key=lambda f: int(f.get("frame_idx") or 0))
-        if isinstance(fr, dict) and int(fr.get("frame_idx") or 0) in wanted
-    ]
+    """按 export 帧键（source_frame_idx 优先）过滤；输出帧 frame_idx 统一为 export 键。"""
+    from event_engine.export_frame_utils import export_frame_key
+
+    wanted = {int(x) for x in frame_indices}
+    out: list[dict[str, Any]] = []
+    for fr in sorted(frames, key=lambda f: export_frame_key(f)):
+        if not isinstance(fr, dict):
+            continue
+        key = export_frame_key(fr)
+        if key <= 0 or key not in wanted:
+            continue
+        row = dict(fr)
+        row["frame_idx"] = key
+        out.append(row)
     return out
 
 

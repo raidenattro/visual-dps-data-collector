@@ -433,9 +433,10 @@
                 </select>
               </div>
               <div class="playback-records-annotation-source-filter">
-                <select id="playback-annotation-source" title="回放货框叠加来源：母本或当前所选模型层标注目录">
+                <select id="playback-annotation-source" title="回放货框叠加来源：annotation / annotation2 或当前模型层标注目录">
                   <option value="tier" selected>rtmpose-t 模型标注</option>
-                  <option value="master">母本标注</option>
+                  <option value="annotation">annotation</option>
+                  <option value="annotation2">annotation2</option>
                 </select>
               </div>
               <div class="playback-records-search-filter">
@@ -515,6 +516,10 @@
                 <input type="checkbox" id="playback-show-det-bbox" />
                 <span>检测框</span>
               </label>
+              <label class="playback-det-bbox-label toggle-row" title="暂停时在画面上显示 track / person_id">
+                <input type="checkbox" id="playback-show-feature-labels" />
+                <span>特征ID</span>
+              </label>
               <label class="playback-speed-label">
                 倍速
                 <select id="playback-speed" title="播放倍速">
@@ -543,37 +548,12 @@
             </div>
           </div>
           <p id="playback-info" class="hint"></p>
-          <section id="playback-wrist-features" class="playback-wrist-features hidden" aria-live="polite">
+          <section id="playback-skeleton-features" class="playback-skeleton-features hidden" aria-live="polite">
             <div class="playback-wrist-features-head">
-              <h3 class="playback-wrist-features-title">手腕特征 · 帧 <span id="playback-wrist-features-frame">—</span></h3>
-              <span id="playback-wrist-features-meta" class="hint"></span>
+              <h3 class="playback-wrist-features-title">骨骼特征 · 帧 <span id="playback-skeleton-features-frame">—</span></h3>
+              <span id="playback-skeleton-features-meta" class="hint">暂停时显示特征参数</span>
             </div>
-            <div class="playback-wrist-features-block">
-              <h4 class="playback-wrist-features-subtitle">速度（推理坐标 px/s）</h4>
-              <div id="playback-wrist-velocity-body" class="playback-wrist-velocity-body"></div>
-            </div>
-            <div class="playback-wrist-features-block">
-              <h4 class="playback-wrist-features-subtitle">碰撞段（当前帧进行中）</h4>
-              <div class="playback-wrist-segments-wrap">
-                <table class="wrist-features-table wrist-features-table--segments">
-                  <thead>
-                    <tr>
-                      <th>手腕</th>
-                      <th>货框</th>
-                      <th>帧范围</th>
-                      <th>阶段</th>
-                      <th>进入 x/y</th>
-                      <th>离开 x/y</th>
-                      <th>位移</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody id="playback-wrist-segments-body">
-                    <tr><td colspan="8" class="hint">—</td></tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
+            <div id="playback-skeleton-features-body" class="playback-skeleton-features-body"></div>
           </section>
         </div>
 
@@ -702,19 +682,19 @@
   <script src="annotateVisualMode.js?v=2"></script>
   <!-- 回放/采集主逻辑（由 app.monolith.js 拆分，按依赖顺序加载） -->
   <script src="app/00-core.js?v=71"></script>
-  <script src="app/01-layout-frames.js?v=51"></script>
+  <script src="app/01-layout-frames.js?v=52"></script>
   <script src="app/02-playback-selection.js?v=34"></script>
   <script src="app/03-tabs.js?v=36"></script>
   <script src="app/04-collision-config.js?v=35"></script>
   <script src="app/05-collect.js?v=42"></script>
-  <script src="app/06-records.js?v=52"></script>
+  <script src="app/06-records.js?v=54"></script>
   <script src="app/07-playback-stage.js?v=71"></script>
   <script src="app/08-event-review.js?v=79"></script>
-  <script src="app/09-playback-events.js?v=81"></script>
-  <script src="app/10-render-collision.js?v=86"></script>
-  <script src="app/11-playback-controls.js?v=81"></script>
-  <script src="app/12-playback-wrist-features.js?v=3"></script>
+  <script src="app/09-playback-events.js?v=87"></script>
+  <script src="app/10-render-collision.js?v=97"></script>
+  <script src="app/11-playback-controls.js?v=83"></script>
+  <script src="app/13-playback-skeleton-features.js?v=8"></script>
   <script src="annotate.js?v=17"></script>
-  <script src="accuracy.js?v=13"></script>
+  <script src="accuracy.js?v=14"></script>
 </body>
 </html>
