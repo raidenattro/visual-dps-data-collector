@@ -119,7 +119,11 @@ async function realignPlaybackToPinnedEvent() {
       videoEl.currentTime = Math.min(seekT, videoEl.duration);
       await waitVideoSeeked(videoEl);
       if (typeof renderSkeletonSyncedToVideo === "function") {
-        await renderSkeletonSyncedToVideo({ playback: true, setAuthority: true });
+        await renderSkeletonSyncedToVideo({
+          playback: true,
+          setAuthority: false,
+          frameIdx: fi,
+        });
       } else {
         await renderExplicitPlaybackFrame(fi);
       }
@@ -142,7 +146,11 @@ async function renderExplicitPlaybackFrame(frameIdx) {
     videoEl.readyState >= 2 &&
     Number(videoEl.duration) > 0
   ) {
-    const fi = await renderSkeletonSyncedToVideo({ playback: true, setAuthority: true });
+    const fi = await renderSkeletonSyncedToVideo({
+      playback: true,
+      setAuthority: false,
+      frameIdx,
+    });
     return fi > 0;
   }
   const fi = parseInt(frameIdx, 10) || 0;
@@ -569,7 +577,11 @@ async function seekToTimestamp(timeSec, frameIdx = null, opts = {}) {
           await waitVideoSeeked(videoEl);
         }
         if (typeof renderSkeletonSyncedToVideo === "function") {
-          await renderSkeletonSyncedToVideo({ playback: true, setAuthority: true });
+          await renderSkeletonSyncedToVideo({
+            playback: true,
+            setAuthority: false,
+            frameIdx: hitByIdx.frameIdx,
+          });
         } else {
           await renderExplicitPlaybackFrame(hitByIdx.frameIdx);
         }

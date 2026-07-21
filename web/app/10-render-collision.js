@@ -1690,30 +1690,59 @@ function waitPresentedVideoFrame(el, timeoutMs = 600) {
 }
 
 /**
+ * 解析本次应绘制的帧号：逐帧跳转优先权威帧，否则按视频时间映射
+ */
+function resolveExplicitPlaybackFrameIdx(opts = {}) {
+  if (opts.frameIdx != null) {
+    const explicit = parseInt(opts.frameIdx, 10) || 0;
+    if (explicit > 0) return explicit;
+  }
+  if (opts.preferAuthority !== false && typeof getPlaybackAuthorityFrameIdx === "function") {
+    const authority = getPlaybackAuthorityFrameIdx();
+    if (authority != null && authority > 0) return authority;
+  }
+  if (opts.preferPinned !== false && typeof pinnedEventFrameIdx === "function") {
+    const pinned = pinnedEventFrameIdx();
+    if (pinned != null && pinned > 0) return pinned;
+  }
+  return 0;
+}
+
+/**
  * 按视频呈现时间绘制骨架（播放/暂停/seek 共用入口）
  * 与 playbackRenderLoop 一致：resolvePlaybackMediaTime + frameIdxAtVideoTime(playback:true)
  */
 async function renderSkeletonSyncedToVideo(opts = {}) {
   const playback = opts.playback !== false;
-  const mediaTime =
-    opts.mediaTime != null && Number.isFinite(Number(opts.mediaTime))
-      ? Number(opts.mediaTime)
-      : opts.waitPresented !== false && videoEl?.paused
-        ? await waitPresentedVideoFrame(videoEl)
-        : null;
-  const timeSec =
-    typeof resolvePlaybackMediaTime === "function"
-      ? resolvePlaybackMediaTime(mediaTime)
-      : Math.max(0, Number(videoEl?.currentTime) || 0);
-  const fi = frameIdxAtVideoTime(timeSec, { playback });
+  let fi = resolveExplicitPlaybackFrameIdx(opts);
+
+  if (!fi) {
+    let mediaTime = opts.mediaTime;
+    if (mediaTime == null && opts.waitPresented !== false && videoEl?.paused) {
+      mediaTime = await waitPresentedVideoFrame(videoEl);
+    }
+    const timeSec =
+      typeof resolvePlaybackMediaTime === "function"
+        ? resolvePlaybackMediaTime(mediaTime)
+        : Math.max(0, Number(videoEl?.currentTime) || 0);
+    fi = frameIdxAtVideoTime(timeSec, { playback });
+  }
+
   if (!fi) return 0;
   const hit =
-    typeof frameEntryByIdx === "function"
-      ? frameEntryByIdx(fi)
-      : frameByTime?.find((e) => e.frameIdx === fi) || null;
+    typeof ensureFrameIndexEntry === "function"
+      ? ensureFrameIndexEntry(fi)
+      : typeof frameEntryByIdx === "function"
+        ? frameEntryByIdx(fi)
+        : frameByTime?.find((e) => e.frameIdx === fi) || null;
   if (!hit) return 0;
+  const hadAuthority =
+    typeof getPlaybackAuthorityFrameIdx === "function" &&
+    (getPlaybackAuthorityFrameIdx() ?? 0) > 0;
   if (opts.setAuthority !== false && typeof setPlaybackAuthorityFrameIdx === "function") {
-    setPlaybackAuthorityFrameIdx(fi);
+    if (!hadAuthority && opts.frameIdx == null) {
+      setPlaybackAuthorityFrameIdx(fi);
+    }
   }
   lastRenderedFrameIdx = -1;
   tickPoseFrameIdx = -1;
@@ -1772,22 +1801,8 @@ function bakePlaybackStaticLayer() {
   return layer;
 }
 
-/** 播放专用：静态货框 + 碰撞黄/告警红 + 骨架连线 */
-function drawSkeletonPlaybackOnly(frame, inferW, inferH) {
-  const { cw, ch } = syncCanvasSize();
-  ctx.clearRect(0, 0, cw, ch);
-  if (playbackStaticLayerCanvas) {
-    ctx.drawImage(playbackStaticLayerCanvas, 0, 0, cw, ch);
-  } else {
-    drawAnnotationBoxesStatic();
-  }
-  if (frame && annotationBoxes.length) {
-    const collisionSets = collisionSetsForPlaybackFrame(frame, inferW, inferH);
-    drawAnnotationBoxesCollisionOnly(frame, inferW, inferH, collisionSets);
-  }
+function drawSkeletonConnections(frame, inferW, inferH, layout) {
   if (!frame?.persons?.length) return;
-
-  const layout = frozenPlaybackLayout || getDisplayLayout();
   ctx.lineWidth = 2;
   ctx.strokeStyle = "rgba(34, 211, 238, 0.9)";
   ctx.beginPath();
@@ -1804,40 +1819,10 @@ function drawSkeletonPlaybackOnly(frame, inferW, inferH) {
     });
   });
   ctx.stroke();
-  drawPersonFeatureTrackLabels(frame, inferW, inferH);
 }
 
-function clearFrozenPlaybackLayout() {
-  frozenPlaybackLayout = null;
-  frozenPlaybackCanvasCss = null;
-  playbackStaticLayerCanvas = null;
-}
-
-function drawSkeleton(frame, inferW, inferH, collisionSets = null) {
-  const { cw, ch } = syncCanvasSize();
-  ctx.clearRect(0, 0, cw, ch);
-  drawAnnotationBoxes(frame, inferW, inferH, collisionSets);
-  drawDetBboxes(frame, inferW, inferH);
+function drawSkeletonKeypoints(frame, inferW, inferH, layout) {
   if (!frame?.persons?.length) return;
-
-  const layout = getDisplayLayout();
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = "rgba(34, 211, 238, 0.9)";
-  ctx.beginPath();
-  frame.persons.forEach((person) => {
-    const kpts = person.keypoints || [];
-    COCO_LINES.forEach(([a, b]) => {
-      const pa = kpts[a];
-      const pb = kpts[b];
-      if (!pa || !pb || pa[2] < SCORE_MIN || pb[2] < SCORE_MIN) return;
-      const [x1, y1] = mapInferToDisplay(pa[0], pa[1], inferW, inferH, layout);
-      const [x2, y2] = mapInferToDisplay(pb[0], pb[1], inferW, inferH, layout);
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
-    });
-  });
-  ctx.stroke();
-
   frame.persons.forEach((person) => {
     const kpts = person.keypoints || [];
     kpts.forEach((kp, i) => {
@@ -1849,7 +1834,126 @@ function drawSkeleton(frame, inferW, inferH, collisionSets = null) {
       ctx.fill();
     });
   });
+}
+
+/**
+ * 统一骨架绘制：mode=lite 播放轻量，mode=full 暂停/seek 完整
+ */
+function drawSkeletonFrame(frame, inferW, inferH, opts = {}) {
+  const mode = opts.mode === "full" ? "full" : "lite";
+  const layout =
+    opts.layout ||
+    (mode === "lite" ? frozenPlaybackLayout || getDisplayLayout() : getDisplayLayout());
+  const { cw, ch } = syncCanvasSize();
+  ctx.clearRect(0, 0, cw, ch);
+
+  if (mode === "lite") {
+    if (playbackStaticLayerCanvas) {
+      ctx.drawImage(playbackStaticLayerCanvas, 0, 0, cw, ch);
+    } else {
+      drawAnnotationBoxesStatic();
+    }
+    if (frame && annotationBoxes.length) {
+      const collisionSets =
+        opts.collisionSets || collisionSetsForPlaybackFrame(frame, inferW, inferH);
+      drawAnnotationBoxesCollisionOnly(frame, inferW, inferH, collisionSets);
+    }
+  } else {
+    const collisionSets = opts.collisionSets ?? getFrameCollisionSets(frame, inferW, inferH);
+    drawAnnotationBoxes(frame, inferW, inferH, collisionSets);
+    drawDetBboxes(frame, inferW, inferH);
+  }
+
+  drawSkeletonConnections(frame, inferW, inferH, layout);
+  if (mode === "full") {
+    drawSkeletonKeypoints(frame, inferW, inferH, layout);
+  }
   drawPersonFeatureTrackLabels(frame, inferW, inferH);
+}
+
+function clearFrozenPlaybackLayout() {
+  frozenPlaybackLayout = null;
+  frozenPlaybackCanvasCss = null;
+  playbackStaticLayerCanvas = null;
+}
+
+/** 暂停/seek 绘制后更新碰撞提示与特征侧栏 */
+function updatePlaybackFrameUi(frame, collisionSets) {
+  const { collisionSet, alarmSet } = collisionSets;
+  if (collisionSet.size || alarmSet.size) {
+    const c = [...collisionSet].join(", ") || "—";
+    const a = [...alarmSet].join(", ") || "—";
+    timeLabel.title = `碰撞: ${c} | 报警: ${a}`;
+  } else {
+    timeLabel.title = annotationBoxes.length ? "无碰撞" : "";
+  }
+  const skipFeatureUi = playbackRenderLoopActive && videoEl && !videoEl.paused;
+  if (!skipFeatureUi && typeof updatePlaybackSkeletonFeaturesUi === "function") {
+    const fi = Number(frame?.frame_idx) || Number(frame?.source_frame_idx) || lastRenderedFrameIdx;
+    updatePlaybackSkeletonFeaturesUi(fi);
+  }
+  if (typeof updateEventReviewFrameNavUi === "function") updateEventReviewFrameNavUi();
+}
+
+/** 由视频时间解析并取帧（播放/暂停共用） */
+function resolvePlaybackFrameAtTime(timeSec, opts = {}) {
+  const playback = opts.playback !== false;
+  const targetIdx = frameIdxAtVideoTime(timeSec, { playback });
+  if (!targetIdx) return null;
+
+  let frameIdx = targetIdx;
+  let frame = frameCache.get(targetIdx);
+  if (!frame && typeof frameEntryByIdx === "function") {
+    const cachedEntry = frameEntryByIdx(targetIdx);
+    if (cachedEntry?.frame) frame = cachedEntry.frame;
+  }
+
+  if (frame) {
+    const { w, h } = inferSizeForFrameIdx(frameIdx);
+    return { frameIdx, frame, w, h };
+  }
+
+  if (playbackSkeletonReady) return null;
+
+  if (typeof ensureFrameChunkLoaded === "function") {
+    void ensureFrameChunkLoaded(targetIdx);
+  }
+  if (!opts.allowNearestFallback) return null;
+
+  const nearest = findNearestCachedFrameEntry(targetIdx);
+  if (!nearest) return null;
+  const lag = targetIdx - nearest.frameIdx;
+  // 骨架分块未就绪时，最多展示落后 1 帧的缓存，避免与画面严重错位
+  if (lag < 0 || lag > 1) return null;
+  frame = frameCache.get(nearest.frameIdx);
+  if (!frame) return null;
+  const { w, h } = inferSizeForFrameIdx(nearest.frameIdx);
+  return { frameIdx: nearest.frameIdx, frame, w, h, lagged: true };
+}
+
+/** 同步绘制指定时间的骨架（mode: lite=播放, full=暂停预览） */
+function renderPlaybackFrameAtTime(timeSec, opts = {}) {
+  const mode = opts.mode || "lite";
+  const resolved = resolvePlaybackFrameAtTime(timeSec, {
+    playback: opts.playback !== false,
+    allowNearestFallback: mode === "lite",
+  });
+  if (!resolved) return 0;
+
+  const { frameIdx, frame, w, h } = resolved;
+  if (opts.skipIfSame !== false && frameIdx === lastRenderedFrameIdx) return frameIdx;
+
+  lastRenderedFrameIdx = frameIdx;
+  tickPoseFrameIdx = frameIdx;
+
+  if (mode === "full") {
+    const collisionSets = getFrameCollisionSets(frame, w, h);
+    drawSkeletonFrame(frame, w, h, { mode: "full", collisionSets });
+    updatePlaybackFrameUi(frame, collisionSets);
+  } else {
+    drawSkeletonFrame(frame, w, h, { mode: "lite" });
+  }
+  return frameIdx;
 }
 
 /** 特征异步加载后仅重绘 track 标签，避免整帧 redraw 风暴 */
@@ -1874,8 +1978,26 @@ function redrawCurrentFrame() {
   if (playbackRenderLoopActive && videoEl && !videoEl.paused) return;
   renderGeneration++;
   const gen = renderGeneration;
+  const pinnedFi =
+    typeof pinnedEventFrameIdx === "function" ? pinnedEventFrameIdx() : null;
+  const authorityFi =
+    typeof getPlaybackAuthorityFrameIdx === "function" ? getPlaybackAuthorityFrameIdx() : null;
+  const heldFi = lastRenderedFrameIdx >= 1 ? lastRenderedFrameIdx : null;
+  const targetFi = pinnedFi || authorityFi || heldFi;
+  if (targetFi && frameByTime?.length) {
+    const hit =
+      typeof ensureFrameIndexEntry === "function"
+        ? ensureFrameIndexEntry(targetFi)
+        : typeof frameEntryByIdx === "function"
+          ? frameEntryByIdx(targetFi)
+          : frameByTime.find((item) => item.frameIdx === targetFi) || null;
+    if (hit) {
+      void renderFrameEntry(hit, gen);
+      return;
+    }
+  }
   if (videoEl?.src && videoEl.readyState >= 2) {
-    void renderSkeletonSyncedToVideo({ playback: true, setAuthority: true }).then((fi) => {
+    void renderSkeletonSyncedToVideo({ playback: true, setAuthority: false }).then((fi) => {
       if (gen !== renderGeneration) return;
       if (fi > 0) return;
       if (frameByTime.length) void renderFrameEntry(frameByTime[0], gen);
@@ -1893,6 +2015,19 @@ function redrawCurrentFrame() {
 
 async function renderFrameEntry(hit, renderGen) {
   if (!hit) return;
+  const authorityFi =
+    typeof getPlaybackAuthorityFrameIdx === "function" ? getPlaybackAuthorityFrameIdx() : null;
+  // 丢弃/纠正落后于权威帧的异步渲染，避免 pause/seeked 竞态把画面拉回
+  if (authorityFi != null && authorityFi > 0 && hit.frameIdx !== authorityFi) {
+    const authHit =
+      typeof ensureFrameIndexEntry === "function"
+        ? ensureFrameIndexEntry(authorityFi)
+        : typeof frameEntryByIdx === "function"
+          ? frameEntryByIdx(authorityFi)
+          : frameByTime.find((e) => e.frameIdx === authorityFi) || null;
+    if (!authHit) return;
+    hit = authHit;
+  }
   const requestedFi = hit.frameIdx;
   let frame = hit.frame || (await ensureFrame(requestedFi));
   if (!frame && typeof findNearestCachedFrameEntry === "function") {
@@ -1907,24 +2042,25 @@ async function renderFrameEntry(hit, renderGen) {
   lastRenderedFrameIdx = requestedFi;
   tickPoseFrameIdx = requestedFi;
   const collisionSets = getFrameCollisionSets(frame, hit.w, hit.h);
-  drawSkeleton(frame, hit.w, hit.h, collisionSets);
-  const { collisionSet, alarmSet } = collisionSets;
-  if (collisionSet.size || alarmSet.size) {
-    const c = [...collisionSet].join(", ") || "—";
-    const a = [...alarmSet].join(", ") || "—";
-    timeLabel.title = `碰撞: ${c} | 报警: ${a}`;
-  } else {
-    timeLabel.title = annotationBoxes.length ? "无碰撞" : "";
-  }
-  const skipFeatureUi =
-    playbackRenderLoopActive && videoEl && !videoEl.paused;
-  if (!skipFeatureUi && typeof updatePlaybackSkeletonFeaturesUi === "function") {
-    updatePlaybackSkeletonFeaturesUi(hit.frameIdx);
-  }
-  if (typeof updateEventReviewFrameNavUi === "function") updateEventReviewFrameNavUi();
+  drawSkeletonFrame(frame, hit.w, hit.h, { mode: "full", collisionSets });
+  updatePlaybackFrameUi(frame, collisionSets);
 }
 
 async function renderAtTimeCore(timeSec, opts = {}) {
+  const authorityFi =
+    typeof getPlaybackAuthorityFrameIdx === "function" ? getPlaybackAuthorityFrameIdx() : null;
+  if (authorityFi != null && authorityFi > 0) {
+    const authHit =
+      typeof ensureFrameIndexEntry === "function"
+        ? ensureFrameIndexEntry(authorityFi)
+        : typeof frameEntryByIdx === "function"
+          ? frameEntryByIdx(authorityFi)
+          : frameByTime.find((e) => e.frameIdx === authorityFi) || null;
+    if (authHit) {
+      await renderFrameEntry(authHit);
+      return;
+    }
+  }
   const t = Math.max(0, Number(timeSec) || 0);
   const playback = opts.playback ?? !!(videoEl?.src && Number(videoEl.duration) > 0);
   const fi = frameIdxAtVideoTime(t, { playback });
@@ -1988,41 +2124,13 @@ async function renderAtTime(timeSec, opts = {}) {
   }
 }
 
-/** 播放热路径：全量缓存就绪后仅同步绘制 */
+/** 播放热路径：委托统一渲染入口（lite 模式） */
 function syncRenderPlaybackFrame(timeSec, opts = {}) {
-  const playback = opts.playback === true;
-  const targetIdx = frameIdxAtVideoTime(timeSec, { playback });
-  if (!targetIdx) return;
-
-  let frame = frameCache.get(targetIdx);
-  if (!frame && typeof frameEntryByIdx === "function") {
-    const cachedEntry = frameEntryByIdx(targetIdx);
-    if (cachedEntry?.frame) frame = cachedEntry.frame;
-  }
-  if (!frame) {
-    void ensureFrameChunkLoaded(targetIdx);
-    if (!playbackSkeletonReady) {
-      const nearest = findNearestCachedFrameEntry(targetIdx);
-      if (!nearest) return;
-      const lag = targetIdx - nearest.frameIdx;
-      // 骨架分块未就绪时，最多展示落后 1 帧的缓存，避免与画面严重错位
-      if (lag < 0 || lag > 1) return;
-      const nearFrame = frameCache.get(nearest.frameIdx);
-      if (!nearFrame || nearest.frameIdx === lastRenderedFrameIdx) return;
-      lastRenderedFrameIdx = nearest.frameIdx;
-      tickPoseFrameIdx = nearest.frameIdx;
-      const { w, h } = inferSizeForFrameIdx(nearest.frameIdx);
-      drawSkeletonPlaybackOnly(nearFrame, w, h);
-    }
-    return;
-  }
-
-  if (targetIdx === lastRenderedFrameIdx) return;
-
-  lastRenderedFrameIdx = targetIdx;
-  tickPoseFrameIdx = targetIdx;
-  const { w, h } = inferSizeForFrameIdx(targetIdx);
-  drawSkeletonPlaybackOnly(frame, w, h);
+  renderPlaybackFrameAtTime(timeSec, {
+    playback: opts.playback === true,
+    mode: "lite",
+    skipIfSame: true,
+  });
 }
 
 let videoFrameCallbackHandle = null;

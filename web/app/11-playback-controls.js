@@ -189,18 +189,25 @@ videoEl.addEventListener("pause", () => {
     }
     return;
   }
+  // 播放循环最后一帧（常比 currentTime 映射更早）；须在清零前保存
+  const resumeFrameIdx = lastRenderedFrameIdx >= 1 ? lastRenderedFrameIdx : null;
   tickVideoFrameIdx = -1;
   lastRenderedFrameIdx = -1;
+  if (resumeFrameIdx && typeof setPlaybackAuthorityFrameIdx === "function") {
+    setPlaybackAuthorityFrameIdx(resumeFrameIdx);
+  }
   // 显式事件跳转中（playbackEventLinkExact）不同步「最近事件」，避免覆盖 activeEventKey
   if (!playbackEventLinkExact && typeof syncActiveEventFromPlaybackPosition === "function") {
     syncActiveEventFromPlaybackPosition({
       timeSec: videoEl.currentTime,
       frameIdx:
-        typeof getCurrentPlaybackFrameIdx === "function"
+        resumeFrameIdx ??
+        (typeof getCurrentPlaybackFrameIdx === "function"
           ? getCurrentPlaybackFrameIdx()
           : typeof frameIdxAtVideoTime === "function"
-            ? frameIdxAtVideoTime(videoEl.currentTime)
-            : null,
+            ? frameIdxAtVideoTime(videoEl.currentTime, { playback: true })
+            : null),
+      skipRedraw: true,
     });
   }
   if (typeof redrawCurrentFrame === "function") redrawCurrentFrame();
