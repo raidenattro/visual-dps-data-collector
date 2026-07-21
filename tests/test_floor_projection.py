@@ -69,6 +69,26 @@ def test_sticky_foot_tracker_new_segment_on_uv_jump():
     assert foot_uv_from_person(person_b) is not None
 
 
+def test_project_uv_outside_ground_map_returns_none():
+    from spatial_pose.floor_projection import project_uv_to_floor
+
+    cfg = _synthetic_calibration_config()
+    cal = compute_and_update_config(cfg, infer_width=640, infer_height=480)
+    # 投射到网格外的大坐标（取决于标定，用极端 UV 试探）
+    out = project_uv_to_floor(cal, (-9999.0, -9999.0))
+    assert out is None
+
+
+def test_ground_map_bounds_from_visualization():
+    cfg = _synthetic_calibration_config()
+    cal = compute_and_update_config(cfg)
+    x_min, x_max, y_min, y_max = cal.ground_map_bounds()
+    assert x_min == 0.0
+    assert y_min == 0.0
+    assert x_max == 2.0
+    assert y_max == 9.6
+
+
 def test_low_score_ankle_skipped():
     cfg = _synthetic_calibration_config()
     cal = compute_and_update_config(cfg)

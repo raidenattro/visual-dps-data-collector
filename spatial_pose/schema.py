@@ -25,6 +25,7 @@ DEFAULT_RUNTIME = {
     "smooth_alpha_normal": 0.2,
     "smooth_alpha_jump": 0.08,
     "smooth_jump_threshold_m": 1.4,
+    "trail_tail_frames": 90,
 }
 
 DEFAULT_VISUALIZATION = {

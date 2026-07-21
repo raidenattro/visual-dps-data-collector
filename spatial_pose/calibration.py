@@ -153,6 +153,13 @@ class SpatialCalibration:
             float(bounds.get("y_max", 12.5)),
         )
 
+    def ground_map_bounds(self) -> tuple[float, float, float, float]:
+        """Ground Map 可视网格范围（米），用于 floor_xy 计算与轨迹过滤。"""
+        vis = self.visualization()
+        width_m = float(vis.get("grid_width_m") or 2.0)
+        depth_m = float(vis.get("grid_depth_m") or 9.6)
+        return (0.0, width_m, 0.0, depth_m)
+
     def manifest_summary(self) -> dict[str, Any]:
         rel = self.config.get("_calibration_rel") or f"spatial/{self.camera_slug}.json"
         return {

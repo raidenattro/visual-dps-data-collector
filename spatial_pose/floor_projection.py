@@ -79,7 +79,7 @@ def project_uv_to_floor(
     offset_xy = tuning.get("offset_xy_m") or [0.0, 0.0]
     x = float(xy[0]) * float(scale_xy[0]) + float(offset_xy[0])
     y = float(xy[1]) * float(scale_xy[1]) + float(offset_xy[1])
-    x_min, x_max, y_min, y_max = cal.floor_bounds()
+    x_min, x_max, y_min, y_max = cal.ground_map_bounds()
     if not (x_min <= x <= x_max and y_min <= y <= y_max):
         return None
     return x, y
@@ -226,15 +226,17 @@ def project_foot_for_frame(
     if foot_uv is None:
         return FloorProjectionResult(trail_segment_id=trail_segment_id)
     raw_xy = project_uv_to_floor(cal, foot_uv)
+    if raw_xy is None:
+        smooth_state.smooth_xy = None
+        return FloorProjectionResult(trail_segment_id=trail_segment_id)
     smooth_xy = smooth_state.apply(raw_xy)
     result = FloorProjectionResult(
         foot_uv_px=[foot_uv[0], foot_uv[1]],
         trail_segment_id=trail_segment_id,
     )
-    if raw_xy is not None:
-        result.raw_floor_xy_m = [raw_xy[0], raw_xy[1]]
+    result.raw_floor_xy_m = [raw_xy[0], raw_xy[1]]
     if smooth_xy is not None:
         result.floor_xy_m = [smooth_xy[0], smooth_xy[1]]
-    elif raw_xy is not None:
+    else:
         result.floor_xy_m = [raw_xy[0], raw_xy[1]]
     return result

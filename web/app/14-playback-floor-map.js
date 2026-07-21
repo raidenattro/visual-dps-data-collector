@@ -13,6 +13,37 @@ const playbackFloorMapState = {
   spacingM: 2.4,
 };
 
+function footTrailTailMaxFrames() {
+  const rt =
+    playbackSpatialContext?.calibration?.runtime ||
+    playbackSpatialContext?.calibration?.config?.runtime ||
+    {};
+  return Math.max(15, Number(rt.trail_tail_frames) || 90);
+}
+
+function isWithinGroundMapXy(xy) {
+  if (!Array.isArray(xy) || xy.length < 2) return false;
+  const { widthM, depthM } = playbackFloorMapState;
+  const x = Number(xy[0]);
+  const y = Number(xy[1]);
+  return x >= 0 && x <= widthM && y >= 0 && y <= depthM;
+}
+
+function filterFootTrailTail(points, currentFrameIdx) {
+  const fi = Number(currentFrameIdx) || 0;
+  if (fi <= 0 || !points?.length) return [];
+  const minFrame = Math.max(1, fi - footTrailTailMaxFrames() + 1);
+  return points.filter((pt) => pt.frameIdx >= minFrame && pt.frameIdx <= fi);
+}
+
+function playbackFootTrailPointsForFrame(currentFrameIdx, space = "floor") {
+  const fi = Number(currentFrameIdx) || 0;
+  if (fi <= 0) return [];
+  const source = space === "uv" ? playbackFootUvTrajectory : playbackFloorTrajectory;
+  const inRange = source.filter((pt) => pt.frameIdx > 0 && pt.frameIdx <= fi);
+  return filterFootTrailTail(inRange, fi);
+}
+
 function footTrailBreakOptions(inferW = 852) {
   const tuning =
     playbackSpatialContext?.calibration?.config?.tuning ||
@@ -85,10 +116,16 @@ function mergeFloorXyOntoUvTrail(uvTrail) {
 }
 
 function drawFootTrailSegments(ctx, segments, drawSegmentLine) {
+  const flat = segments.flat();
+  if (flat.length < 2) return;
+  const minFrame = flat[0].frameIdx;
+  const maxFrame = flat[flat.length - 1].frameIdx;
+  const span = Math.max(1, maxFrame - minFrame);
   segments.forEach((seg) => {
     if (seg.length < 2) return;
     for (let i = 1; i < seg.length; i += 1) {
-      const alpha = 0.25 + (i / seg.length) * 0.65;
+      const t = (Number(seg[i].frameIdx) - minFrame) / span;
+      const alpha = 0.08 + t * 0.87;
       drawSegmentLine(seg[i - 1], seg[i], alpha);
     }
   });
@@ -153,6 +190,7 @@ async function loadPlaybackSpatialContext(recordId) {
       const rows = body.rows || [];
       playbackFloorTrajectory = rows
         .filter((row) => Array.isArray(row.floor_xy_m) && row.floor_xy_m.length >= 2)
+        .filter((row) => isWithinGroundMapXy(row.floor_xy_m))
         .map((row) => ({
           frameIdx: Number(row.frame_idx) || 0,
           t: Number(row.timestamp_sec) || 0,
@@ -164,6 +202,7 @@ async function loadPlaybackSpatialContext(recordId) {
         }));
       playbackFootUvTrajectory = rows
         .filter((row) => Array.isArray(row.foot_uv_px) && row.foot_uv_px.length >= 2)
+        .filter((row) => isWithinGroundMapXy(row.floor_xy_m))
         .map((row) => ({
           frameIdx: Number(row.frame_idx) || 0,
           uv: [Number(row.foot_uv_px[0]), Number(row.foot_uv_px[1])],
@@ -202,9 +241,7 @@ function floorMapToPixel(x, y, canvas) {
 }
 
 function playbackFloorTrailUntilFrame(currentFrameIdx) {
-  const fi = Number(currentFrameIdx) || 0;
-  if (fi <= 0) return playbackFloorTrajectory;
-  return playbackFloorTrajectory.filter((pt) => pt.frameIdx > 0 && pt.frameIdx <= fi);
+  return playbackFootTrailPointsForFrame(currentFrameIdx, "floor");
 }
 
 function pickPrimaryPersonForFoot(frame) {
@@ -289,7 +326,7 @@ function drawPlaybackFootTrailOverlay(frame, inferW, inferH, layout, currentFram
   const fi = Number(currentFrameIdx) || Number(frame?.frame_idx) || 0;
   if (fi <= 0) return;
 
-  const trail = playbackFootUvTrajectory.filter((pt) => pt.frameIdx > 0 && pt.frameIdx <= fi);
+  const trail = playbackFootTrailPointsForFrame(fi, "uv");
   const trailWithFloor = mergeFloorXyOntoUvTrail(trail);
   const opts = footTrailBreakOptions(inferW);
   const segments = splitFootTrailPoints(trailWithFloor, opts);
@@ -311,7 +348,9 @@ function drawPlaybackFootTrailOverlay(frame, inferW, inferH, layout, currentFram
   }
 
   const currentUv = resolveFootUvAtFrame(fi, frame);
-  if (!currentUv) return;
+  const currentXy = resolveFloorXyAtFrame(fi, null, frame);
+  const showCurrentFoot = currentUv && currentXy && isWithinGroundMapXy(currentXy);
+  if (!showCurrentFoot) return;
 
   const person = pickPrimaryPersonForFoot(frame);
   if (person?.keypoints) {
@@ -407,10 +446,21 @@ function drawPlaybackFloorMapCanvas(currentXy, currentFrameIdx) {
     mctx.fillText(y.toFixed(1), a[0] - 10, a[1] + 14);
   }
 
-  const trail = playbackFloorTrailUntilFrame(currentFrameIdx);
+  const trail = isPlaybackFootTrailEnabled()
+    ? playbackFootTrailPointsForFrame(currentFrameIdx, "floor")
+    : [];
   const opts = footTrailBreakOptions();
   const segments = splitFootTrailPoints(trail, opts);
   if (segments.length) {
+    mctx.save();
+    mctx.beginPath();
+    mctx.rect(
+      Math.min(p0[0], p1[0]),
+      Math.min(p0[1], p1[1]),
+      Math.abs(p1[0] - p0[0]),
+      Math.abs(p1[1] - p0[1])
+    );
+    mctx.clip();
     mctx.lineJoin = "round";
     mctx.lineCap = "round";
     drawFootTrailSegments(mctx, segments, (prev, curr, alpha) => {
@@ -423,9 +473,11 @@ function drawPlaybackFloorMapCanvas(currentXy, currentFrameIdx) {
       mctx.lineTo(x1, y1);
       mctx.stroke();
     });
+    mctx.restore();
   }
 
-  if (currentXy && currentXy.length >= 2) {
+  const showCurrentMarker = currentXy && currentXy.length >= 2;
+  if (showCurrentMarker) {
     const [cx, cy] = floorMapToPixel(currentXy[0], currentXy[1], canvas);
     mctx.strokeStyle = "#ffffff";
     mctx.lineWidth = 2;
@@ -455,14 +507,15 @@ function updatePlaybackFloorMapUi(hit, frame) {
     0;
   const coords = document.getElementById("playback-floor-coords");
   const xy = resolveFloorXyAtFrame(frameIdx, hit, frame);
+  const xyInMap = xy && isWithinGroundMapXy(xy) ? xy : null;
   if (coords) {
-    coords.textContent = xy
-      ? `floor X=${xy[0].toFixed(2)} Y=${xy[1].toFixed(2)} m · 帧 ${frameIdx}`
+    coords.textContent = xyInMap
+      ? `floor X=${xyInMap[0].toFixed(2)} Y=${xyInMap[1].toFixed(2)} m · 帧 ${frameIdx}`
       : frameIdx > 0
         ? `帧 ${frameIdx} · 无 floor_xy`
         : "";
   }
-  drawPlaybackFloorMapCanvas(xy, frameIdx);
+  drawPlaybackFloorMapCanvas(xyInMap, frameIdx);
 }
 
 function bindPlaybackFloorMapControls() {
@@ -477,7 +530,6 @@ function bindPlaybackFloorMapControls() {
     trailToggle.dataset.bound = "1";
     trailToggle.addEventListener("change", (e) => {
       trailToggle.dataset.userTouched = "1";
-      if (!e.target.checked) return;
       refreshPlaybackSpatialOverlay();
     });
   }
