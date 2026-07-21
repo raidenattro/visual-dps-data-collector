@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
 from config_loader import load_config_file, resolve_app_paths, spatial_enabled
 from floor_foot_store import (
     FLOOR_FOOT_FILE,
+    assign_trail_segment_ids,
     floor_foot_rows_from_frames,
     rewrite_timeline_without_floor,
     write_floor_foot_parquet,
@@ -26,7 +27,7 @@ from pose_store import (
     _assemble_frames_from_tables,
 )
 from spatial_pose.calibration import load_calibration
-from spatial_pose.floor_projection import FloorSmoothState, pick_primary_person, project_foot_for_frame
+from spatial_pose.floor_projection import FloorSmoothState, StickyFootTracker, pick_primary_person, project_foot_for_frame
 
 
 def _require_pyarrow():
@@ -85,20 +86,30 @@ def enrich_record(record_dir: Path, *, spatial_dir: Path, force: bool = False) -
     frames = _assemble_frames_from_tables(timeline_rows, skeleton_rows, floor_by_frame={})
 
     smooth = FloorSmoothState.from_calibration(cal)
+    sticky = StickyFootTracker.from_calibration(cal)
     updated = 0
     for frame in frames:
-        floor = project_foot_for_frame(cal, frame.get("persons") or [], smooth)
+        fi = int(frame.get("frame_idx") or 0)
+        floor = project_foot_for_frame(
+            cal,
+            frame.get("persons") or [],
+            smooth,
+            sticky_tracker=sticky,
+            frame_idx=fi,
+        )
         frame.pop("foot_uv_px", None)
         frame.pop("raw_floor_xy_m", None)
         frame.pop("floor_xy_m", None)
         frame.pop("foot_person_id", None)
         frame.pop("foot_person_track_id", None)
+        frame.pop("foot_trail_segment_id", None)
         if floor.foot_uv_px is not None:
             frame["foot_uv_px"] = floor.foot_uv_px
         if floor.raw_floor_xy_m is not None:
             frame["raw_floor_xy_m"] = floor.raw_floor_xy_m
         if floor.floor_xy_m is not None:
             frame["floor_xy_m"] = floor.floor_xy_m
+        frame["foot_trail_segment_id"] = int(floor.trail_segment_id)
         person = pick_primary_person(frame.get("persons") or [])
         if person is not None:
             frame["foot_person_id"] = int(person.get("person_id") if person.get("person_id") is not None else -1)
@@ -107,7 +118,12 @@ def enrich_record(record_dir: Path, *, spatial_dir: Path, force: bool = False) -
         if floor.floor_xy_m or floor.foot_uv_px:
             updated += 1
 
-    floor_rows = floor_foot_rows_from_frames(frames)
+    floor_rows = assign_trail_segment_ids(
+        floor_foot_rows_from_frames(frames),
+        jump_threshold_m=float(cal.runtime().get("smooth_jump_threshold_m", 1.4)),
+        max_frame_gap=int(cal.runtime().get("sticky_max_frame_gap", 25)),
+        max_uv_jump_px=sticky.max_uv_jump_px,
+    )
     write_floor_foot_parquet(record_dir, floor_rows)
 
     clean_timeline = [_timeline_row_from_frame(fr) for fr in frames]

@@ -13,6 +13,87 @@ const playbackFloorMapState = {
   spacingM: 2.4,
 };
 
+function footTrailBreakOptions(inferW = 852) {
+  const tuning =
+    playbackSpatialContext?.calibration?.config?.tuning ||
+    playbackSpatialContext?.calibration?.runtime ||
+    {};
+  const jumpM = Number(tuning.smooth_jump_threshold_m) || 1.4;
+  const maxFrameGap = Number(tuning.sticky_max_frame_gap) || 25;
+  const uvRatio = Number(tuning.sticky_max_uv_jump_ratio) || 0.12;
+  return {
+    jumpM,
+    maxFrameGap,
+    maxUvJumpPx: Math.max(40, inferW * uvRatio),
+  };
+}
+
+function shouldBreakFootTrail(prev, curr, opts) {
+  if (!prev || !curr) return true;
+  if (
+    prev.trailSegmentId != null &&
+    curr.trailSegmentId != null &&
+    prev.trailSegmentId !== curr.trailSegmentId
+  ) {
+    return true;
+  }
+  const frameGap = Number(curr.frameIdx) - Number(prev.frameIdx);
+  if (frameGap > opts.maxFrameGap) return true;
+  if (
+    prev.personId >= 0 &&
+    curr.personId >= 0 &&
+    prev.personId !== curr.personId
+  ) {
+    return true;
+  }
+  if (prev.xy && curr.xy) {
+    const dx = curr.xy[0] - prev.xy[0];
+    const dy = curr.xy[1] - prev.xy[1];
+    if (Math.hypot(dx, dy) > opts.jumpM) return true;
+  }
+  if (prev.uv && curr.uv) {
+    const du = curr.uv[0] - prev.uv[0];
+    const dv = curr.uv[1] - prev.uv[1];
+    if (Math.hypot(du, dv) > opts.maxUvJumpPx) return true;
+  }
+  return false;
+}
+
+function splitFootTrailPoints(points, opts) {
+  if (!points?.length) return [];
+  const sorted = [...points].sort((a, b) => a.frameIdx - b.frameIdx);
+  const segments = [];
+  let seg = [sorted[0]];
+  for (let i = 1; i < sorted.length; i += 1) {
+    if (shouldBreakFootTrail(sorted[i - 1], sorted[i], opts)) {
+      if (seg.length) segments.push(seg);
+      seg = [sorted[i]];
+    } else {
+      seg.push(sorted[i]);
+    }
+  }
+  if (seg.length) segments.push(seg);
+  return segments;
+}
+
+function mergeFloorXyOntoUvTrail(uvTrail) {
+  const floorByFrame = new Map(playbackFloorTrajectory.map((p) => [p.frameIdx, p]));
+  return uvTrail.map((pt) => ({
+    ...pt,
+    xy: floorByFrame.get(pt.frameIdx)?.xy || pt.xy || null,
+  }));
+}
+
+function drawFootTrailSegments(ctx, segments, drawSegmentLine) {
+  segments.forEach((seg) => {
+    if (seg.length < 2) return;
+    for (let i = 1; i < seg.length; i += 1) {
+      const alpha = 0.25 + (i / seg.length) * 0.65;
+      drawSegmentLine(seg[i - 1], seg[i], alpha);
+    }
+  });
+}
+
 function resetPlaybackFloorMap() {
   playbackSpatialContext = null;
   playbackFloorTrajectory = [];
@@ -78,6 +159,8 @@ async function loadPlaybackSpatialContext(recordId) {
           xy: [Number(row.floor_xy_m[0]), Number(row.floor_xy_m[1])],
           personId: Number(row.person_id),
           personTrackId: Number(row.person_track_id) || 0,
+          trailSegmentId:
+            row.trail_segment_id != null ? Number(row.trail_segment_id) : null,
         }));
       playbackFootUvTrajectory = rows
         .filter((row) => Array.isArray(row.foot_uv_px) && row.foot_uv_px.length >= 2)
@@ -86,6 +169,8 @@ async function loadPlaybackSpatialContext(recordId) {
           uv: [Number(row.foot_uv_px[0]), Number(row.foot_uv_px[1])],
           personId: Number(row.person_id),
           personTrackId: Number(row.person_track_id) || 0,
+          trailSegmentId:
+            row.trail_segment_id != null ? Number(row.trail_segment_id) : null,
         }));
     }
   } catch (_err) {
@@ -205,14 +290,14 @@ function drawPlaybackFootTrailOverlay(frame, inferW, inferH, layout, currentFram
   if (fi <= 0) return;
 
   const trail = playbackFootUvTrajectory.filter((pt) => pt.frameIdx > 0 && pt.frameIdx <= fi);
-  if (trail.length >= 2) {
+  const trailWithFloor = mergeFloorXyOntoUvTrail(trail);
+  const opts = footTrailBreakOptions(inferW);
+  const segments = splitFootTrailPoints(trailWithFloor, opts);
+  if (segments.length) {
     ctx.save();
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
-    for (let i = 1; i < trail.length; i += 1) {
-      const prev = trail[i - 1];
-      const curr = trail[i];
-      const alpha = 0.25 + (i / trail.length) * 0.65;
+    drawFootTrailSegments(ctx, segments, (prev, curr, alpha) => {
       ctx.strokeStyle = `rgba(225, 130, 45, ${alpha.toFixed(3)})`;
       ctx.lineWidth = 2.5;
       const [x0, y0] = mapInferToDisplay(prev.uv[0], prev.uv[1], inferW, inferH, layout);
@@ -221,7 +306,7 @@ function drawPlaybackFootTrailOverlay(frame, inferW, inferH, layout, currentFram
       ctx.moveTo(x0, y0);
       ctx.lineTo(x1, y1);
       ctx.stroke();
-    }
+    });
     ctx.restore();
   }
 
@@ -323,20 +408,21 @@ function drawPlaybackFloorMapCanvas(currentXy, currentFrameIdx) {
   }
 
   const trail = playbackFloorTrailUntilFrame(currentFrameIdx);
-  if (trail.length > 1) {
+  const opts = footTrailBreakOptions();
+  const segments = splitFootTrailPoints(trail, opts);
+  if (segments.length) {
     mctx.lineJoin = "round";
     mctx.lineCap = "round";
-    for (let i = 1; i < trail.length; i += 1) {
-      const alpha = 0.25 + (i / trail.length) * 0.65;
+    drawFootTrailSegments(mctx, segments, (prev, curr, alpha) => {
       mctx.strokeStyle = `rgba(225, 130, 45, ${alpha.toFixed(3)})`;
       mctx.lineWidth = 2;
-      const [x0, y0] = floorMapToPixel(trail[i - 1].xy[0], trail[i - 1].xy[1], canvas);
-      const [x1, y1] = floorMapToPixel(trail[i].xy[0], trail[i].xy[1], canvas);
+      const [x0, y0] = floorMapToPixel(prev.xy[0], prev.xy[1], canvas);
+      const [x1, y1] = floorMapToPixel(curr.xy[0], curr.xy[1], canvas);
       mctx.beginPath();
       mctx.moveTo(x0, y0);
       mctx.lineTo(x1, y1);
       mctx.stroke();
-    }
+    });
   }
 
   if (currentXy && currentXy.length >= 2) {

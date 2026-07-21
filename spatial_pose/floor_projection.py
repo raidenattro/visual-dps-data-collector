@@ -115,28 +115,121 @@ class FloorSmoothState:
 
 
 @dataclass
+class StickyFootTracker:
+    """按上一帧足部像素位置跟踪同一人，跨帧跳变过大时开启新轨迹段。"""
+
+    last_uv: tuple[float, float] | None = None
+    last_frame_idx: int = 0
+    trail_segment_id: int = 0
+    max_uv_jump_px: float = 100.0
+    max_frame_gap: int = 25
+
+    @classmethod
+    def from_calibration(cls, cal: SpatialCalibration) -> StickyFootTracker:
+        rt = cal.runtime()
+        infer_w = int(cal.infer_width or 852)
+        ratio = float(rt.get("sticky_max_uv_jump_ratio", 0.12))
+        return cls(
+            max_uv_jump_px=max(40.0, infer_w * ratio),
+            max_frame_gap=int(rt.get("sticky_max_frame_gap", 25)),
+        )
+
+    def _start_new_segment(self) -> None:
+        self.trail_segment_id += 1
+        self.last_uv = None
+
+    def pick_person(
+        self,
+        persons: list[dict[str, Any]],
+        *,
+        frame_idx: int,
+        score_min: float,
+    ) -> tuple[dict[str, Any] | None, int, bool]:
+        """返回 (person, trail_segment_id, segment_break)。"""
+        segment_break = False
+        if frame_idx > 0 and self.last_frame_idx > 0:
+            if frame_idx - self.last_frame_idx > self.max_frame_gap:
+                self._start_new_segment()
+                segment_break = True
+
+        candidates: list[tuple[dict[str, Any], tuple[float, float]]] = []
+        for person in persons:
+            if not isinstance(person, dict):
+                continue
+            uv = foot_uv_from_person(person, score_min=score_min)
+            if uv:
+                candidates.append((person, uv))
+
+        if not candidates:
+            self.last_uv = None
+            return None, self.trail_segment_id, segment_break
+
+        chosen: dict[str, Any] | None = None
+        chosen_uv: tuple[float, float] | None = None
+
+        if self.last_uv is not None:
+            best_person, best_uv = min(
+                candidates,
+                key=lambda item: float(
+                    np.hypot(item[1][0] - self.last_uv[0], item[1][1] - self.last_uv[1])
+                ),
+            )
+            dist = float(np.hypot(best_uv[0] - self.last_uv[0], best_uv[1] - self.last_uv[1]))
+            if dist <= self.max_uv_jump_px:
+                chosen, chosen_uv = best_person, best_uv
+            else:
+                self._start_new_segment()
+                segment_break = True
+                chosen = pick_primary_person(persons)
+                chosen_uv = foot_uv_from_person(chosen, score_min=score_min) if chosen else None
+        else:
+            chosen = pick_primary_person(persons)
+            chosen_uv = foot_uv_from_person(chosen, score_min=score_min) if chosen else None
+
+        if chosen_uv is not None:
+            self.last_uv = chosen_uv
+        self.last_frame_idx = frame_idx
+        return chosen, self.trail_segment_id, segment_break
+
+
+@dataclass
 class FloorProjectionResult:
     foot_uv_px: list[float] | None = None
     raw_floor_xy_m: list[float] | None = None
     floor_xy_m: list[float] | None = None
+    trail_segment_id: int = 0
 
 
 def project_foot_for_frame(
     cal: SpatialCalibration,
     persons: list[dict[str, Any]],
     smooth_state: FloorSmoothState,
+    *,
+    sticky_tracker: StickyFootTracker | None = None,
+    frame_idx: int = 0,
 ) -> FloorProjectionResult:
     score_min = float(cal.runtime().get("foot_score_min", 0.35))
-    person = pick_primary_person(persons)
+    trail_segment_id = 0
+    if sticky_tracker is not None:
+        person, trail_segment_id, segment_break = sticky_tracker.pick_person(
+            persons,
+            frame_idx=frame_idx,
+            score_min=score_min,
+        )
+        if segment_break:
+            smooth_state.smooth_xy = None
+    else:
+        person = pick_primary_person(persons)
     if person is None:
         return FloorProjectionResult()
     foot_uv = foot_uv_from_person(person, score_min=score_min)
     if foot_uv is None:
-        return FloorProjectionResult()
+        return FloorProjectionResult(trail_segment_id=trail_segment_id)
     raw_xy = project_uv_to_floor(cal, foot_uv)
     smooth_xy = smooth_state.apply(raw_xy)
     result = FloorProjectionResult(
         foot_uv_px=[foot_uv[0], foot_uv[1]],
+        trail_segment_id=trail_segment_id,
     )
     if raw_xy is not None:
         result.raw_floor_xy_m = [raw_xy[0], raw_xy[1]]

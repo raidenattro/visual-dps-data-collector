@@ -46,6 +46,7 @@ def floor_foot_empty_schema() -> dict[str, Any]:
         "floor_y_m": pa.array([], type=pa.float64()),
         "raw_floor_x_m": pa.array([], type=pa.float64()),
         "raw_floor_y_m": pa.array([], type=pa.float64()),
+        "trail_segment_id": pa.array([], type=pa.int32()),
     }
 
 
@@ -73,6 +74,7 @@ def floor_foot_row_from_frame(frame: dict[str, Any]) -> dict[str, Any] | None:
         "floor_y_m": None,
         "raw_floor_x_m": None,
         "raw_floor_y_m": None,
+        "trail_segment_id": int(frame.get("foot_trail_segment_id") or 0),
     }
     if has_foot:
         row["foot_u_px"] = float(foot_uv[0])
@@ -217,11 +219,58 @@ def row_to_playback_payload(row: dict[str, Any]) -> dict[str, Any]:
         out["floor_xy_m"] = [float(row["floor_x_m"]), float(row["floor_y_m"])]
     if row.get("raw_floor_x_m") is not None and row.get("raw_floor_y_m") is not None:
         out["raw_floor_xy_m"] = [float(row["raw_floor_x_m"]), float(row["raw_floor_y_m"])]
+    if row.get("trail_segment_id") is not None:
+        out["trail_segment_id"] = int(row["trail_segment_id"])
     return out
 
 
 def playback_payload_from_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [row_to_playback_payload(r) for r in rows if isinstance(r, dict)]
+
+
+def assign_trail_segment_ids(
+    rows: list[dict[str, Any]],
+    *,
+    jump_threshold_m: float = 1.4,
+    max_frame_gap: int = 25,
+    max_uv_jump_px: float = 100.0,
+) -> list[dict[str, Any]]:
+    """按帧序为 sidecar 行分配 trail_segment_id（绘制断线用）。"""
+    if not rows:
+        return rows
+    sorted_rows = sorted(rows, key=lambda r: int(r.get("frame_idx") or 0))
+    segment_id = 0
+    prev: dict[str, Any] | None = None
+    out: list[dict[str, Any]] = []
+    for row in sorted_rows:
+        item = dict(row)
+        if prev is not None:
+            prev_fi = int(prev.get("frame_idx") or 0)
+            fi = int(item.get("frame_idx") or 0)
+            if fi - prev_fi > max_frame_gap:
+                segment_id += 1
+            elif (
+                prev.get("person_id") is not None
+                and item.get("person_id") is not None
+                and int(prev.get("person_id")) >= 0
+                and int(item.get("person_id")) >= 0
+                and int(prev.get("person_id")) != int(item.get("person_id"))
+            ):
+                segment_id += 1
+            elif prev.get("floor_x_m") is not None and item.get("floor_x_m") is not None:
+                dx = float(item["floor_x_m"]) - float(prev["floor_x_m"])
+                dy = float(item["floor_y_m"]) - float(prev["floor_y_m"])
+                if (dx * dx + dy * dy) ** 0.5 > jump_threshold_m:
+                    segment_id += 1
+            elif prev.get("foot_u_px") is not None and item.get("foot_u_px") is not None:
+                du = float(item["foot_u_px"]) - float(prev["foot_u_px"])
+                dv = float(item["foot_v_px"]) - float(prev["foot_v_px"])
+                if (du * du + dv * dv) ** 0.5 > max_uv_jump_px:
+                    segment_id += 1
+        item["trail_segment_id"] = segment_id
+        out.append(item)
+        prev = item
+    return out
 
 
 def strip_floor_from_timeline_row(row: dict[str, Any]) -> dict[str, Any]:
