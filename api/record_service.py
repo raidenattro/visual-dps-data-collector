@@ -10,10 +10,13 @@ from typing import Any
 from fastapi import HTTPException
 
 from annotation_store import (
+    ANNOTATION_SOURCE_ANNOTATION,
     ANNOTATION_SOURCE_MASTER,
     annotation_dir_display_rel,
     annotation_dir_for_source,
     annotation_path_for_video_stem,
+    canonical_annotation_dir,
+    is_base_annotation_source,
     load_annotation_json,
     normalize_annotation_payload,
     normalize_annotation_source,
@@ -56,6 +59,7 @@ from api.reflection_service import REFLECTION_OK, load_reflection_or_http, norma
 from video_transcode import (
     default_playback_transcode_height,
     ensure_preview_transcode_async,
+    probe_video_timing,
     read_video_height,
     resolve_playback_serve_path,
     transcode_preview_video,
@@ -132,8 +136,8 @@ def persist_annotation_for_video(
 
     paths = resolve_app_paths()
     norm = normalize_annotation_source(annotation_source)
-    if norm == "master":
-        raise ValueError("母本目录只读，请指定模型层 annotation_source（rtmpose-t/s/m）")
+    if is_base_annotation_source(norm):
+        raise ValueError("基准标注目录只读，请指定模型层 annotation_source（rtmpose-t/s/m）")
     ann_dir = annotation_dir_for_source(paths, norm)
     save_stem = resolve_annotation_save_stem(
         ann_dir,
@@ -325,6 +329,30 @@ def video_path_for_video_stem(video_stem: str) -> Path | None:
         if candidate.is_file():
             return candidate
     return None
+
+
+def enrich_manifest_playback_timing(record_id: str, manifest: dict[str, Any]) -> dict[str, Any]:
+    """补齐 manifest 中的视频时长与 PTS 偏移，供回放按浏览器时间轴对齐骨架。"""
+    has_pts = manifest.get("video_start_pts_sec") is not None
+    has_dur = manifest.get("video_duration_sec") is not None
+    if has_pts and has_dur:
+        return manifest
+    vp = video_path_for_record(record_id)
+    if not vp or not vp.is_file():
+        return manifest
+    timing = probe_video_timing(vp)
+    if not timing:
+        return manifest
+    out = dict(manifest)
+    if not has_dur and timing.get("duration_sec"):
+        out["video_duration_sec"] = round(float(timing["duration_sec"]), 6)
+    if not has_pts:
+        pts = timing.get("start_pts_sec")
+        if pts is None:
+            pts = timing.get("first_pts_sec")
+        if pts is not None and float(pts) > 0:
+            out["video_start_pts_sec"] = round(float(pts), 6)
+    return out
 
 
 def playback_video_path_for_record(record_id: str) -> Path | None:
@@ -862,23 +890,28 @@ def resolve_annotation_path_for_source(
     )
     if path:
         try:
-            in_tier = path.resolve().is_relative_to(ann_dir.resolve())
+            in_dir = path.resolve().is_relative_to(ann_dir.resolve())
         except AttributeError:
-            in_tier = str(path.resolve()).startswith(str(ann_dir.resolve()))
-        tag = "tier" if norm != ANNOTATION_SOURCE_MASTER and in_tier else "master"
+            in_dir = str(path.resolve()).startswith(str(ann_dir.resolve()))
+        if is_base_annotation_source(norm):
+            tag = norm
+        elif in_dir:
+            tag = "tier"
+        else:
+            tag = ANNOTATION_SOURCE_ANNOTATION
         return path, tag
 
-    if norm != ANNOTATION_SOURCE_MASTER:
+    if not is_base_annotation_source(norm):
         master_path = _resolve_annotation_in_dir(
             record_id,
             paths=paths,
-            ann_dir=paths.annotation_dir,
+            ann_dir=canonical_annotation_dir(paths),
             locator=locator,
             meta=meta,
             allow_reflection=True,
         )
         if master_path:
-            return master_path, "master"
+            return master_path, ANNOTATION_SOURCE_ANNOTATION
 
     return None, "none"
 
