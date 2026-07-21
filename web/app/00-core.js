@@ -78,6 +78,13 @@ let playbackSkeletonReady = false;
 let frozenPlaybackLayout = null;
 /** 播放期间冻结的 canvas CSS 尺寸 */
 let frozenPlaybackCanvasCss = null;
+/** 暂停后保留的播放期 layout/canvas（与 lite 绘制对齐，供 full 重绘复用） */
+let pausedPlaybackLayout = null;
+let pausedPlaybackCanvasCss = null;
+/** 播放循环最近一次 rVFC mediaTime（暂停时与播放查帧同源） */
+let lastPlaybackMediaTimeSec = null;
+/** 逐帧/事件 seek 后 video.currentTime 是否为 timeline+PTS（与连续播放 timeline 轴不同） */
+let playbackVideoClockUsesPtsSeek = false;
 /** 播放 UI 节流时间戳 */
 let lastPlaybackUiSyncMs = 0;
 /** 播放循环当前视频帧号（与 tickPoseFrameIdx 区分） */

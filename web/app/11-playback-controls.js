@@ -176,27 +176,26 @@ videoEl.addEventListener("play", () => {
 });
 
 videoEl.addEventListener("pause", () => {
-  if (typeof cancelPlaybackRenderLoop === "function") cancelPlaybackRenderLoop();
-  // 逐帧/按 frame_idx 精确 seek 时，不在 pause 回调里按 currentTime 重绘
   const explicitFi =
     typeof getExplicitSeekFrameIdx === "function" ? getExplicitSeekFrameIdx() : null;
   const authorityFi =
     typeof getPlaybackAuthorityFrameIdx === "function" ? getPlaybackAuthorityFrameIdx() : null;
   if (explicitFi || authorityFi || playbackEventLinkExact) {
+    if (typeof cancelPlaybackRenderLoop === "function") {
+      cancelPlaybackRenderLoop({ preserveLayout: true });
+    }
     if (videoEl.duration && Number.isFinite(videoEl.duration)) {
       seekBar.value = String((videoEl.currentTime / videoEl.duration) * 1000);
       timeLabel.textContent = formatTime(videoEl.currentTime);
     }
     return;
   }
-  // 播放循环最后一帧（常比 currentTime 映射更早）；须在清零前保存
+  const resumeMediaTime = lastPlaybackMediaTimeSec;
   const resumeFrameIdx = lastRenderedFrameIdx >= 1 ? lastRenderedFrameIdx : null;
-  tickVideoFrameIdx = -1;
-  lastRenderedFrameIdx = -1;
-  if (resumeFrameIdx && typeof setPlaybackAuthorityFrameIdx === "function") {
-    setPlaybackAuthorityFrameIdx(resumeFrameIdx);
+  if (typeof cancelPlaybackRenderLoop === "function") {
+    cancelPlaybackRenderLoop({ preserveLayout: true });
   }
-  // 显式事件跳转中（playbackEventLinkExact）不同步「最近事件」，避免覆盖 activeEventKey
+  tickVideoFrameIdx = -1;
   if (!playbackEventLinkExact && typeof syncActiveEventFromPlaybackPosition === "function") {
     syncActiveEventFromPlaybackPosition({
       timeSec: videoEl.currentTime,
@@ -205,12 +204,19 @@ videoEl.addEventListener("pause", () => {
         (typeof getCurrentPlaybackFrameIdx === "function"
           ? getCurrentPlaybackFrameIdx()
           : typeof frameIdxAtVideoTime === "function"
-            ? frameIdxAtVideoTime(videoEl.currentTime, { playback: true })
+            ? frameIdxAtVideoTime(
+                typeof resolvePlaybackMediaTime === "function"
+                  ? resolvePlaybackMediaTime(resumeMediaTime)
+                  : videoEl.currentTime,
+                { playback: true }
+              )
             : null),
       skipRedraw: true,
     });
   }
-  if (typeof redrawCurrentFrame === "function") redrawCurrentFrame();
+  if (typeof renderPausedPlaybackFrame === "function") {
+    renderPausedPlaybackFrame({ mediaTime: resumeMediaTime, frameIdx: resumeFrameIdx });
+  }
   if (typeof onPlaybackVideoPlayStateChange === "function") onPlaybackVideoPlayStateChange();
   if (videoEl.duration && Number.isFinite(videoEl.duration)) {
     seekBar.value = String((videoEl.currentTime / videoEl.duration) * 1000);
@@ -323,6 +329,11 @@ videoEl.addEventListener("seeked", () => {
   if (typeof isExplicitFrameSeekInFlight === "function" && isExplicitFrameSeekInFlight()) {
     return;
   }
+  const authorityFi =
+    typeof getPlaybackAuthorityFrameIdx === "function" ? getPlaybackAuthorityFrameIdx() : null;
+  if (authorityFi != null && authorityFi > 0) {
+    return;
+  }
   if (playbackRenderLoopActive && !videoEl.paused) return;
 
   const pinnedEventNav = playbackEventLinkExact && activeEventKey;
@@ -355,7 +366,8 @@ videoEl.addEventListener("seeked", () => {
 });
 
 window.addEventListener("resize", () => {
-  syncCanvasSize();
+  if (typeof clearPausedPlaybackLayout === "function") clearPausedPlaybackLayout();
+  syncCanvasSize({ force: true });
   redrawCurrentFrame();
 });
 
@@ -366,6 +378,7 @@ window.addEventListener("beforeunload", () => {
 seekBar.addEventListener("input", async () => {
   if (typeof clearPlaybackAuthorityFrameIdx === "function") clearPlaybackAuthorityFrameIdx();
   else if (typeof clearExplicitSeekFrameIdx === "function") clearExplicitSeekFrameIdx();
+  if (typeof clearPlaybackVideoPtsSeekClock === "function") clearPlaybackVideoPtsSeekClock();
   playbackEventLinkExact = false;
   lastRenderedFrameIdx = -1;
   tickPoseFrameIdx = -1;

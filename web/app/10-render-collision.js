@@ -1154,18 +1154,28 @@ function containerPtsOffsetSec() {
   return Number.isFinite(v) && v > 0 ? v : 0;
 }
 
+/** rVFC 连续播放 mediaTime → timeline（始终减容器 PTS） */
+function resolveRvfcMediaTime(mediaTime) {
+  if (mediaTime == null || !Number.isFinite(Number(mediaTime))) return null;
+  let t = Math.max(0, Number(mediaTime));
+  if (timelineUsesZeroBase()) {
+    const pts = containerPtsOffsetSec();
+    if (pts > 0) t = Math.max(0, t - pts);
+  }
+  return t;
+}
+
 /** 播放中用于骨架对齐的媒体时间（优先 VideoFrameCallback.mediaTime） */
 function resolvePlaybackMediaTime(mediaTime) {
   if (mediaTime != null && Number.isFinite(Number(mediaTime))) {
-    let t = Math.max(0, Number(mediaTime));
-    // mediaTime 可能含容器首帧 PTS（如 1.761s），映射回与 timeline 一致的 0 起点
-    if (timelineUsesZeroBase()) {
-      const pts = containerPtsOffsetSec();
-      if (pts > 0) t = Math.max(0, t - pts);
-    }
-    return t;
+    const fromRvfc = resolveRvfcMediaTime(mediaTime);
+    return fromRvfc != null ? fromRvfc : Math.max(0, Number(mediaTime));
   }
   return Math.max(0, Number(videoEl?.currentTime) || 0);
+}
+
+function clearPlaybackVideoPtsSeekClock() {
+  playbackVideoClockUsesPtsSeek = false;
 }
 
 /** 有配套视频时，按 duration 将 currentTime 线性映射到帧号（与浏览器墙钟对齐） */
@@ -1200,7 +1210,7 @@ function frameIdxFromVideoDuration(timeSec, opts = {}) {
   return Math.min(total, Math.max(1, idx));
 }
 
-/** 由帧号反查视频 currentTime（优先 timeline timestamp_sec） */
+/** 由帧号反查 timeline timestamp_sec（骨架查帧用） */
 function videoTimeForFrameIdx(frameIdx, opts = {}) {
   const fi = Math.max(1, parseInt(frameIdx, 10) || 0);
   if (!fi) return 0;
@@ -1228,10 +1238,44 @@ function videoTimeForFrameIdx(frameIdx, opts = {}) {
   return Math.min(dur, Math.max(0, offset + tContent));
 }
 
+/**
+ * 暂停逐帧/事件 seek 时写入 video.currentTime 的值。
+ * HTML5 currentTime 走解码时间轴；timeline 帧 N 对应 ffprobe PTS ≈ timestamp_sec + video_start_pts_sec。
+ */
+function videoSeekTimeForFrameIdx(frameIdx) {
+  const timelineT = videoTimeForFrameIdx(frameIdx);
+  if (!timelineUsesZeroBase()) return timelineT;
+  const pts = containerPtsOffsetSec();
+  if (!(pts > 0)) return timelineT;
+  const dur = playbackDurationSec();
+  const seekT = timelineT + pts;
+  if (dur > 0) return Math.min(seekT, dur);
+  return seekT;
+}
+
+/** 将 video.currentTime 映射回 timeline（逐帧 seek 后需减 PTS） */
+function timelineSecFromVideoClock() {
+  const cur = Math.max(0, Number(videoEl?.currentTime) || 0);
+  if (playbackVideoClockUsesPtsSeek && timelineUsesZeroBase()) {
+    const pts = containerPtsOffsetSec();
+    if (pts > 0) return Math.max(0, cur - pts);
+  }
+  return cur;
+}
+
 function syncCanvasSize(opts = {}) {
   const force = opts.force === true;
   if (!force && playbackRenderLoopActive && frozenPlaybackCanvasCss) {
     return frozenPlaybackCanvasCss;
+  }
+  if (!force && pausedPlaybackCanvasCss) {
+    const { cw, ch } = pausedPlaybackCanvasCss;
+    canvas._layoutCssW = cw;
+    canvas._layoutCssH = ch;
+    canvas.width = cw;
+    canvas.height = ch;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    return pausedPlaybackCanvasCss;
   }
   const wrap = stageWrap || document.querySelector(".stage-wrap");
   if (!wrap) return { cw: 1, ch: 1 };
@@ -1239,7 +1283,7 @@ function syncCanvasSize(opts = {}) {
     return { cw: canvas._layoutCssW, ch: canvas._layoutCssH };
   }
   const rect = wrap.getBoundingClientRect();
-  const dpr = playbackRenderLoopActive ? 1 : window.devicePixelRatio || 1;
+  const dpr = playbackRenderLoopActive || pausedPlaybackCanvasCss ? 1 : window.devicePixelRatio || 1;
   const cssW = Math.max(1, Math.floor(rect.width));
   const cssH = Math.max(1, Math.floor(rect.height));
   canvas._layoutCssW = cssW;
@@ -1714,16 +1758,19 @@ function resolveExplicitPlaybackFrameIdx(opts = {}) {
  */
 async function renderSkeletonSyncedToVideo(opts = {}) {
   const playback = opts.playback !== false;
+  const explicitFrameIdx =
+    opts.frameIdx != null && (parseInt(opts.frameIdx, 10) || 0) > 0
+      ? parseInt(opts.frameIdx, 10)
+      : 0;
   let fi = resolveExplicitPlaybackFrameIdx(opts);
 
   if (!fi) {
-    let mediaTime = opts.mediaTime;
-    if (mediaTime == null && opts.waitPresented !== false && videoEl?.paused) {
-      mediaTime = await waitPresentedVideoFrame(videoEl);
+    if (opts.waitPresented !== false && videoEl?.paused) {
+      await waitPresentedVideoFrame(videoEl);
     }
     const timeSec =
-      typeof resolvePlaybackMediaTime === "function"
-        ? resolvePlaybackMediaTime(mediaTime)
+      typeof timelineSecFromVideoClock === "function"
+        ? timelineSecFromVideoClock()
         : Math.max(0, Number(videoEl?.currentTime) || 0);
     fi = frameIdxAtVideoTime(timeSec, { playback });
   }
@@ -1744,11 +1791,35 @@ async function renderSkeletonSyncedToVideo(opts = {}) {
       setPlaybackAuthorityFrameIdx(fi);
     }
   }
+  resetPlaybackCollisionTracker();
+  if (videoEl?.src && videoEl.readyState >= 2) {
+    const layout = pausedPlaybackLayout || frozenPlaybackLayout;
+    const drawOpts = {
+      mode: "full",
+      skipIfSame: false,
+      layout,
+      playback: true,
+    };
+    let mediaTime = opts.mediaTime;
+    if (mediaTime == null && opts.waitPresented !== false && videoEl.paused) {
+      mediaTime = await waitPresentedVideoFrame(videoEl);
+    }
+    let timeSec = null;
+    if (mediaTime != null) {
+      timeSec = resolveRvfcMediaTime(mediaTime);
+    }
+    if (timeSec == null && explicitFrameIdx > 0) {
+      timeSec = videoTimeForFrameIdx(explicitFrameIdx);
+    }
+    if (timeSec == null) {
+      timeSec = Math.max(0, Number(videoEl?.currentTime) || 0);
+    }
+    return renderPlaybackFrameAtTime(timeSec, drawOpts);
+  }
   lastRenderedFrameIdx = -1;
   tickPoseFrameIdx = -1;
   tickVideoFrameIdx = -1;
   lastEventSyncFrameIdx = -1;
-  resetPlaybackCollisionTracker();
   await renderFrameEntry(hit);
   return fi;
 }
@@ -1841,9 +1912,12 @@ function drawSkeletonKeypoints(frame, inferW, inferH, layout) {
  */
 function drawSkeletonFrame(frame, inferW, inferH, opts = {}) {
   const mode = opts.mode === "full" ? "full" : "lite";
+  const playbackAlignedLayout = pausedPlaybackLayout || frozenPlaybackLayout;
   const layout =
     opts.layout ||
-    (mode === "lite" ? frozenPlaybackLayout || getDisplayLayout() : getDisplayLayout());
+    (mode === "lite"
+      ? frozenPlaybackLayout || getDisplayLayout()
+      : playbackAlignedLayout || getDisplayLayout());
   const { cw, ch } = syncCanvasSize();
   ctx.clearRect(0, 0, cw, ch);
 
@@ -1875,6 +1949,11 @@ function clearFrozenPlaybackLayout() {
   frozenPlaybackLayout = null;
   frozenPlaybackCanvasCss = null;
   playbackStaticLayerCanvas = null;
+}
+
+function clearPausedPlaybackLayout() {
+  pausedPlaybackLayout = null;
+  pausedPlaybackCanvasCss = null;
 }
 
 /** 暂停/seek 绘制后更新碰撞提示与特征侧栏 */
@@ -1931,6 +2010,78 @@ function resolvePlaybackFrameAtTime(timeSec, opts = {}) {
   return { frameIdx: nearest.frameIdx, frame, w, h, lagged: true };
 }
 
+/** 按 frame_idx 直接取帧（逐帧/事件跳转，避免 mediaTime 二次映射） */
+function resolvePlaybackFrameByIdx(frameIdx, opts = {}) {
+  const fi = Math.max(1, parseInt(frameIdx, 10) || 0);
+  if (!fi) return null;
+  const hit =
+    typeof frameEntryByIdx === "function"
+      ? frameEntryByIdx(fi)
+      : frameByTime?.find((e) => e.frameIdx === fi) || null;
+  if (!hit) return null;
+
+  let frame = hit.frame || frameCache.get(fi);
+  if (frame) {
+    const { w, h } = inferSizeForFrameIdx(fi);
+    return { frameIdx: fi, frame, w, h };
+  }
+  if (playbackSkeletonReady) return null;
+  if (typeof ensureFrameChunkLoaded === "function") {
+    void ensureFrameChunkLoaded(fi);
+  }
+  if (!opts.allowNearestFallback) return null;
+  const nearest = findNearestCachedFrameEntry(fi);
+  if (!nearest?.frame) return null;
+  const lag = fi - nearest.frameIdx;
+  if (lag < 0 || lag > 1) return null;
+  const { w, h } = inferSizeForFrameIdx(nearest.frameIdx);
+  return { frameIdx: nearest.frameIdx, frame: nearest.frame, w, h, lagged: true };
+}
+
+/** 同步绘制指定 frame_idx（mode: lite=播放, full=暂停/跳转） */
+function renderPlaybackFrameByIdx(frameIdx, opts = {}) {
+  const mode = opts.mode || "full";
+  const resolved = resolvePlaybackFrameByIdx(frameIdx, {
+    allowNearestFallback: mode === "lite",
+  });
+  if (!resolved) return 0;
+
+  const { frameIdx: fi, frame, w, h } = resolved;
+  if (opts.skipIfSame !== false && fi === lastRenderedFrameIdx) return fi;
+
+  lastRenderedFrameIdx = fi;
+  tickPoseFrameIdx = fi;
+  tickVideoFrameIdx = fi;
+
+  const layout = opts.layout || pausedPlaybackLayout || frozenPlaybackLayout;
+  if (mode === "full") {
+    const collisionSets = getFrameCollisionSets(frame, w, h);
+    drawSkeletonFrame(frame, w, h, { mode: "full", collisionSets, layout });
+    updatePlaybackFrameUi(frame, collisionSets);
+  } else {
+    drawSkeletonFrame(frame, w, h, { mode: "lite", layout });
+  }
+  return fi;
+}
+
+async function ensureRenderPlaybackFrameByIdx(frameIdx, opts = {}) {
+  const fi = Math.max(1, parseInt(frameIdx, 10) || 0);
+  if (!fi) return 0;
+  let resolved = resolvePlaybackFrameByIdx(fi, { allowNearestFallback: false });
+  if (!resolved?.frame && typeof ensureFrame === "function") {
+    const frame = await ensureFrame(fi);
+    if (frame) {
+      const { w, h } = inferSizeForFrameIdx(fi);
+      resolved = { frameIdx: fi, frame, w, h };
+    }
+  }
+  if (!resolved?.frame) {
+    resolved = resolvePlaybackFrameByIdx(fi, { allowNearestFallback: true });
+  }
+  if (!resolved?.frame) return 0;
+  return renderPlaybackFrameByIdx(resolved.frameIdx, opts);
+}
+
 /** 同步绘制指定时间的骨架（mode: lite=播放, full=暂停预览） */
 function renderPlaybackFrameAtTime(timeSec, opts = {}) {
   const mode = opts.mode || "lite";
@@ -1948,12 +2099,47 @@ function renderPlaybackFrameAtTime(timeSec, opts = {}) {
 
   if (mode === "full") {
     const collisionSets = getFrameCollisionSets(frame, w, h);
-    drawSkeletonFrame(frame, w, h, { mode: "full", collisionSets });
+    drawSkeletonFrame(frame, w, h, {
+      mode: "full",
+      collisionSets,
+      layout: opts.layout || pausedPlaybackLayout || frozenPlaybackLayout,
+    });
     updatePlaybackFrameUi(frame, collisionSets);
   } else {
     drawSkeletonFrame(frame, w, h, { mode: "lite" });
   }
   return frameIdx;
+}
+
+/** 暂停后与播放同源查帧 + full 重绘（复用播放期 layout） */
+function renderPausedPlaybackFrame(opts = {}) {
+  if (playbackRenderLoopActive && videoEl && !videoEl.paused) return 0;
+  const layout = opts.layout || pausedPlaybackLayout || frozenPlaybackLayout;
+  const drawOpts = {
+    mode: "full",
+    skipIfSame: false,
+    layout,
+  };
+  // 逐帧/事件跳转：frame_idx 优先，不走 mediaTime 二次映射
+  if (opts.preferFrameIdx && opts.frameIdx >= 1) {
+    return renderPlaybackFrameByIdx(opts.frameIdx, drawOpts);
+  }
+  if (opts.mediaTime != null && Number.isFinite(Number(opts.mediaTime))) {
+    const timeSec = resolveRvfcMediaTime(opts.mediaTime);
+    if (timeSec != null) {
+      return renderPlaybackFrameAtTime(timeSec, {
+        playback: true,
+        ...drawOpts,
+      });
+    }
+  }
+  if (opts.frameIdx >= 1) {
+    return renderPlaybackFrameByIdx(opts.frameIdx, drawOpts);
+  }
+  return renderPlaybackFrameAtTime(resolvePlaybackMediaTime(null), {
+    playback: true,
+    ...drawOpts,
+  });
 }
 
 /** 特征异步加载后仅重绘 track 标签，避免整帧 redraw 风暴 */
@@ -1984,6 +2170,29 @@ function redrawCurrentFrame() {
     typeof getPlaybackAuthorityFrameIdx === "function" ? getPlaybackAuthorityFrameIdx() : null;
   const heldFi = lastRenderedFrameIdx >= 1 ? lastRenderedFrameIdx : null;
   const targetFi = pinnedFi || authorityFi || heldFi;
+  if (videoEl?.src && videoEl.paused && videoEl.readyState >= 2) {
+    const layout = pausedPlaybackLayout || frozenPlaybackLayout;
+    const drawOpts = {
+      mode: "full",
+      skipIfSame: false,
+      layout,
+      playback: true,
+    };
+    if (pinnedFi || authorityFi) {
+      const hit =
+        typeof frameEntryByIdx === "function"
+          ? frameEntryByIdx(targetFi)
+          : frameByTime?.find((e) => e.frameIdx === targetFi) || null;
+      const timeSec =
+        hit && Number.isFinite(Number(hit.t))
+          ? Math.max(0, Number(hit.t))
+          : Math.max(0, Number(videoEl?.currentTime) || 0);
+      renderPlaybackFrameAtTime(timeSec, drawOpts);
+      return;
+    }
+    renderPausedPlaybackFrame({ mediaTime: lastPlaybackMediaTimeSec, frameIdx: targetFi });
+    return;
+  }
   if (targetFi && frameByTime?.length) {
     const hit =
       typeof ensureFrameIndexEntry === "function"
@@ -2050,6 +2259,14 @@ async function renderAtTimeCore(timeSec, opts = {}) {
   const authorityFi =
     typeof getPlaybackAuthorityFrameIdx === "function" ? getPlaybackAuthorityFrameIdx() : null;
   if (authorityFi != null && authorityFi > 0) {
+    if (videoEl?.src && videoEl.readyState >= 2) {
+      await ensureRenderPlaybackFrameByIdx(authorityFi, {
+        mode: "full",
+        skipIfSame: false,
+        layout: pausedPlaybackLayout || frozenPlaybackLayout,
+      });
+      return;
+    }
     const authHit =
       typeof ensureFrameIndexEntry === "function"
         ? ensureFrameIndexEntry(authorityFi)
@@ -2063,6 +2280,15 @@ async function renderAtTimeCore(timeSec, opts = {}) {
   }
   const t = Math.max(0, Number(timeSec) || 0);
   const playback = opts.playback ?? !!(videoEl?.src && Number(videoEl.duration) > 0);
+  if (videoEl?.src && videoEl.paused && videoEl.readyState >= 2) {
+    renderPlaybackFrameAtTime(t, {
+      playback,
+      mode: "full",
+      skipIfSame: false,
+      layout: pausedPlaybackLayout || frozenPlaybackLayout,
+    });
+    return;
+  }
   const fi = frameIdxAtVideoTime(t, { playback });
   if (!fi) {
     lastRenderedFrameIdx = -1;
@@ -2136,7 +2362,7 @@ function syncRenderPlaybackFrame(timeSec, opts = {}) {
 let videoFrameCallbackHandle = null;
 let playbackRenderLoopActive = false;
 
-function cancelPlaybackRenderLoop() {
+function cancelPlaybackRenderLoop(opts = {}) {
   playbackRenderLoopActive = false;
   if (videoFrameCallbackHandle != null && typeof videoEl?.cancelVideoFrameCallback === "function") {
     videoEl.cancelVideoFrameCallback(videoFrameCallbackHandle);
@@ -2146,12 +2372,21 @@ function cancelPlaybackRenderLoop() {
     cancelAnimationFrame(rafId);
     rafId = null;
   }
+  if (opts.preserveLayout && frozenPlaybackLayout) {
+    pausedPlaybackLayout = frozenPlaybackLayout;
+    pausedPlaybackCanvasCss = frozenPlaybackCanvasCss;
+  } else if (!opts.preserveLayout) {
+    clearPausedPlaybackLayout();
+  }
   clearFrozenPlaybackLayout();
 }
 
 /** 唯一入口：避免 play 事件与底部按钮重复启动多条渲染循环 */
 function ensurePlaybackRenderLoop() {
   if (!videoEl?.src || videoEl.paused || videoEl.ended) return;
+  clearPausedPlaybackLayout();
+  clearPlaybackVideoPtsSeekClock();
+  lastPlaybackMediaTimeSec = null;
   cancelPlaybackRenderLoop();
   frozenPlaybackLayout = getDisplayLayout();
   frozenPlaybackCanvasCss = syncCanvasSize({ force: true });
@@ -2168,12 +2403,21 @@ function ensurePlaybackRenderLoop() {
 function playbackRenderLoop(now, metadata) {
   if (!playbackRenderLoopActive || videoEl.paused || videoEl.ended) {
     playbackRenderLoopActive = false;
-    clearFrozenPlaybackLayout();
+    if (videoEl.ended) {
+      clearPausedPlaybackLayout();
+      clearFrozenPlaybackLayout();
+    } else if (!videoEl.paused) {
+      clearFrozenPlaybackLayout();
+    }
     return;
   }
 
   if (videoEl.readyState >= 2) {
-    const timeSec = resolvePlaybackMediaTime(metadata?.mediaTime);
+    if (metadata?.mediaTime != null && Number.isFinite(Number(metadata.mediaTime))) {
+      lastPlaybackMediaTimeSec = Number(metadata.mediaTime);
+    }
+    const rvfcTime = resolveRvfcMediaTime(metadata?.mediaTime);
+    const timeSec = rvfcTime != null ? rvfcTime : Math.max(0, Number(videoEl?.currentTime) || 0);
     const nextIdx = frameIdxAtVideoTime(timeSec, { playback: true });
     if (nextIdx > 0 && nextIdx !== tickVideoFrameIdx) {
       tickVideoFrameIdx = nextIdx;
@@ -2198,7 +2442,7 @@ function playbackRenderLoop(now, metadata) {
     }
   } else {
     playbackRenderLoopActive = false;
-    clearFrozenPlaybackLayout();
+    if (!videoEl.paused) clearFrozenPlaybackLayout();
   }
 }
 

@@ -111,18 +111,26 @@ async function realignPlaybackToPinnedEvent() {
   setPlaybackAuthorityFrameIdx(fi);
   if (videoEl.duration && Number.isFinite(videoEl.duration) && videoEl.duration > 0) {
     const seekT =
-      typeof videoTimeForFrameIdx === "function"
-        ? videoTimeForFrameIdx(fi)
-        : hit.t;
+      typeof videoSeekTimeForFrameIdx === "function"
+        ? videoSeekTimeForFrameIdx(fi)
+        : typeof videoTimeForFrameIdx === "function"
+          ? videoTimeForFrameIdx(fi)
+          : hit.t;
     explicitFrameSeekInFlight = true;
     try {
       videoEl.currentTime = Math.min(seekT, videoEl.duration);
       await waitVideoSeeked(videoEl);
+      let presentedMediaTime = null;
+      if (typeof waitPresentedVideoFrame === "function") {
+        presentedMediaTime = await waitPresentedVideoFrame(videoEl);
+      }
       if (typeof renderSkeletonSyncedToVideo === "function") {
         await renderSkeletonSyncedToVideo({
           playback: true,
           setAuthority: false,
           frameIdx: fi,
+          mediaTime: presentedMediaTime,
+          waitPresented: false,
         });
       } else {
         await renderExplicitPlaybackFrame(fi);
@@ -325,7 +333,9 @@ async function loadPlaybackEvents(recordId = null) {
 
 function getCurrentPlaybackTimeSec() {
   if (videoEl.duration && Number.isFinite(videoEl.duration) && videoEl.duration > 0) {
-    return videoEl.currentTime;
+    return typeof timelineSecFromVideoClock === "function"
+      ? timelineSecFromVideoClock()
+      : videoEl.currentTime;
   }
   if (!frameByTime.length) return 0;
   const idx = Math.floor((parseInt(seekBar.value, 10) / 1000) * frameByTime.length);
@@ -334,11 +344,17 @@ function getCurrentPlaybackTimeSec() {
 }
 
 function getCurrentPlaybackFrameIdx() {
+  const authority =
+    typeof getPlaybackAuthorityFrameIdx === "function" ? getPlaybackAuthorityFrameIdx() : null;
+  if (authority != null && authority > 0) return authority;
   const hasVideo = !!(videoEl?.src && Number(videoEl.duration) > 0);
-  const timeSec =
-    hasVideo && typeof resolvePlaybackMediaTime === "function"
-      ? resolvePlaybackMediaTime()
-      : getCurrentPlaybackTimeSec();
+  const timeSec = hasVideo
+    ? typeof timelineSecFromVideoClock === "function"
+      ? timelineSecFromVideoClock()
+      : typeof resolvePlaybackMediaTime === "function"
+        ? resolvePlaybackMediaTime()
+        : getCurrentPlaybackTimeSec()
+    : getCurrentPlaybackTimeSec();
   if (typeof frameIdxAtVideoTime === "function") {
     const fi = frameIdxAtVideoTime(timeSec, { playback: hasVideo });
     return fi > 0 ? fi : null;
@@ -509,11 +525,14 @@ function syncActiveEventFromPlaybackPosition(opts = {}) {
           : parseInt(pinned.frame_idx, 10) || 0;
       if (pinnedFi > 0) {
         const expectedT =
-          typeof videoTimeForFrameIdx === "function"
-            ? videoTimeForFrameIdx(pinnedFi)
-            : Number(pinned.timestamp_sec) || 0;
+          typeof videoSeekTimeForFrameIdx === "function"
+            ? videoSeekTimeForFrameIdx(pinnedFi)
+            : typeof videoTimeForFrameIdx === "function"
+              ? videoTimeForFrameIdx(pinnedFi)
+              : Number(pinned.timestamp_sec) || 0;
         const fps = Number(poseData?.fps) || 25;
-        if (Math.abs(timeSec - expectedT) > 0.5 / fps) {
+        const actualVideoT = Math.max(0, Number(videoEl?.currentTime) || 0);
+        if (Math.abs(actualVideoT - expectedT) > 0.5 / fps) {
           void realignPlaybackToPinnedEvent();
         }
       }
@@ -560,27 +579,48 @@ async function seekToTimestamp(timeSec, frameIdx = null, opts = {}) {
   const targetFi = frameIdx != null ? parseInt(frameIdx, 10) || 0 : 0;
   const hitByIdx = targetFi > 0 ? frameEntryByIdx(targetFi) : null;
   const t = hitByIdx
-    ? (typeof videoTimeForFrameIdx === "function"
-        ? videoTimeForFrameIdx(hitByIdx.frameIdx)
-        : hitByIdx.t)
+    ? (typeof videoSeekTimeForFrameIdx === "function"
+        ? videoSeekTimeForFrameIdx(hitByIdx.frameIdx)
+        : typeof videoTimeForFrameIdx === "function"
+          ? videoTimeForFrameIdx(hitByIdx.frameIdx)
+          : hitByIdx.t)
     : Math.max(0, Number(timeSec) || 0);
   if (hitByIdx) setPlaybackAuthorityFrameIdx(hitByIdx.frameIdx);
   if (videoEl.duration && Number.isFinite(videoEl.duration) && videoEl.duration > 0) {
     const prevTime = videoEl.currentTime;
+    if (hitByIdx && typeof videoSeekTimeForFrameIdx === "function") {
+      if (typeof clearPlaybackVideoPtsSeekClock === "function") clearPlaybackVideoPtsSeekClock();
+      if (timelineUsesZeroBase() && containerPtsOffsetSec() > 0) {
+        playbackVideoClockUsesPtsSeek = true;
+      }
+    } else if (typeof clearPlaybackVideoPtsSeekClock === "function") {
+      clearPlaybackVideoPtsSeekClock();
+    }
     videoEl.currentTime = Math.min(t, videoEl.duration);
-    seekBar.value = String((videoEl.currentTime / videoEl.duration) * 1000);
-    timeLabel.textContent = formatTime(videoEl.currentTime);
+    const displayT = hitByIdx
+      ? typeof videoTimeForFrameIdx === "function"
+        ? videoTimeForFrameIdx(hitByIdx.frameIdx)
+        : hitByIdx.t
+      : videoEl.currentTime;
+    seekBar.value = String((displayT / videoEl.duration) * 1000);
+    timeLabel.textContent = formatTime(displayT);
     if (hitByIdx) {
       explicitFrameSeekInFlight = true;
       try {
         if (videoEl.seeking || Math.abs(prevTime - videoEl.currentTime) > 1e-4) {
           await waitVideoSeeked(videoEl);
         }
+        let presentedMediaTime = null;
+        if (typeof waitPresentedVideoFrame === "function") {
+          presentedMediaTime = await waitPresentedVideoFrame(videoEl);
+        }
         if (typeof renderSkeletonSyncedToVideo === "function") {
           await renderSkeletonSyncedToVideo({
             playback: true,
             setAuthority: false,
             frameIdx: hitByIdx.frameIdx,
+            mediaTime: presentedMediaTime,
+            waitPresented: false,
           });
         } else {
           await renderExplicitPlaybackFrame(hitByIdx.frameIdx);
@@ -593,7 +633,7 @@ async function seekToTimestamp(timeSec, frameIdx = null, opts = {}) {
     }
     if (!opts.skipEventSync) {
       syncActiveEventFromPlaybackPosition({
-        timeSec: videoEl.currentTime,
+        timeSec: displayT,
         frameIdx: hitByIdx?.frameIdx ?? frameIdx,
         skipRedraw: !!hitByIdx,
       });
@@ -646,9 +686,11 @@ async function seekToEvent(ev, { keepReviewBack = false } = {}) {
   const ensurePinnedAligned = async () => {
     if (activeEventKey !== key || !playbackEventLinkExact || !targetFi) return;
     const expectedT =
-      typeof videoTimeForFrameIdx === "function"
-        ? videoTimeForFrameIdx(targetFi)
-        : Number(ev.timestamp_sec) || 0;
+      typeof videoSeekTimeForFrameIdx === "function"
+        ? videoSeekTimeForFrameIdx(targetFi)
+        : typeof videoTimeForFrameIdx === "function"
+          ? videoTimeForFrameIdx(targetFi)
+          : Number(ev.timestamp_sec) || 0;
     const fps = Number(poseData?.fps) || 25;
     if (Math.abs(videoEl.currentTime - expectedT) > 0.5 / fps) {
       await realignPlaybackToPinnedEvent();
