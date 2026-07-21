@@ -11,6 +11,7 @@ const tabs = document.querySelectorAll(".tab");
 const panels = {
   collect: $("#panel-collect"),
   annotate: $("#panel-annotate"),
+  spatial: $("#panel-spatial"),
   accuracy: $("#panel-accuracy"),
   playback: $("#panel-playback"),
 };

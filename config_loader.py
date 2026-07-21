@@ -178,6 +178,7 @@ class AppPaths:
     upload_dir: Path
     playback_temp_dir: Path
     annotation_dir: Path
+    spatial_dir: Path
     models_onnx_dir: Path
     models_detection_dir: Path
     models_pose_dir: Path
@@ -213,6 +214,14 @@ def resolve_app_paths(cfg: dict[str, Any] | None = None, *, base: Path | None = 
             base=root,
         )
     )
+    spatial_cfg = _section(cfg, "spatial")
+    spatial_dir = Path(
+        _resolve_path(
+            str(spatial_cfg.get("calibration_dir") or "localdata/spatial"),
+            base=root,
+        )
+    )
+
     from model_assets import ONNX_DETECTION_DIR, ONNX_POSE_DIR
 
     return AppPaths(
@@ -223,6 +232,7 @@ def resolve_app_paths(cfg: dict[str, Any] | None = None, *, base: Path | None = 
         upload_dir=upload_dir,
         playback_temp_dir=(upload_dir / "playback_temp").resolve(),
         annotation_dir=annotation_dir.resolve(),
+        spatial_dir=spatial_dir.resolve(),
         models_onnx_dir=models_onnx.resolve(),
         models_detection_dir=(models_onnx / ONNX_DETECTION_DIR).resolve(),
         models_pose_dir=(models_onnx / ONNX_POSE_DIR).resolve(),
@@ -253,6 +263,13 @@ def default_save_video(cfg: dict[str, Any] | None = None) -> bool:
     cfg = cfg or load_config_file()
     storage = _section(cfg, "storage")
     return _pick_bool(None, storage.get("save_video"), True)
+
+
+def spatial_enabled(cfg: dict[str, Any] | None = None) -> bool:
+    """地面投射（floor_xy）是否在采集时启用。"""
+    cfg = cfg or load_config_file()
+    spatial = _section(cfg, "spatial")
+    return _pick_bool(None, spatial.get("enabled"), True)
 
 
 def record_video_path(

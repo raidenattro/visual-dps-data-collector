@@ -1036,6 +1036,8 @@ function applyTimelineRowsToFrameIndex(rows, inferW, inferH) {
       frameIdx: fi,
       w: Number(row.infer_width) || inferW,
       h: Number(row.infer_height) || inferH,
+      floor_xy_m: Array.isArray(row.floor_xy_m) ? row.floor_xy_m : null,
+      foot_uv_px: Array.isArray(row.foot_uv_px) ? row.foot_uv_px : null,
     });
   });
   frameByTime.sort((a, b) => a.t - b.t);
@@ -1102,18 +1104,32 @@ function buildFrameIndex(recordId = null) {
   if (!poseData) return Promise.resolve();
 
   if ((poseData.schema || 1) >= 2 && recordId) {
-    const inferW = poseData.infer_width || 640;
-    const inferH = poseData.infer_height || 480;
-
-    if (buildSyntheticFrameIndexFromManifest()) {
-      if (typeof renderAccuracySeekMarkers === "function") renderAccuracySeekMarkers();
-      return Promise.resolve();
-    }
-
     return fetch(`${recordApiUrl(recordId, "/timeline")}?light=1`)
       .then((res) => (res.ok ? res.json() : { timeline: [] }))
       .then((body) => {
-        applyTimelineRowsToFrameIndex(body.timeline || [], inferW, inferH);
+        const tl = body.timeline || [];
+        let inferW = Number(poseData.infer_width) || 0;
+        let inferH = Number(poseData.infer_height) || 0;
+        if ((!inferW || !inferH) && tl.length) {
+          inferW = Number(tl[0].infer_width) || inferW;
+          inferH = Number(tl[0].infer_height) || inferH;
+        }
+        if ((!inferW || !inferH) && playbackSpatialContext) {
+          inferW = Number(playbackSpatialContext.infer_width) || inferW;
+          inferH = Number(playbackSpatialContext.infer_height) || inferH;
+        }
+        if (!inferW || !inferH) {
+          inferW = 852;
+          inferH = 480;
+        }
+        poseData.infer_width = inferW;
+        poseData.infer_height = inferH;
+
+        if (buildSyntheticFrameIndexFromManifest()) {
+          if (typeof renderAccuracySeekMarkers === "function") renderAccuracySeekMarkers();
+          return;
+        }
+        applyTimelineRowsToFrameIndex(tl, inferW, inferH);
         densifyFrameIndexFromManifest();
         if (typeof renderAccuracySeekMarkers === "function") renderAccuracySeekMarkers();
       });
@@ -1510,9 +1526,23 @@ function frameIdxAtVideoTime(timeSec) {
 }
 
 function playbackInferSize() {
+  const ctxInferW = Number(playbackSpatialContext?.infer_width) || 0;
+  const ctxInferH = Number(playbackSpatialContext?.infer_height) || 0;
+  const calInferW = Number(playbackSpatialContext?.calibration?.infer_width) || 0;
+  const calInferH = Number(playbackSpatialContext?.calibration?.infer_height) || 0;
   return {
-    w: poseData?.infer_width || frameByTime[0]?.w || 852,
-    h: poseData?.infer_height || frameByTime[0]?.h || 480,
+    w:
+      poseData?.infer_width ||
+      frameByTime[0]?.w ||
+      ctxInferW ||
+      calInferW ||
+      852,
+    h:
+      poseData?.infer_height ||
+      frameByTime[0]?.h ||
+      ctxInferH ||
+      calInferH ||
+      480,
   };
 }
 
@@ -1544,7 +1574,7 @@ function bakePlaybackStaticLayer() {
   return layer;
 }
 
-/** 播放专用：静态货框 + 碰撞黄/告警红 + 骨架连线 */
+/** 播放专用：静态货框 + 碰撞黄/告警红 + 地面网格 + 骨架连线 */
 function drawSkeletonPlaybackOnly(frame, inferW, inferH) {
   const { cw, ch } = syncCanvasSize();
   ctx.clearRect(0, 0, cw, ch);
@@ -1553,29 +1583,40 @@ function drawSkeletonPlaybackOnly(frame, inferW, inferH) {
   } else {
     drawAnnotationBoxesStatic();
   }
+  if (typeof drawSpatialGroundGridOverlay === "function") {
+    drawSpatialGroundGridOverlay(inferW, inferH);
+  }
   if (frame && annotationBoxes.length) {
     const collisionSets = collisionSetsForPlaybackFrame(frame, inferW, inferH);
     drawAnnotationBoxesCollisionOnly(frame, inferW, inferH, collisionSets);
   }
-  if (!frame?.persons?.length) return;
-
   const layout = frozenPlaybackLayout || getDisplayLayout();
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = "rgba(34, 211, 238, 0.9)";
-  ctx.beginPath();
-  frame.persons.forEach((person) => {
-    const kpts = person.keypoints || [];
-    COCO_LINES.forEach(([a, b]) => {
-      const pa = kpts[a];
-      const pb = kpts[b];
-      if (!pa || !pb || pa[2] < SCORE_MIN || pb[2] < SCORE_MIN) return;
-      const [x1, y1] = mapInferToDisplay(pa[0], pa[1], inferW, inferH, layout);
-      const [x2, y2] = mapInferToDisplay(pb[0], pb[1], inferW, inferH, layout);
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
+  if (frame?.persons?.length) {
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "rgba(34, 211, 238, 0.9)";
+    ctx.beginPath();
+    frame.persons.forEach((person) => {
+      const kpts = person.keypoints || [];
+      COCO_LINES.forEach(([a, b]) => {
+        const pa = kpts[a];
+        const pb = kpts[b];
+        if (!pa || !pb || pa[2] < SCORE_MIN || pb[2] < SCORE_MIN) return;
+        const [x1, y1] = mapInferToDisplay(pa[0], pa[1], inferW, inferH, layout);
+        const [x2, y2] = mapInferToDisplay(pb[0], pb[1], inferW, inferH, layout);
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+      });
     });
-  });
-  ctx.stroke();
+    ctx.stroke();
+  }
+
+  if (typeof drawPlaybackFootTrailOverlay === "function") {
+    const fi =
+      Number(frame?.frame_idx) ||
+      Number(typeof lastRenderedFrameIdx !== "undefined" ? lastRenderedFrameIdx : 0) ||
+      0;
+    drawPlaybackFootTrailOverlay(frame, inferW, inferH, layout, fi);
+  }
 }
 
 function clearFrozenPlaybackLayout() {
@@ -1587,39 +1628,47 @@ function clearFrozenPlaybackLayout() {
 function drawSkeleton(frame, inferW, inferH, collisionSets = null) {
   const { cw, ch } = syncCanvasSize();
   ctx.clearRect(0, 0, cw, ch);
+  if (typeof drawSpatialGroundGridOverlay === "function") {
+    drawSpatialGroundGridOverlay(inferW, inferH);
+  }
   drawAnnotationBoxes(frame, inferW, inferH, collisionSets);
   drawDetBboxes(frame, inferW, inferH);
-  if (!frame?.persons?.length) return;
-
   const layout = getDisplayLayout();
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = "rgba(34, 211, 238, 0.9)";
-  ctx.beginPath();
-  frame.persons.forEach((person) => {
-    const kpts = person.keypoints || [];
-    COCO_LINES.forEach(([a, b]) => {
-      const pa = kpts[a];
-      const pb = kpts[b];
-      if (!pa || !pb || pa[2] < SCORE_MIN || pb[2] < SCORE_MIN) return;
-      const [x1, y1] = mapInferToDisplay(pa[0], pa[1], inferW, inferH, layout);
-      const [x2, y2] = mapInferToDisplay(pb[0], pb[1], inferW, inferH, layout);
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
+  if (frame?.persons?.length) {
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "rgba(34, 211, 238, 0.9)";
+    ctx.beginPath();
+    frame.persons.forEach((person) => {
+      const kpts = person.keypoints || [];
+      COCO_LINES.forEach(([a, b]) => {
+        const pa = kpts[a];
+        const pb = kpts[b];
+        if (!pa || !pb || pa[2] < SCORE_MIN || pb[2] < SCORE_MIN) return;
+        const [x1, y1] = mapInferToDisplay(pa[0], pa[1], inferW, inferH, layout);
+        const [x2, y2] = mapInferToDisplay(pb[0], pb[1], inferW, inferH, layout);
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+      });
     });
-  });
-  ctx.stroke();
+    ctx.stroke();
 
-  frame.persons.forEach((person) => {
-    const kpts = person.keypoints || [];
-    kpts.forEach((kp, i) => {
-      if (!kp || kp[2] < SCORE_MIN) return;
-      const [x, y] = mapInferToDisplay(kp[0], kp[1], inferW, inferH, layout);
-      ctx.fillStyle = ["#22d3ee", "#a78bfa", "#f472b6"][i % 3];
-      ctx.beginPath();
-      ctx.arc(x, y, 4, 0, Math.PI * 2);
-      ctx.fill();
+    frame.persons.forEach((person) => {
+      const kpts = person.keypoints || [];
+      kpts.forEach((kp, i) => {
+        if (!kp || kp[2] < SCORE_MIN) return;
+        const [x, y] = mapInferToDisplay(kp[0], kp[1], inferW, inferH, layout);
+        ctx.fillStyle = ["#22d3ee", "#a78bfa", "#f472b6"][i % 3];
+        ctx.beginPath();
+        ctx.arc(x, y, 4, 0, Math.PI * 2);
+        ctx.fill();
+      });
     });
-  });
+  }
+
+  if (typeof drawPlaybackFootTrailOverlay === "function") {
+    const fi = Number(frame?.frame_idx) || Number(typeof lastRenderedFrameIdx !== "undefined" ? lastRenderedFrameIdx : 0) || 0;
+    drawPlaybackFootTrailOverlay(frame, inferW, inferH, layout, fi);
+  }
 }
 
 function redrawCurrentFrame() {
@@ -1696,6 +1745,9 @@ async function renderFrameEntry(hit, renderGen) {
   }
   if (typeof updatePlaybackWristFeaturesUi === "function") {
     updatePlaybackWristFeaturesUi(hit.frameIdx);
+  }
+  if (typeof updatePlaybackFloorMapUi === "function") {
+    updatePlaybackFloorMapUi(hit, frame);
   }
   if (typeof updateEventReviewFrameNavUi === "function") updateEventReviewFrameNavUi();
 }
@@ -1787,6 +1839,10 @@ function syncRenderPlaybackFrame(timeSec) {
   tickPoseFrameIdx = targetIdx;
   const { w, h } = playbackInferSize();
   drawSkeletonPlaybackOnly(frame, w, h);
+  if (typeof updatePlaybackFloorMapUi === "function") {
+    const hit = frameByTime?.find((r) => r.frameIdx === targetIdx) || { frameIdx: targetIdx };
+    updatePlaybackFloorMapUi(hit, frame);
+  }
 }
 
 let videoFrameCallbackHandle = null;

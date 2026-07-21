@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "camera_slug": "",
+  "enabled": false,
+  "physical": {
+    "aisle_width_m": 2.0,
+    "marker_spacing_m": 2.4,
+    "marker_pairs": 5
+  },
+  "calibration": {
+    "resolution": [0, 0],
+    "image_points_px": []
+  },
+  "computed": {},
+  "tuning": {
+    "homography_override": null,
+    "scale_xy": [1.0, 1.0],
+    "offset_xy_m": [0.0, 0.0],
+    "notes": ""
+  },
+  "runtime": {
+    "floor_bounds_m": {
+      "x_min": -0.7,
+      "x_max": 2.7,
+      "y_min": -1.5,
+      "y_max": 12.5
+    },
+    "foot_score_min": 0.35,
+    "smooth_alpha_normal": 0.2,
+    "smooth_alpha_jump": 0.08,
+    "smooth_jump_threshold_m": 1.4
+  },
+  "visualization": {
+    "grid_width_m": 2.0,
+    "grid_depth_m": 9.6,
+    "grid_spacing_m": 2.4
+  }
+}

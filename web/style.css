@@ -2357,6 +2357,64 @@ button.danger-btn {
   margin-top: 0.5rem;
 }
 
+/* 地面标定 */
+.spatial-hint {
+  margin-top: 0.25rem;
+}
+
+.spatial-physical-row label {
+  min-width: 7rem;
+}
+
+.spatial-enabled-row {
+  align-self: flex-end;
+  margin-bottom: 0.35rem;
+}
+
+.spatial-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.spatial-point-hint {
+  margin: 0.65rem 0 0;
+  font-weight: 500;
+}
+
+.spatial-status-bar {
+  margin-top: 0.5rem;
+}
+
+.spatial-rmse {
+  margin: 0.35rem 0 0;
+  color: #86efac;
+}
+
+.spatial-rmse-warn {
+  color: #fbbf24;
+}
+
+.spatial-stage {
+  text-align: center;
+  margin-top: 0.75rem;
+}
+
+#spatial-canvas {
+  max-width: 100%;
+  width: auto;
+  height: auto;
+  border: 2px solid #3d4f66;
+  border-radius: 8px;
+  cursor: crosshair;
+  background: #000;
+}
+
+.spatial-stage-hint {
+  margin-top: 0.45rem;
+}
+
 #annotate-stem {
   display: block;
   width: 100%;
@@ -2698,4 +2756,37 @@ button.danger-btn {
 
 .accuracy-diagnostics-empty {
   margin: 0.5rem 0;
+}
+
+.playback-floor-coords {
+  margin: 0.25rem 0 0.5rem;
+  color: #93c5fd;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.playback-floor-map-panel {
+  margin: 0.5rem 0 1rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid #2a3441;
+  border-radius: 8px;
+  background: #121820;
+}
+
+.playback-floor-map-panel.hidden {
+  display: none;
+}
+
+.playback-floor-map-title {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+  color: #e2e8f0;
+}
+
+.playback-floor-map-canvas {
+  width: 100%;
+  max-width: 360px;
+  height: 220px;
+  display: block;
+  border-radius: 6px;
+  background: #f7f7f4;
 }

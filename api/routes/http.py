@@ -93,6 +93,14 @@ from api.collect_service import (
 from api.constants import VIDEO_MIME
 from api.job_store import get_job, set_job
 from api.collision_recompute_service import recompute_records_collisions
+from api.spatial_service import (
+    calibration_for_infer,
+    get_calibration_payload,
+    list_spatial_camera_slugs,
+    preview_calibration_payload,
+    record_spatial_context,
+    save_calibration_payload,
+)
 from api.record_service import (
     annotation_frame_size,
     annotation_path_for_record,
@@ -1379,6 +1387,146 @@ def _patch_record_event_review_locked(
         payload["light"] = True
     else:
         payload["events"] = enrich_events_with_review(all_events, locator)
+    return JSONResponse(payload)
+
+
+@router.get("/api/spatial/cameras")
+def list_spatial_cameras(pose_tier: str = "rtmpose-m") -> JSONResponse:
+    """地面标定页：列出 video 目录与已有 spatial 配置的机位 slug。"""
+    paths = resolve_app_paths()
+    try:
+        tier = normalize_pose_tier(pose_tier)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return JSONResponse(
+        {
+            "pose_tier": tier,
+            "camera_slugs": list_spatial_camera_slugs(paths, pose_tier=tier),
+        }
+    )
+
+
+@router.post("/api/spatial/calibration/{camera_slug:path}/preview")
+def post_spatial_calibration_preview(
+    camera_slug: str,
+    body: dict[str, Any] = Body(...),
+) -> JSONResponse:
+    """预览地面网格与 RMSE，不写入磁盘。"""
+    paths = resolve_app_paths()
+    calib = body.get("calibration") if isinstance(body.get("calibration"), dict) else {}
+    res = calib.get("resolution") or [0, 0]
+    infer_w = int(res[0] if len(res) > 0 else 0)
+    infer_h = int(res[1] if len(res) > 1 else 0)
+    try:
+        payload = preview_calibration_payload(
+            camera_slug,
+            body,
+            paths=paths,
+            infer_width=infer_w or None,
+            infer_height=infer_h or None,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(500, str(exc)) from exc
+    return JSONResponse(payload)
+
+
+@router.get("/api/spatial/calibration/{camera_slug:path}/preview-frame")
+def get_spatial_calibration_preview_frame(
+    camera_slug: str,
+    pose_tier: str = "rtmpose-m",
+    infer_height: int = 0,
+    infer_width: int = 0,
+) -> JSONResponse:
+    paths = resolve_app_paths()
+    cfg = load_config_file()
+    default_h = int((cfg.get("inference") or {}).get("height") or 480)
+    ih = int(infer_height) if int(infer_height) > 0 else default_h
+    iw = int(infer_width) if int(infer_width) > 0 else 0
+    try:
+        video_path = first_frame_video_for_camera(
+            paths,
+            camera_slug,
+            pose_tier=normalize_pose_tier(pose_tier),
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(404, str(exc)) from exc
+    try:
+        frame = first_frame_base64(video_path, infer_width=iw, infer_height=ih)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise HTTPException(500, str(exc)) from exc
+    return JSONResponse(
+        {
+            "camera_slug": camera_slug,
+            "video": str(video_path),
+            "frame_base64": frame.get("image") or "",
+            "image": frame.get("image") or "",
+            "width": int(frame.get("width") or 0),
+            "height": int(frame.get("height") or 0),
+            "source_width": int(frame.get("source_width") or 0),
+            "source_height": int(frame.get("source_height") or 0),
+            "infer_width": int(frame.get("width") or 0),
+            "infer_height": int(frame.get("height") or 0),
+            "frame_index": int(frame.get("frame_index") or 0),
+            "frame_count": int(frame.get("frame_count") or 0),
+        }
+    )
+
+
+@router.get("/api/spatial/calibration/{camera_slug:path}")
+def get_spatial_calibration(camera_slug: str) -> JSONResponse:
+    paths = resolve_app_paths()
+    try:
+        payload = get_calibration_payload(camera_slug, paths=paths)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    calib = payload.get("calibration") if isinstance(payload.get("calibration"), dict) else {}
+    res = calib.get("resolution") or [0, 0]
+    infer_w = int(res[0] if len(res) > 0 else 0)
+    infer_h = int(res[1] if len(res) > 1 else 0)
+    cal_runtime = None
+    if infer_w > 0 and infer_h > 0 and payload.get("enabled"):
+        try:
+            cal_runtime = calibration_for_infer(
+                camera_slug,
+                infer_width=infer_w,
+                infer_height=infer_h,
+                paths=paths,
+            )
+        except ValueError:
+            cal_runtime = None
+    return JSONResponse({"camera_slug": camera_slug, "config": payload, "runtime": cal_runtime})
+
+
+@router.put("/api/spatial/calibration/{camera_slug:path}")
+def put_spatial_calibration(camera_slug: str, body: dict[str, Any] = Body(...)) -> JSONResponse:
+    paths = resolve_app_paths()
+    calib = body.get("calibration") if isinstance(body.get("calibration"), dict) else {}
+    res = calib.get("resolution") or [0, 0]
+    infer_w = int(res[0] if len(res) > 0 else 0)
+    infer_h = int(res[1] if len(res) > 1 else 0)
+    try:
+        saved = save_calibration_payload(
+            camera_slug,
+            body,
+            paths=paths,
+            infer_width=infer_w or None,
+            infer_height=infer_h or None,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(500, str(exc)) from exc
+    return JSONResponse({"ok": True, "camera_slug": camera_slug, "config": saved})
+
+
+@router.get("/api/records/{record_id:path}/spatial")
+def get_record_spatial(record_id: str) -> JSONResponse:
+    try:
+        payload = record_spatial_context(record_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
     return JSONResponse(payload)
 
 

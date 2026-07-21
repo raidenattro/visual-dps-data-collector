@@ -39,6 +39,20 @@ python scripts/collect/batch_staging_parallel.py --terminal --with-collision --m
 python scripts/data/merge_staging_batches.py --consolidate-after
 ```
 
+## spatial/ — 地面标定与 floor_xy
+
+| 脚本 | 用途 |
+|------|------|
+| `spatial/calibrate_from_video.py` | 在机位视频帧上交互点击 10 地面点，生成 `localdata/spatial/{slug}.json` |
+| `spatial/enrich_record_floor_xy.py` | 对已有 v2 记录离线补算 `floor_xy` 到 timeline.parquet |
+
+详见 [`docs/spatial-calibration.md`](../docs/spatial-calibration.md)。
+
+```bash
+python scripts/spatial/calibrate_from_video.py --camera-slug 1-1-1 --pose-tier rtmpose-m
+python scripts/spatial/enrich_record_floor_xy.py rtmpose-m/1-1-1/clip_xxx_rtmpose_m
+```
+
 ## data/ — 数据迁移与维护
 
 推荐顺序：**模型层迁移 → slug 归并 → 跨机合并**。

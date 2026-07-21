@@ -25,6 +25,7 @@ from config_loader import (
     resolve_app_paths,
     resolve_config_path,
     sanitize_file_stem,
+    spatial_enabled,
 )
 from pose_store import (
     STORAGE_V2_PARQUET,
@@ -192,6 +193,9 @@ def run_job(
             annotation_path=str(annotation_path) if annotation_path else None,
             alarm_min_consecutive_frames=alarm_min,
             alarm_cooldown_frames=alarm_cd,
+            camera_slug=camera_slug or "",
+            spatial_dir=resolve_app_paths().spatial_dir,
+            spatial_enabled_flag=spatial_enabled(),
         )
         record_id = record_id_from_pose_path(pose_path)
         has_skeleton = collect_result_has_skeleton(data)

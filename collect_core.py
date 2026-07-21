@@ -26,6 +26,14 @@ except ImportError:
     load_scaled_boxes = None  # type: ignore
     CollisionProcessor = None  # type: ignore
 
+try:
+    from spatial_pose.calibration import SpatialCalibration
+    from spatial_pose.floor_projection import FloorSmoothState, project_foot_for_frame
+except ImportError:
+    SpatialCalibration = None  # type: ignore
+    FloorSmoothState = None  # type: ignore
+    project_foot_for_frame = None  # type: ignore
+
 ProgressCallback = Callable[[int, int], None]
 
 
@@ -132,6 +140,17 @@ def _throttle_frame_rate(frame_rate: float, loop_started_at: float) -> None:
         time.sleep(sleep_sec)
 
 
+def _apply_floor_fields(frame_out: dict[str, Any], floor: Any) -> None:
+    if floor is None:
+        return
+    if floor.foot_uv_px is not None:
+        frame_out["foot_uv_px"] = floor.foot_uv_px
+    if floor.raw_floor_xy_m is not None:
+        frame_out["raw_floor_xy_m"] = floor.raw_floor_xy_m
+    if floor.floor_xy_m is not None:
+        frame_out["floor_xy_m"] = floor.floor_xy_m
+
+
 def collect_from_video(
     pipeline: RTMPosePipeline,
     video_path: Path,
@@ -144,6 +163,7 @@ def collect_from_video(
     annotation_path: str | Path | None = None,
     alarm_min_consecutive_frames: int = 3,
     alarm_cooldown_frames: int = 12,
+    spatial_calibration: Any | None = None,
 ) -> dict[str, Any]:
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
@@ -191,6 +211,16 @@ def collect_from_video(
             else:
                 print(f"⚠️ 标注 JSON 无有效货框: {ann_path}")
 
+    floor_smooth: Any | None = None
+    spatial_cal_active: Any | None = None
+    if spatial_calibration is not None and FloorSmoothState and project_foot_for_frame:
+        spatial_cal_active = spatial_calibration
+        floor_smooth = FloorSmoothState.from_calibration(spatial_cal_active)
+        print(
+            f"ℹ️ 地面投射: 机位 {spatial_cal_active.camera_slug} "
+            f"RMSE={spatial_cal_active.ground_control_rmse_px:.2f}px"
+        )
+
     try:
         while True:
             loop_started_at = time.perf_counter()
@@ -228,6 +258,13 @@ def collect_from_video(
                 frame_out["persons"] = event.get("skeletons") or persons
                 frame_out["collisions"] = event.get("collisions") or []
                 frame_out["alarm_collisions"] = event.get("alarm_collisions") or []
+            if spatial_cal_active is not None and floor_smooth is not None:
+                floor = project_foot_for_frame(
+                    spatial_cal_active,
+                    frame_out.get("persons") or persons,
+                    floor_smooth,
+                )
+                _apply_floor_fields(frame_out, floor)
             frames_out.append(frame_out)
             if on_progress:
                 on_progress(read_idx, total_frames)
@@ -261,6 +298,8 @@ def collect_from_video(
             "alarm_min_consecutive_frames": alarm_min_consecutive_frames,
             "alarm_cooldown_frames": alarm_cooldown_frames,
         }
+    if spatial_cal_active is not None:
+        result["spatial"] = spatial_cal_active.manifest_summary()
     return result
 
 
@@ -299,6 +338,9 @@ def run_collect_job(
     annotation_path: str | Path | None = None,
     alarm_min_consecutive_frames: int = 3,
     alarm_cooldown_frames: int = 12,
+    camera_slug: str = "",
+    spatial_dir: str | Path | None = None,
+    spatial_enabled_flag: bool = True,
 ) -> dict[str, Any]:
     video_path = validate_video_path(video_path)
     resize = _resolve_collect_resize(video_path, width, height)
@@ -318,6 +360,25 @@ def run_collect_job(
         backend=ort_backend,
     )
 
+    spatial_cal = None
+    slug = str(camera_slug or "").strip()
+    if spatial_enabled_flag and slug and spatial_dir and SpatialCalibration is not None:
+        from spatial_pose.calibration import load_calibration
+
+        infer_w = int(resize[0]) if resize else 0
+        infer_h = int(resize[1]) if resize else 0
+        if infer_w <= 0 or infer_h <= 0:
+            infer_w, infer_h = _read_video_source_size(video_path)
+        spatial_cal = load_calibration(
+            Path(spatial_dir),
+            slug,
+            infer_width=infer_w,
+            infer_height=infer_h,
+            require_enabled=True,
+        )
+        if spatial_cal is None:
+            print(f"⚠️ 未找到可用 spatial 标定: {slug}（跳过 floor_xy）")
+
     t0 = time.perf_counter()
     data = collect_from_video(
         pipeline,
@@ -330,9 +391,12 @@ def run_collect_job(
         annotation_path=annotation_path,
         alarm_min_consecutive_frames=alarm_min_consecutive_frames,
         alarm_cooldown_frames=alarm_cooldown_frames,
+        spatial_calibration=spatial_cal,
     )
     data["collected_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     data["elapsed_sec"] = round(time.perf_counter() - t0, 3)
     data["storage"] = STORAGE_V2_PARQUET if Path(output_path).suffix.lower() != ".json" else "v1_json"
+    if slug:
+        data["camera_slug"] = slug
     write_collect_output(data, output_path)
     return data

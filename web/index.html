@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>骨架采集与回放</title>
-  <link rel="stylesheet" href="style.css?v=65" />
+  <link rel="stylesheet" href="style.css?v=66" />
 </head>
 <body>
   <header>
@@ -15,6 +15,7 @@
   <nav class="tabs">
     <button type="button" class="tab active" data-tab="collect">采集</button>
     <button type="button" class="tab" data-tab="annotate">标注</button>
+    <button type="button" class="tab" data-tab="spatial">地面标定</button>
     <button type="button" class="tab" data-tab="accuracy">准确率</button>
     <button type="button" class="tab" data-tab="playback">回放</button>
   </nav>
@@ -247,6 +248,83 @@
         <p class="annotate-stage-hint">
           <span class="hint">画布</span>
           <button type="button" class="field-tip" data-tip="步骤：① 选择标注来源/机位/货位 → ② 生成货位并对照 → ③ 拖角点或平移货位 → ④ 选模型层后保存（母本只读）。">?</button>
+        </p>
+      </div>
+    </section>
+
+    <section id="panel-spatial" class="panel">
+      <div class="card">
+        <p class="hint spatial-hint">
+          在机位配套视频帧上按顺序点击 <strong>10</strong> 个地面控制点（远→近，每行左/右），保存至
+          <code>localdata/spatial/{slug}.json</code>。与货框标注独立，不影响碰撞检测。
+        </p>
+        <div class="row">
+          <label>
+            <span class="label-with-tip">视频 tier
+              <button type="button" class="field-tip" data-tip="从 localdata/video/{tier}/{slug}/ 取首帧作为标定背景。">?</button>
+            </span>
+            <select id="spatial-pose-tier">
+              <option value="rtmpose-t">rtmpose-t</option>
+              <option value="rtmpose-s">rtmpose-s</option>
+              <option value="rtmpose-m" selected>rtmpose-m</option>
+            </select>
+          </label>
+          <label>
+            <span class="label-with-tip">机位 slug
+              <button type="button" class="field-tip" data-tip="存储目录名，如 1-1-1 或 1-1-1-(2)。与采集 manifest 中 camera_slug 一致。">?</button>
+            </span>
+            <select id="spatial-camera-slug">
+              <option value="">— 加载中 —</option>
+            </select>
+          </label>
+          <label>
+            <span class="label-with-tip">手动 slug
+              <button type="button" class="field-tip" data-tip="下拉无目标时可手动输入 slug，按 Enter 或点「加载」。">?</button>
+            </span>
+            <input type="text" id="spatial-camera-slug-manual" placeholder="如 1-1-1-(2)" />
+          </label>
+          <label>
+            <span class="label-with-tip">推理高 (px)
+              <button type="button" class="field-tip" data-tip="标定背景帧与采集推理分辨率一致（默认 config inference.height=480）。勿用原视频 2560×1440 标点，否则与骨架坐标系不一致。">?</button>
+            </span>
+            <input type="number" id="spatial-infer-height" value="480" min="120" step="1" />
+          </label>
+        </div>
+        <div class="row spatial-physical-row">
+          <label>
+            <span>通道宽 (m)</span>
+            <input type="number" id="spatial-aisle-width" value="2.0" min="0.1" step="0.1" />
+          </label>
+          <label>
+            <span>行间距 (m)</span>
+            <input type="number" id="spatial-marker-spacing" value="2.4" min="0.1" step="0.1" />
+          </label>
+          <label>
+            <span>控制行数</span>
+            <input type="number" id="spatial-marker-pairs" value="5" min="1" max="10" step="1" />
+          </label>
+          <label class="toggle-row spatial-enabled-row">
+            <input type="checkbox" id="spatial-enabled" checked />
+            <span>启用标定（采集时写入 floor_xy）</span>
+          </label>
+        </div>
+        <div class="spatial-actions">
+          <button type="button" id="spatial-load" class="primary-btn">加载</button>
+          <button type="button" id="spatial-undo">撤销一点</button>
+          <button type="button" id="spatial-clear">清空点</button>
+          <button type="button" id="spatial-preview">预览网格</button>
+          <button type="button" id="spatial-save">保存标定</button>
+          <button type="button" id="spatial-reload">重新加载</button>
+        </div>
+        <p id="spatial-point-hint" class="hint spatial-point-hint">请先选择机位并加载视频帧</p>
+        <p id="spatial-status" class="status spatial-status-bar hidden" role="status"></p>
+        <p id="spatial-rmse" class="hint spatial-rmse hidden"></p>
+      </div>
+      <div class="spatial-stage">
+        <canvas id="spatial-canvas" class="hidden"></canvas>
+        <p class="spatial-stage-hint">
+          <span class="hint">左键依次标点 · 右键撤销 · 共 10 点</span>
+          <button type="button" class="field-tip" data-tip="顺序：远-左、远-右、远2-左、远2-右、中-左、中-右、近2-左、近2-右、近-左、近-右。点应落在可见地面网格交点附近。">?</button>
         </p>
       </div>
     </section>
@@ -515,6 +593,14 @@
                 <input type="checkbox" id="playback-show-det-bbox" />
                 <span>检测框</span>
               </label>
+              <label class="playback-det-bbox-label toggle-row" title="叠加显示地面标定网格（需 spatial 标定）">
+                <input type="checkbox" id="playback-show-floor-grid" />
+                <span>地面网格</span>
+              </label>
+              <label class="playback-det-bbox-label toggle-row" title="随视频播放绘制足部判定点与轨迹（需 floor_xy 数据）">
+                <input type="checkbox" id="playback-show-foot-trail" disabled />
+                <span>足部轨迹</span>
+              </label>
               <label class="playback-speed-label">
                 倍速
                 <select id="playback-speed" title="播放倍速">
@@ -543,6 +629,11 @@
             </div>
           </div>
           <p id="playback-info" class="hint"></p>
+          <p id="playback-floor-coords" class="playback-floor-coords hint"></p>
+          <section id="playback-floor-map-panel" class="playback-floor-map-panel hidden" aria-live="polite">
+            <h3 class="playback-floor-map-title">Ground Map</h3>
+            <canvas id="playback-floor-map" class="playback-floor-map-canvas" width="320" height="220"></canvas>
+          </section>
           <section id="playback-wrist-features" class="playback-wrist-features hidden" aria-live="polite">
             <div class="playback-wrist-features-head">
               <h3 class="playback-wrist-features-title">手腕特征 · 帧 <span id="playback-wrist-features-frame">—</span></h3>
@@ -707,13 +798,15 @@
   <script src="app/03-tabs.js?v=36"></script>
   <script src="app/04-collision-config.js?v=35"></script>
   <script src="app/05-collect.js?v=42"></script>
-  <script src="app/06-records.js?v=52"></script>
+  <script src="app/06-records.js?v=53"></script>
   <script src="app/07-playback-stage.js?v=71"></script>
   <script src="app/08-event-review.js?v=79"></script>
   <script src="app/09-playback-events.js?v=81"></script>
-  <script src="app/10-render-collision.js?v=86"></script>
+  <script src="app/10-render-collision.js?v=88"></script>
   <script src="app/11-playback-controls.js?v=81"></script>
   <script src="app/12-playback-wrist-features.js?v=3"></script>
+  <script src="app/14-playback-floor-map.js?v=3"></script>
+  <script src="spatialCalibrate.js?v=4"></script>
   <script src="annotate.js?v=17"></script>
   <script src="accuracy.js?v=13"></script>
 </body>

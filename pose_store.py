@@ -262,7 +262,7 @@ def _person_row_to_skeleton(
 
 
 def _timeline_row_from_frame(frame: dict[str, Any]) -> dict[str, Any]:
-    return {
+    row: dict[str, Any] = {
         "frame_idx": int(frame.get("frame_idx") or 0),
         "source_frame_idx": int(frame.get("source_frame_idx") or frame.get("frame_idx") or 0),
         "timestamp_sec": float(frame.get("timestamp_sec") or 0.0),
@@ -271,6 +271,26 @@ def _timeline_row_from_frame(frame: dict[str, Any]) -> dict[str, Any]:
         "collisions": list(frame.get("collisions") or []),
         "alarm_collisions": list(frame.get("alarm_collisions") or []),
     }
+    foot_uv = frame.get("foot_uv_px")
+    if isinstance(foot_uv, (list, tuple)) and len(foot_uv) >= 2:
+        row["foot_u_px"] = float(foot_uv[0])
+        row["foot_v_px"] = float(foot_uv[1])
+    else:
+        row["foot_u_px"] = None
+        row["foot_v_px"] = None
+
+    for key, cols in (
+        ("floor_xy_m", ("floor_x_m", "floor_y_m")),
+        ("raw_floor_xy_m", ("raw_floor_x_m", "raw_floor_y_m")),
+    ):
+        val = frame.get(key)
+        if isinstance(val, (list, tuple)) and len(val) >= 2:
+            row[cols[0]] = float(val[0])
+            row[cols[1]] = float(val[1])
+        else:
+            row[cols[0]] = None
+            row[cols[1]] = None
+    return row
 
 
 def _build_manifest_from_collect(data: dict[str, Any], record_id: str) -> dict[str, Any]:
@@ -378,6 +398,12 @@ def write_v2_package(record_dir: Path, data: dict[str, Any], *, record_id: str |
                     "infer_height": pa.array([], type=pa.int32()),
                     "collisions": pa.array([], type=pa.list_(pa.string())),
                     "alarm_collisions": pa.array([], type=pa.list_(pa.string())),
+                    "foot_u_px": pa.array([], type=pa.float64()),
+                    "foot_v_px": pa.array([], type=pa.float64()),
+                    "floor_x_m": pa.array([], type=pa.float64()),
+                    "floor_y_m": pa.array([], type=pa.float64()),
+                    "raw_floor_x_m": pa.array([], type=pa.float64()),
+                    "raw_floor_y_m": pa.array([], type=pa.float64()),
                 }
             ),
             record_dir / TIMELINE_FILE,
@@ -470,6 +496,12 @@ def _assemble_frames_from_tables(
             "collisions": list(tl.get("collisions") or []),
             "alarm_collisions": list(tl.get("alarm_collisions") or []),
         }
+        if tl.get("foot_u_px") is not None and tl.get("foot_v_px") is not None:
+            frame["foot_uv_px"] = [float(tl["foot_u_px"]), float(tl["foot_v_px"])]
+        if tl.get("floor_x_m") is not None and tl.get("floor_y_m") is not None:
+            frame["floor_xy_m"] = [float(tl["floor_x_m"]), float(tl["floor_y_m"])]
+        if tl.get("raw_floor_x_m") is not None and tl.get("raw_floor_y_m") is not None:
+            frame["raw_floor_xy_m"] = [float(tl["raw_floor_x_m"]), float(tl["raw_floor_y_m"])]
         frames.append(frame)
     return frames
 
@@ -578,6 +610,26 @@ def load_timeline_index(locator: RecordLocator) -> list[dict[str, Any]]:
     return table.to_pylist()
 
 
+def _floor_fields_from_row(r: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    if r.get("foot_u_px") is not None and r.get("foot_v_px") is not None:
+        out["foot_uv_px"] = [float(r["foot_u_px"]), float(r["foot_v_px"])]
+    if r.get("floor_x_m") is not None and r.get("floor_y_m") is not None:
+        out["floor_xy_m"] = [float(r["floor_x_m"]), float(r["floor_y_m"])]
+    if r.get("raw_floor_x_m") is not None and r.get("raw_floor_y_m") is not None:
+        out["raw_floor_xy_m"] = [float(r["raw_floor_x_m"]), float(r["raw_floor_y_m"])]
+    floor = r.get("floor_xy_m")
+    if isinstance(floor, (list, tuple)) and len(floor) >= 2:
+        out["floor_xy_m"] = [float(floor[0]), float(floor[1])]
+    raw = r.get("raw_floor_xy_m")
+    if isinstance(raw, (list, tuple)) and len(raw) >= 2:
+        out["raw_floor_xy_m"] = [float(raw[0]), float(raw[1])]
+    foot = r.get("foot_uv_px")
+    if isinstance(foot, (list, tuple)) and len(foot) >= 2:
+        out["foot_uv_px"] = [float(foot[0]), float(foot[1])]
+    return out
+
+
 def load_timeline(locator: RecordLocator, *, include_events: bool = False) -> list[dict[str, Any]]:
     """轻量时间轴（回放索引用；可选含 collisions / alarm_collisions）。"""
     if locator.storage == STORAGE_V1_JSON:
@@ -596,6 +648,7 @@ def load_timeline(locator: RecordLocator, *, include_events: bool = False) -> li
             if include_events:
                 row["collisions"] = list(fr.get("collisions") or [])
                 row["alarm_collisions"] = list(fr.get("alarm_collisions") or [])
+            row.update(_floor_fields_from_row(fr))
             rows.append(row)
         return rows
 
@@ -614,6 +667,7 @@ def load_timeline(locator: RecordLocator, *, include_events: bool = False) -> li
         if include_events:
             row["collisions"] = list(r.get("collisions") or [])
             row["alarm_collisions"] = list(r.get("alarm_collisions") or [])
+        row.update(_floor_fields_from_row(r))
         out.append(row)
     return out
 
@@ -1173,6 +1227,22 @@ def enrich_events_with_review(
     return out
 
 
+def infer_size_from_timeline(locator: RecordLocator) -> tuple[int, int]:
+    """从 timeline.parquet 首行读取 infer 尺寸（manifest 缺字段时回退）。"""
+    path = locator.path / TIMELINE_FILE
+    if not path.is_file():
+        return 0, 0
+    try:
+        pa, pq = _require_pyarrow()
+        table = pq.read_table(path, columns=["infer_width", "infer_height"])
+        if table.num_rows <= 0:
+            return 0, 0
+        row = table.slice(0, 1).to_pylist()[0]
+        return int(row.get("infer_width") or 0), int(row.get("infer_height") or 0)
+    except Exception:
+        return 0, 0
+
+
 def load_pose_header(locator: RecordLocator) -> dict[str, Any]:
     """加载不含 frames 的头部（Web manifest / 列表）。"""
     if locator.storage == STORAGE_V1_JSON:
@@ -1186,6 +1256,13 @@ def load_pose_header(locator: RecordLocator) -> dict[str, Any]:
     manifest = load_manifest(locator)
     header = dict(manifest)
     header.pop("frames", None)
+    infer_w = int(header.get("infer_width") or 0)
+    infer_h = int(header.get("infer_height") or 0)
+    if infer_w <= 0 or infer_h <= 0:
+        tl_w, tl_h = infer_size_from_timeline(locator)
+        if tl_w > 0 and tl_h > 0:
+            header["infer_width"] = tl_w
+            header["infer_height"] = tl_h
     return header
 
 

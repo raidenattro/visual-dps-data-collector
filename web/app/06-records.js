@@ -1257,6 +1257,24 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
     poseData = await poseRes.json();
   }
   await buildFrameIndex(recordId);
+  if (typeof loadPlaybackSpatialContext === "function") {
+    await loadPlaybackSpatialContext(recordId);
+    const iw = Number(playbackSpatialContext?.infer_width) || 0;
+    const ih = Number(playbackSpatialContext?.infer_height) || 0;
+    if (iw > 0 && ih > 0 && poseData) {
+      const prevW = Number(poseData.infer_width) || 0;
+      const prevH = Number(poseData.infer_height) || 0;
+      if (prevW !== iw || prevH !== ih) {
+        poseData.infer_width = iw;
+        poseData.infer_height = ih;
+        frameByTime.forEach((row) => {
+          row.w = iw;
+          row.h = ih;
+        });
+        invalidateDisplayLayoutCache();
+      }
+    }
+  }
   showPlaybackStageLoading(`【${displayName || recordId}】加载骨架…`);
   await prefetchAllPlaybackChunksInBackground(recordId, (pct) => {
     const msg = `【${displayName || recordId}】加载骨架 ${pct}%…`;
