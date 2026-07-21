@@ -16,7 +16,8 @@ if str(ROOT) not in sys.path:
 import importlib.util
 
 from config_loader import load_config_file, resolve_app_paths
-from pose_store import TIMELINE_FILE, locate_record
+from floor_foot_store import load_floor_foot_rows
+from pose_store import locate_record
 
 _ENRICH_MOD_PATH = ROOT / "scripts" / "spatial" / "enrich_record_floor_xy.py"
 _spec = importlib.util.spec_from_file_location("enrich_record_floor_xy", _ENRICH_MOD_PATH)
@@ -32,12 +33,7 @@ def _load_manifest(path: Path) -> dict[str, Any]:
 
 
 def _floor_by_frame_idx(record_dir: Path) -> dict[int, dict[str, Any]]:
-    import pyarrow.parquet as pq
-
-    timeline_path = record_dir / TIMELINE_FILE
-    if not timeline_path.is_file():
-        return {}
-    rows = pq.read_table(timeline_path).to_pylist()
+    rows = load_floor_foot_rows(record_dir, allow_legacy_timeline=True)
     out: dict[int, dict[str, Any]] = {}
     for row in rows:
         fid = int(row.get("frame_idx") or 0)

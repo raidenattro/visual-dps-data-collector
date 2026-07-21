@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""对已有 v2 记录从 skeleton 踝点重算 floor_xy 并更新 timeline.parquet。"""
+"""对已有 v2 记录从 skeleton 踝点重算 floor_xy，写入 floor_foot.parquet sidecar。"""
 
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -12,15 +13,20 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from config_loader import load_config_file, resolve_app_paths, spatial_enabled
+from floor_foot_store import (
+    FLOOR_FOOT_FILE,
+    floor_foot_rows_from_frames,
+    rewrite_timeline_without_floor,
+    write_floor_foot_parquet,
+)
 from pose_store import (
     TIMELINE_FILE,
-    load_manifest,
     locate_record,
     _timeline_row_from_frame,
     _assemble_frames_from_tables,
 )
 from spatial_pose.calibration import load_calibration
-from spatial_pose.floor_projection import FloorSmoothState, project_foot_for_frame
+from spatial_pose.floor_projection import FloorSmoothState, pick_primary_person, project_foot_for_frame
 
 
 def _require_pyarrow():
@@ -41,8 +47,6 @@ def enrich_record(record_dir: Path, *, spatial_dir: Path, force: bool = False) -
     if not manifest_path.is_file():
         return "skip: 无 manifest"
     with open(manifest_path, encoding="utf-8") as f:
-        import json
-
         manifest = json.load(f)
     camera_slug = str(manifest.get("camera_slug") or "").strip()
     if not camera_slug:
@@ -78,40 +82,49 @@ def enrich_record(record_dir: Path, *, spatial_dir: Path, force: bool = False) -
     pa, pq = _require_pyarrow()
     timeline_rows = pq.read_table(timeline_path).to_pylist()
     skeleton_rows = pq.read_table(skeleton_path).to_pylist()
-    frames = _assemble_frames_from_tables(timeline_rows, skeleton_rows)
+    frames = _assemble_frames_from_tables(timeline_rows, skeleton_rows, floor_by_frame={})
 
     smooth = FloorSmoothState.from_calibration(cal)
     updated = 0
     for frame in frames:
         floor = project_foot_for_frame(cal, frame.get("persons") or [], smooth)
-        if floor.floor_xy_m or floor.foot_uv_px:
-            updated += 1
+        frame.pop("foot_uv_px", None)
+        frame.pop("raw_floor_xy_m", None)
+        frame.pop("floor_xy_m", None)
+        frame.pop("foot_person_id", None)
+        frame.pop("foot_person_track_id", None)
         if floor.foot_uv_px is not None:
             frame["foot_uv_px"] = floor.foot_uv_px
-        else:
-            frame.pop("foot_uv_px", None)
         if floor.raw_floor_xy_m is not None:
             frame["raw_floor_xy_m"] = floor.raw_floor_xy_m
-        else:
-            frame.pop("raw_floor_xy_m", None)
         if floor.floor_xy_m is not None:
             frame["floor_xy_m"] = floor.floor_xy_m
-        else:
-            frame.pop("floor_xy_m", None)
+        person = pick_primary_person(frame.get("persons") or [])
+        if person is not None:
+            frame["foot_person_id"] = int(person.get("person_id") if person.get("person_id") is not None else -1)
+            if person.get("person_track_id") is not None:
+                frame["foot_person_track_id"] = int(person["person_track_id"])
+        if floor.floor_xy_m or floor.foot_uv_px:
+            updated += 1
 
-    new_timeline = [_timeline_row_from_frame(fr) for fr in frames]
-    pq.write_table(pa.Table.from_pylist(new_timeline), timeline_path, compression="zstd")
+    floor_rows = floor_foot_rows_from_frames(frames)
+    write_floor_foot_parquet(record_dir, floor_rows)
+
+    clean_timeline = [_timeline_row_from_frame(fr) for fr in frames]
+    pq.write_table(pa.Table.from_pylist(clean_timeline), timeline_path, compression="zstd")
+    rewrite_timeline_without_floor(record_dir)
 
     manifest["spatial"] = cal.manifest_summary()
+    files = manifest.get("files") if isinstance(manifest.get("files"), dict) else {}
+    files["floor_foot"] = FLOOR_FOOT_FILE
+    manifest["files"] = files
     with open(manifest_path, "w", encoding="utf-8") as f:
-        import json
-
         json.dump(manifest, f, ensure_ascii=False, indent=2)
-    return f"ok: {record_dir.name} updated_frames={updated} rmse={cal.ground_control_rmse_px:.2f}px"
+    return f"ok: {record_dir.name} floor_foot={len(floor_rows)} updated_frames={updated} rmse={cal.ground_control_rmse_px:.2f}px"
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="离线补算 floor_xy 到 timeline.parquet")
+    parser = argparse.ArgumentParser(description="离线补算 floor_xy 到 floor_foot.parquet")
     parser.add_argument("target", help="record 目录或 record_id")
     parser.add_argument("--json-dir", default="", help="覆盖 json_dir")
     args = parser.parse_args()

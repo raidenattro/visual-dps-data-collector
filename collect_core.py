@@ -28,11 +28,12 @@ except ImportError:
 
 try:
     from spatial_pose.calibration import SpatialCalibration
-    from spatial_pose.floor_projection import FloorSmoothState, project_foot_for_frame
+    from spatial_pose.floor_projection import FloorSmoothState, pick_primary_person, project_foot_for_frame
 except ImportError:
     SpatialCalibration = None  # type: ignore
     FloorSmoothState = None  # type: ignore
     project_foot_for_frame = None  # type: ignore
+    pick_primary_person = None  # type: ignore
 
 ProgressCallback = Callable[[int, int], None]
 
@@ -265,6 +266,11 @@ def collect_from_video(
                     floor_smooth,
                 )
                 _apply_floor_fields(frame_out, floor)
+                person = pick_primary_person(frame_out.get("persons") or persons) if pick_primary_person else None
+                if person is not None:
+                    frame_out["foot_person_id"] = int(
+                        person.get("person_id") if person.get("person_id") is not None else -1
+                    )
             frames_out.append(frame_out)
             if on_progress:
                 on_progress(read_idx, total_frames)

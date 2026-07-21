@@ -44,7 +44,8 @@ python scripts/data/merge_staging_batches.py --consolidate-after
 | 脚本 | 用途 |
 |------|------|
 | `spatial/calibrate_from_video.py` | 在机位视频帧上交互点击 10 地面点，生成 `localdata/spatial/{slug}.json` |
-| `spatial/enrich_record_floor_xy.py` | 对已有 v2 记录离线补算 `floor_xy` 到 timeline.parquet |
+| `spatial/enrich_record_floor_xy.py` | 对已有 v2 记录离线补算 `floor_xy` 到 `floor_foot.parquet` |
+| `spatial/enrich_manifest_floor_xy.py` | 按 export manifest 批量补算并回写 export JSON |
 
 详见 [`docs/spatial-calibration.md`](../docs/spatial-calibration.md)。
 

@@ -196,3 +196,20 @@ def record_spatial_context(record_id: str) -> dict[str, Any]:
         "spatial": spatial_meta,
         "calibration": cal_payload,
     }
+
+
+def load_record_floor_foot_payload(record_id: str) -> dict[str, Any]:
+    """读取足部轨迹 sidecar（floor_foot.parquet），供回放 Ground Map。"""
+    locator = locate_record_by_id(record_id)
+    if not locator:
+        raise FileNotFoundError("记录不存在")
+    from floor_foot_store import FLOOR_FOOT_FILE, load_floor_foot_rows, playback_payload_from_rows
+
+    rows = load_floor_foot_rows(locator.path, allow_legacy_timeline=True)
+    return {
+        "record_id": record_id,
+        "storage": FLOOR_FOOT_FILE,
+        "source": "floor_foot" if (locator.path / FLOOR_FOOT_FILE).is_file() else "legacy_timeline",
+        "count": len(rows),
+        "rows": playback_payload_from_rows(rows),
+    }

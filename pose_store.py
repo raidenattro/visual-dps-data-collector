@@ -262,7 +262,8 @@ def _person_row_to_skeleton(
 
 
 def _timeline_row_from_frame(frame: dict[str, Any]) -> dict[str, Any]:
-    row: dict[str, Any] = {
+    """timeline 仅保留碰撞/告警等核心帧级字段（floor 见 floor_foot.parquet）。"""
+    return {
         "frame_idx": int(frame.get("frame_idx") or 0),
         "source_frame_idx": int(frame.get("source_frame_idx") or frame.get("frame_idx") or 0),
         "timestamp_sec": float(frame.get("timestamp_sec") or 0.0),
@@ -271,26 +272,6 @@ def _timeline_row_from_frame(frame: dict[str, Any]) -> dict[str, Any]:
         "collisions": list(frame.get("collisions") or []),
         "alarm_collisions": list(frame.get("alarm_collisions") or []),
     }
-    foot_uv = frame.get("foot_uv_px")
-    if isinstance(foot_uv, (list, tuple)) and len(foot_uv) >= 2:
-        row["foot_u_px"] = float(foot_uv[0])
-        row["foot_v_px"] = float(foot_uv[1])
-    else:
-        row["foot_u_px"] = None
-        row["foot_v_px"] = None
-
-    for key, cols in (
-        ("floor_xy_m", ("floor_x_m", "floor_y_m")),
-        ("raw_floor_xy_m", ("raw_floor_x_m", "raw_floor_y_m")),
-    ):
-        val = frame.get(key)
-        if isinstance(val, (list, tuple)) and len(val) >= 2:
-            row[cols[0]] = float(val[0])
-            row[cols[1]] = float(val[1])
-        else:
-            row[cols[0]] = None
-            row[cols[1]] = None
-    return row
 
 
 def _build_manifest_from_collect(data: dict[str, Any], record_id: str) -> dict[str, Any]:
@@ -320,6 +301,10 @@ def _build_manifest_from_collect(data: dict[str, Any], record_id: str) -> dict[s
             },
         }
     )
+    from floor_foot_store import FLOOR_FOOT_FILE, floor_foot_rows_from_frames
+
+    if floor_foot_rows_from_frames(frames):
+        manifest["files"]["floor_foot"] = FLOOR_FOOT_FILE
     return manifest
 
 
@@ -398,12 +383,6 @@ def write_v2_package(record_dir: Path, data: dict[str, Any], *, record_id: str |
                     "infer_height": pa.array([], type=pa.int32()),
                     "collisions": pa.array([], type=pa.list_(pa.string())),
                     "alarm_collisions": pa.array([], type=pa.list_(pa.string())),
-                    "foot_u_px": pa.array([], type=pa.float64()),
-                    "foot_v_px": pa.array([], type=pa.float64()),
-                    "floor_x_m": pa.array([], type=pa.float64()),
-                    "floor_y_m": pa.array([], type=pa.float64()),
-                    "raw_floor_x_m": pa.array([], type=pa.float64()),
-                    "raw_floor_y_m": pa.array([], type=pa.float64()),
                 }
             ),
             record_dir / TIMELINE_FILE,
@@ -427,6 +406,12 @@ def write_v2_package(record_dir: Path, data: dict[str, Any], *, record_id: str |
     else:
         empty = {c: [] for c in skel_cols}
         pq.write_table(pa.table(empty), record_dir / SKELETON_FILE, compression="zstd")
+
+    from floor_foot_store import floor_foot_rows_from_frames, write_floor_foot_parquet
+
+    floor_rows = floor_foot_rows_from_frames(frames)
+    if floor_rows:
+        write_floor_foot_parquet(record_dir, floor_rows)
 
     manifest = _build_manifest_from_collect(data, rid)
     with open(record_dir / MANIFEST_FILE, "w", encoding="utf-8") as f:
@@ -477,7 +462,11 @@ def _skeleton_row_to_person(row: dict[str, Any]) -> dict[str, Any]:
 def _assemble_frames_from_tables(
     timeline_rows: list[dict[str, Any]],
     skeleton_rows: list[dict[str, Any]],
+    *,
+    floor_by_frame: dict[int, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
+    from floor_foot_store import merge_floor_row_into_frame
+
     skel_by_frame: dict[int, list[dict[str, Any]]] = {}
     for row in skeleton_rows:
         fid = int(row.get("frame_idx") or 0)
@@ -496,12 +485,8 @@ def _assemble_frames_from_tables(
             "collisions": list(tl.get("collisions") or []),
             "alarm_collisions": list(tl.get("alarm_collisions") or []),
         }
-        if tl.get("foot_u_px") is not None and tl.get("foot_v_px") is not None:
-            frame["foot_uv_px"] = [float(tl["foot_u_px"]), float(tl["foot_v_px"])]
-        if tl.get("floor_x_m") is not None and tl.get("floor_y_m") is not None:
-            frame["floor_xy_m"] = [float(tl["floor_x_m"]), float(tl["floor_y_m"])]
-        if tl.get("raw_floor_x_m") is not None and tl.get("raw_floor_y_m") is not None:
-            frame["raw_floor_xy_m"] = [float(tl["raw_floor_x_m"]), float(tl["raw_floor_y_m"])]
+        if floor_by_frame is not None:
+            merge_floor_row_into_frame(frame, floor_by_frame.get(fid))
         frames.append(frame)
     return frames
 
@@ -512,6 +497,15 @@ def _read_parquet_table(path: Path):
         return []
     table = pq.read_table(path)
     return table.to_pylist()
+
+
+def _floor_by_frame_for_locator(locator: RecordLocator) -> dict[int, dict[str, Any]]:
+    if locator.storage != STORAGE_V2_PARQUET:
+        return {}
+    from floor_foot_store import floor_foot_index, load_floor_foot_rows
+
+    rows = load_floor_foot_rows(locator.path, allow_legacy_timeline=True)
+    return floor_foot_index(rows)
 
 
 def load_frames_range(
@@ -553,7 +547,8 @@ def load_frames_range(
         )
         skeleton_rows = skeleton_table.to_pylist()
 
-    return _assemble_frames_from_tables(timeline_rows, skeleton_rows)
+    floor_by_frame = _floor_by_frame_for_locator(locator)
+    return _assemble_frames_from_tables(timeline_rows, skeleton_rows, floor_by_frame=floor_by_frame)
 
 
 def load_all_frames(locator: RecordLocator) -> list[dict[str, Any]]:
@@ -563,7 +558,8 @@ def load_all_frames(locator: RecordLocator) -> list[dict[str, Any]]:
 
     timeline_rows = _read_parquet_table(locator.path / TIMELINE_FILE)
     skeleton_rows = _read_parquet_table(locator.path / SKELETON_FILE)
-    return _assemble_frames_from_tables(timeline_rows, skeleton_rows)
+    floor_by_frame = _floor_by_frame_for_locator(locator)
+    return _assemble_frames_from_tables(timeline_rows, skeleton_rows, floor_by_frame=floor_by_frame)
 
 
 def load_pose_document(locator: RecordLocator, *, include_frames: bool = True) -> dict[str, Any]:
@@ -667,7 +663,6 @@ def load_timeline(locator: RecordLocator, *, include_events: bool = False) -> li
         if include_events:
             row["collisions"] = list(r.get("collisions") or [])
             row["alarm_collisions"] = list(r.get("alarm_collisions") or [])
-        row.update(_floor_fields_from_row(r))
         out.append(row)
     return out
 

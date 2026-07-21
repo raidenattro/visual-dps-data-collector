@@ -66,22 +66,28 @@ async function loadPlaybackSpatialContext(recordId) {
   }
 
   try {
-    const tlRes = await fetch(recordApiUrl(recordId, "/timeline"));
-    if (!tlRes.ok) return;
-    const body = await tlRes.json();
-    playbackFloorTrajectory = (body.timeline || [])
-      .filter((row) => Array.isArray(row.floor_xy_m) && row.floor_xy_m.length >= 2)
-      .map((row) => ({
-        frameIdx: Number(row.frame_idx) || 0,
-        t: Number(row.timestamp_sec) || 0,
-        xy: [Number(row.floor_xy_m[0]), Number(row.floor_xy_m[1])],
-      }));
-    playbackFootUvTrajectory = (body.timeline || [])
-      .filter((row) => Array.isArray(row.foot_uv_px) && row.foot_uv_px.length >= 2)
-      .map((row) => ({
-        frameIdx: Number(row.frame_idx) || 0,
-        uv: [Number(row.foot_uv_px[0]), Number(row.foot_uv_px[1])],
-      }));
+    const footRes = await fetch(recordApiUrl(recordId, "/floor-foot"));
+    if (footRes.ok) {
+      const body = await footRes.json();
+      const rows = body.rows || [];
+      playbackFloorTrajectory = rows
+        .filter((row) => Array.isArray(row.floor_xy_m) && row.floor_xy_m.length >= 2)
+        .map((row) => ({
+          frameIdx: Number(row.frame_idx) || 0,
+          t: Number(row.timestamp_sec) || 0,
+          xy: [Number(row.floor_xy_m[0]), Number(row.floor_xy_m[1])],
+          personId: Number(row.person_id),
+          personTrackId: Number(row.person_track_id) || 0,
+        }));
+      playbackFootUvTrajectory = rows
+        .filter((row) => Array.isArray(row.foot_uv_px) && row.foot_uv_px.length >= 2)
+        .map((row) => ({
+          frameIdx: Number(row.frame_idx) || 0,
+          uv: [Number(row.foot_uv_px[0]), Number(row.foot_uv_px[1])],
+          personId: Number(row.person_id),
+          personTrackId: Number(row.person_track_id) || 0,
+        }));
+    }
   } catch (_err) {
     playbackFloorTrajectory = [];
     playbackFootUvTrajectory = [];

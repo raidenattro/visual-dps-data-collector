@@ -99,6 +99,7 @@ from api.spatial_service import (
     list_spatial_camera_slugs,
     preview_calibration_payload,
     record_spatial_context,
+    load_record_floor_foot_payload,
     save_calibration_payload,
 )
 from api.record_service import (
@@ -1525,6 +1526,16 @@ def put_spatial_calibration(camera_slug: str, body: dict[str, Any] = Body(...)) 
 def get_record_spatial(record_id: str) -> JSONResponse:
     try:
         payload = record_spatial_context(record_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return JSONResponse(payload)
+
+
+@router.get("/api/records/{record_id:path}/floor-foot")
+def get_record_floor_foot(record_id: str) -> JSONResponse:
+    """足部 floor_xy 轨迹 sidecar（floor_foot.parquet），与 timeline 分离。"""
+    try:
+        payload = load_record_floor_foot_payload(record_id)
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc
     return JSONResponse(payload)
