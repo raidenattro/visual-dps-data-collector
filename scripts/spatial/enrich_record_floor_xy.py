@@ -27,7 +27,42 @@ from pose_store import (
     _assemble_frames_from_tables,
 )
 from spatial_pose.calibration import load_calibration
-from spatial_pose.floor_projection import FloorSmoothState, StickyFootTracker, pick_primary_person, project_foot_for_frame
+from spatial_pose.floor_projection import (
+    FloorSmoothState,
+    StickyFootTracker,
+    pick_primary_person,
+    project_foot_for_frame,
+    project_wrists_for_frame,
+)
+from spatial_pose.volume_calibration import shelf_face_enabled
+from wrist_face_store import (
+    WRIST_FACE_FILE,
+    assign_wrist_trail_segment_ids,
+    wrist_face_row_from_volume,
+    write_wrist_face_parquet,
+)
+
+
+def _volume_enabled(cal) -> bool:
+    vol = cal.config.get("volume") if isinstance(cal.config.get("volume"), dict) else {}
+    return bool(vol.get("enabled"))
+
+
+def _wrist_rows_for_frame(frame: dict[str, Any], cal, persons: list) -> list[dict]:
+    person = pick_primary_person(persons)
+    if person is None:
+        return []
+    dual = project_wrists_for_frame(cal, persons, person=person)
+    pid = int(person.get("person_id") if person.get("person_id") is not None else -1)
+    ptid = int(person.get("person_track_id") or 0)
+    rows: list[dict] = []
+    for hand, vol in (("left", dual.left), ("right", dual.right)):
+        if not shelf_face_enabled(cal.config, hand):
+            continue
+        row = wrist_face_row_from_volume(frame, hand, vol, person_id=pid, person_track_id=ptid)
+        if row and row.get("frame_idx", 0) > 0:
+            rows.append(row)
+    return rows
 
 
 def _require_pyarrow():
@@ -88,6 +123,8 @@ def enrich_record(record_dir: Path, *, spatial_dir: Path, force: bool = False) -
     smooth = FloorSmoothState.from_calibration(cal)
     sticky = StickyFootTracker.from_calibration(cal)
     updated = 0
+    wrist_raw: list[dict] = []
+    vol_on = _volume_enabled(cal)
     for frame in frames:
         fi = int(frame.get("frame_idx") or 0)
         floor = project_foot_for_frame(
@@ -117,6 +154,8 @@ def enrich_record(record_dir: Path, *, spatial_dir: Path, force: bool = False) -
                 frame["foot_person_track_id"] = int(person["person_track_id"])
         if floor.floor_xy_m or floor.foot_uv_px:
             updated += 1
+        if vol_on:
+            wrist_raw.extend(_wrist_rows_for_frame(frame, cal, frame.get("persons") or []))
 
     floor_rows = assign_trail_segment_ids(
         floor_foot_rows_from_frames(frames),
@@ -126,6 +165,17 @@ def enrich_record(record_dir: Path, *, spatial_dir: Path, force: bool = False) -
     )
     write_floor_foot_parquet(record_dir, floor_rows)
 
+    wrist_rows: list[dict] = []
+    if vol_on and wrist_raw:
+        rt = cal.runtime()
+        wrist_rows = assign_wrist_trail_segment_ids(
+            wrist_raw,
+            jump_threshold_m=float(rt.get("smooth_jump_threshold_m", 1.4)),
+            max_frame_gap=int(rt.get("sticky_max_frame_gap", 25)),
+            max_uv_jump_px=sticky.max_uv_jump_px,
+        )
+    write_wrist_face_parquet(record_dir, wrist_rows)
+
     clean_timeline = [_timeline_row_from_frame(fr) for fr in frames]
     pq.write_table(pa.Table.from_pylist(clean_timeline), timeline_path, compression="zstd")
     rewrite_timeline_without_floor(record_dir)
@@ -133,10 +183,16 @@ def enrich_record(record_dir: Path, *, spatial_dir: Path, force: bool = False) -
     manifest["spatial"] = cal.manifest_summary()
     files = manifest.get("files") if isinstance(manifest.get("files"), dict) else {}
     files["floor_foot"] = FLOOR_FOOT_FILE
+    if wrist_rows:
+        files["wrist_face"] = WRIST_FACE_FILE
     manifest["files"] = files
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
-    return f"ok: {record_dir.name} floor_foot={len(floor_rows)} updated_frames={updated} rmse={cal.ground_control_rmse_px:.2f}px"
+    wrist_note = f" wrist_face={len(wrist_rows)}" if vol_on else ""
+    return (
+        f"ok: {record_dir.name} floor_foot={len(floor_rows)} updated_frames={updated}"
+        f"{wrist_note} rmse={cal.ground_control_rmse_px:.2f}px"
+    )
 
 
 def main() -> None:

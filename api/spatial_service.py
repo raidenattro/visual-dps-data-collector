@@ -15,10 +15,36 @@ from spatial_pose.calibration import (
     compute_and_update_config,
     load_calibration,
     load_calibration_json,
+    prepare_spatial_config_for_save,
     save_calibration,
 )
 from spatial_pose.grid import grid_segments_image
 from spatial_pose.schema import empty_spatial_config, normalize_spatial_config
+from spatial_pose.volume_calibration import compute_volume_computed_fields
+
+
+def _spatial_preview_extras(config: dict[str, Any], cal=None) -> dict[str, Any]:
+    computed = config.get("computed") if isinstance(config.get("computed"), dict) else {}
+    vol = config.get("volume") if isinstance(config.get("volume"), dict) else {}
+    extras: dict[str, Any] = {
+        "volume_wireframe_segments": computed.get("volume_wireframe_segments") or [],
+        "column_lines_image": computed.get("column_lines_image") or [],
+        "layer_lines_image": computed.get("layer_lines_image") or {},
+        "volume_rmse_px": computed.get("volume_rmse_px"),
+        "face_rmse_px": computed.get("face_rmse_px") or {},
+    }
+    if vol.get("enabled") and not extras["volume_wireframe_segments"]:
+        try:
+            vol_computed = compute_volume_computed_fields(config, cal=cal)
+            if vol_computed:
+                extras["volume_wireframe_segments"] = vol_computed.get("volume_wireframe_segments") or []
+                extras["column_lines_image"] = vol_computed.get("column_lines_image") or []
+                extras["layer_lines_image"] = vol_computed.get("layer_lines_image") or {}
+                extras["volume_rmse_px"] = vol_computed.get("volume_rmse_px")
+                extras["face_rmse_px"] = vol_computed.get("face_rmse_px") or {}
+        except Exception:
+            pass
+    return extras
 
 
 def _bucket_has_videos(bucket: Path) -> bool:
@@ -65,12 +91,32 @@ def preview_calibration_payload(
     if not slug:
         raise ValueError("camera_slug 不能为空")
     norm = normalize_spatial_config(body, camera_slug=slug)
-    cal = compute_and_update_config(norm, infer_width=infer_width, infer_height=infer_height)
+    cal = None
+    grid_segments: list[dict[str, Any]] = []
+    ground_rmse = None
+    try:
+        norm, cal = prepare_spatial_config_for_save(
+            norm,
+            infer_width=infer_width,
+            infer_height=infer_height,
+        )
+        if cal is not None:
+            grid_segments = grid_segments_image(cal)
+            ground_rmse = cal.ground_control_rmse_px
+    except ValueError:
+        from spatial_pose.volume_calibration import compute_volume_computed_fields
+
+        vol_computed = compute_volume_computed_fields(norm, cal=None)
+        if vol_computed:
+            norm.setdefault("computed", {}).update(vol_computed)
+
+    extras = _spatial_preview_extras(norm, cal=cal)
     return {
         "camera_slug": slug,
-        "ground_control_rmse_px": cal.ground_control_rmse_px,
-        "grid_segments": grid_segments_image(cal),
-        "config": cal.config,
+        "ground_control_rmse_px": ground_rmse,
+        "grid_segments": grid_segments,
+        "config": norm,
+        **extras,
     }
 
 
@@ -98,11 +144,17 @@ def save_calibration_payload(
     if not slug:
         raise ValueError("camera_slug 不能为空")
     norm = normalize_spatial_config(body, camera_slug=slug)
-    cal = compute_and_update_config(norm, infer_width=infer_width, infer_height=infer_height)
+    norm, cal = prepare_spatial_config_for_save(
+        norm,
+        infer_width=infer_width,
+        infer_height=infer_height,
+    )
     out_path = calibration_path_for_slug(paths.spatial_dir, slug)
-    save_calibration(out_path, cal.config)
-    payload = dict(cal.config)
-    payload["grid_segments"] = grid_segments_image(cal)
+    save_calibration(out_path, norm)
+    payload = dict(norm)
+    payload["grid_segments"] = grid_segments_image(cal) if cal is not None else []
+    extras = _spatial_preview_extras(norm, cal=cal)
+    payload.update({k: extras[k] for k in ("volume_wireframe_segments", "column_lines_image", "layer_lines_image", "volume_rmse_px", "face_rmse_px") if k in extras})
     return payload
 
 
@@ -123,7 +175,7 @@ def calibration_for_infer(
     )
     if cal is None:
         return None
-    return {
+    payload = {
         "camera_slug": cal.camera_slug,
         "enabled": cal.enabled,
         "ground_control_rmse_px": cal.ground_control_rmse_px,
@@ -133,7 +185,19 @@ def calibration_for_infer(
         "grid_segments": grid_segments_image(cal),
         "infer_width": cal.infer_width,
         "infer_height": cal.infer_height,
+        "config": cal.config,
     }
+    vol = cal.config.get("volume") if isinstance(cal.config.get("volume"), dict) else {}
+    if vol.get("enabled"):
+        payload["volume"] = vol
+        payload["ground_columns"] = cal.config.get("ground_columns")
+        payload["shelf_faces"] = cal.config.get("shelf_faces")
+        extras = _spatial_preview_extras(cal.config, cal=cal)
+        payload["volume_wireframe_segments"] = extras.get("volume_wireframe_segments") or []
+        payload["column_lines_image"] = extras.get("column_lines_image") or []
+        payload["layer_lines_image"] = extras.get("layer_lines_image") or {}
+        payload["volume_rmse_px"] = extras.get("volume_rmse_px")
+    return payload
 
 
 def _infer_size_from_record(locator) -> tuple[int, int]:
@@ -195,6 +259,27 @@ def record_spatial_context(record_id: str) -> dict[str, Any]:
         "infer_height": infer_h,
         "spatial": spatial_meta,
         "calibration": cal_payload,
+    }
+
+
+def load_record_wrist_face_payload(record_id: str) -> dict[str, Any]:
+    """读取手腕侧面 Y×Z 轨迹 sidecar（wrist_face.parquet），供 Left/Right Map。"""
+    locator = locate_record_by_id(record_id)
+    if not locator:
+        raise FileNotFoundError("记录不存在")
+    from wrist_face_store import WRIST_FACE_FILE, load_wrist_face_rows, playback_payload_by_hand
+
+    rows = load_wrist_face_rows(locator.path)
+    by_hand = playback_payload_by_hand(rows)
+    return {
+        "record_id": record_id,
+        "storage": WRIST_FACE_FILE,
+        "source": "wrist_face" if (locator.path / WRIST_FACE_FILE).is_file() else "none",
+        "count": len(rows),
+        "left_count": len(by_hand.get("left") or []),
+        "right_count": len(by_hand.get("right") or []),
+        "left": by_hand.get("left") or [],
+        "right": by_hand.get("right") or [],
     }
 
 

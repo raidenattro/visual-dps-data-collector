@@ -302,9 +302,12 @@ def _build_manifest_from_collect(data: dict[str, Any], record_id: str) -> dict[s
         }
     )
     from floor_foot_store import FLOOR_FOOT_FILE, floor_foot_rows_from_frames
+    from wrist_face_store import WRIST_FACE_FILE, wrist_face_rows_from_frames
 
     if floor_foot_rows_from_frames(frames):
         manifest["files"]["floor_foot"] = FLOOR_FOOT_FILE
+    if wrist_face_rows_from_frames(frames):
+        manifest["files"]["wrist_face"] = WRIST_FACE_FILE
     return manifest
 
 
@@ -408,10 +411,18 @@ def write_v2_package(record_dir: Path, data: dict[str, Any], *, record_id: str |
         pq.write_table(pa.table(empty), record_dir / SKELETON_FILE, compression="zstd")
 
     from floor_foot_store import floor_foot_rows_from_frames, write_floor_foot_parquet
+    from wrist_face_store import WRIST_FACE_FILE, write_wrist_face_parquet
 
     floor_rows = floor_foot_rows_from_frames(frames)
     if floor_rows:
         write_floor_foot_parquet(record_dir, floor_rows)
+
+    from wrist_face_store import assign_wrist_trail_segment_ids, wrist_face_rows_from_frames
+
+    wrist_raw = wrist_face_rows_from_frames(frames)
+    if wrist_raw:
+        wrist_rows = assign_wrist_trail_segment_ids(wrist_raw)
+        write_wrist_face_parquet(record_dir, wrist_rows)
 
     manifest = _build_manifest_from_collect(data, rid)
     with open(record_dir / MANIFEST_FILE, "w", encoding="utf-8") as f:

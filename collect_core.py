@@ -28,13 +28,24 @@ except ImportError:
 
 try:
     from spatial_pose.calibration import SpatialCalibration
-    from spatial_pose.floor_projection import FloorSmoothState, StickyFootTracker, pick_primary_person, project_foot_for_frame
+    from spatial_pose.floor_projection import (
+        FloorSmoothState,
+        StickyFootTracker,
+        pick_primary_person,
+        project_foot_for_frame,
+        project_wrists_for_frame,
+    )
+    from spatial_pose.volume_calibration import shelf_face_enabled
+    from wrist_face_store import wrist_face_row_from_volume
 except ImportError:
     SpatialCalibration = None  # type: ignore
     FloorSmoothState = None  # type: ignore
     project_foot_for_frame = None  # type: ignore
     pick_primary_person = None  # type: ignore
     StickyFootTracker = None  # type: ignore
+    project_wrists_for_frame = None  # type: ignore
+    shelf_face_enabled = None  # type: ignore
+    wrist_face_row_from_volume = None  # type: ignore
 
 ProgressCallback = Callable[[int, int], None]
 
@@ -153,6 +164,29 @@ def _apply_floor_fields(frame_out: dict[str, Any], floor: Any) -> None:
         frame_out["floor_xy_m"] = floor.floor_xy_m
     if getattr(floor, "trail_segment_id", None) is not None:
         frame_out["foot_trail_segment_id"] = int(floor.trail_segment_id)
+
+
+def _apply_wrist_face_fields(frame_out: dict[str, Any], cal: Any, persons: list[dict[str, Any]]) -> None:
+    if project_wrists_for_frame is None or wrist_face_row_from_volume is None or shelf_face_enabled is None:
+        return
+    vol = cal.config.get("volume") if isinstance(cal.config.get("volume"), dict) else {}
+    if not vol.get("enabled"):
+        return
+    person = pick_primary_person(persons) if pick_primary_person else None
+    if person is None:
+        return
+    dual = project_wrists_for_frame(cal, persons, person=person)
+    pid = int(person.get("person_id") if person.get("person_id") is not None else -1)
+    ptid = int(person.get("person_track_id") or 0)
+    rows: list[dict[str, Any]] = []
+    for hand, vol_result in (("left", dual.left), ("right", dual.right)):
+        if not shelf_face_enabled(cal.config, hand):
+            continue
+        row = wrist_face_row_from_volume(frame_out, hand, vol_result, person_id=pid, person_track_id=ptid)
+        if row:
+            rows.append(row)
+    if rows:
+        frame_out["wrist_face_sidecar"] = rows
 
 
 def collect_from_video(
@@ -280,6 +314,7 @@ def collect_from_video(
                         frame_out["foot_person_id"] = int(
                             person.get("person_id") if person.get("person_id") is not None else -1
                         )
+                _apply_wrist_face_fields(frame_out, spatial_cal_active, frame_out.get("persons") or persons)
             frames_out.append(frame_out)
             if on_progress:
                 on_progress(read_idx, total_frames)

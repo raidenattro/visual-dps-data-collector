@@ -100,6 +100,7 @@ from api.spatial_service import (
     preview_calibration_payload,
     record_spatial_context,
     load_record_floor_foot_payload,
+    load_record_wrist_face_payload,
     save_calibration_payload,
 )
 from api.record_service import (
@@ -1526,6 +1527,16 @@ def put_spatial_calibration(camera_slug: str, body: dict[str, Any] = Body(...)) 
 def get_record_spatial(record_id: str) -> JSONResponse:
     try:
         payload = record_spatial_context(record_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return JSONResponse(payload)
+
+
+@router.get("/api/records/{record_id:path}/wrist-face")
+def get_record_wrist_face(record_id: str) -> JSONResponse:
+    """左右手腕侧面 Y×Z 轨迹 sidecar（wrist_face.parquet）。"""
+    try:
+        payload = load_record_wrist_face_payload(record_id)
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc
     return JSONResponse(payload)
