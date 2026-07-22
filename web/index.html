@@ -255,9 +255,23 @@
     <section id="panel-spatial" class="panel">
       <div class="card">
         <p class="hint spatial-hint">
-          在机位配套视频帧上按顺序点击 <strong>10</strong> 个地面控制点（远→近，每行左/右），保存至
-          <code>localdata/spatial/{slug}.json</code>。与货框标注独立，不影响碰撞检测。
+          分步标定立体作业空间：① 8 角点立体框 → ② 地面列 → ③ 左侧层线 → ④ 右侧层线（左右层数可不同，可只启用一侧货架）。
+          <strong>floor_xy</strong> 由立体底面 4 角点自动计算，无需单独标 10 地面点。
+          保存至 <code>localdata/spatial/{slug}.json</code>，与货框标注独立。
         </p>
+        <div class="row spatial-step-row">
+          <label>
+            <span class="label-with-tip">标定步骤
+              <button type="button" class="field-tip" data-tip="主流程 4 步：立体框 → 地面列 → 左侧层线 → 右侧层线。floor_xy 由底面 4 角点自动推导。">?</button>
+            </span>
+            <select id="spatial-calib-step">
+              <option value="volume" selected>① 立体框 8 角点</option>
+              <option value="columns">② 地面列区域</option>
+              <option value="left_layers">③ 左侧层线</option>
+              <option value="right_layers">④ 右侧层线</option>
+            </select>
+          </label>
+        </div>
         <div class="row">
           <label>
             <span class="label-with-tip">视频 tier
@@ -290,29 +304,94 @@
             <input type="number" id="spatial-infer-height" value="480" min="120" step="1" />
           </label>
         </div>
-        <div class="row spatial-physical-row">
+        <div class="row spatial-volume-row">
           <label>
-            <span>通道宽 (m)</span>
-            <input type="number" id="spatial-aisle-width" value="2.0" min="0.1" step="0.1" />
+            <span class="label-with-tip">立体宽 W (m)
+              <button type="button" class="field-tip" data-tip="立体作业空间底面横向宽度（X 方向，单位米）。与 8 角点底面 BL-BR 边对应，用于地面列划分。">?</button>
+            </span>
+            <input type="number" id="spatial-volume-width" value="2.0" min="0.1" step="0.1" />
           </label>
           <label>
-            <span>行间距 (m)</span>
-            <input type="number" id="spatial-marker-spacing" value="2.4" min="0.1" step="0.1" />
+            <span class="label-with-tip">立体深 D (m)
+              <button type="button" class="field-tip" data-tip="立体作业空间纵深（Y 方向，单位米）。与底面 BL-FL 边对应，用于 Left/Right Map 深度轴。">?</button>
+            </span>
+            <input type="number" id="spatial-volume-depth" value="9.6" min="0.1" step="0.1" />
           </label>
           <label>
-            <span>控制行数</span>
-            <input type="number" id="spatial-marker-pairs" value="5" min="1" max="10" step="1" />
+            <span class="label-with-tip">立体高 H (m)
+              <button type="button" class="field-tip" data-tip="立体作业空间高度（Z 方向，单位米）。与 8 角点底面到顶面距离对应，用于层线划分与侧面 Map 高度轴。">?</button>
+            </span>
+            <input type="number" id="spatial-volume-height" value="2.4" min="0.1" step="0.1" />
           </label>
-          <label class="toggle-row spatial-enabled-row">
-            <input type="checkbox" id="spatial-enabled" checked />
-            <span>启用标定（采集时写入 floor_xy）</span>
+          <label class="toggle-row">
+            <input type="checkbox" id="spatial-volume-enabled" checked />
+            <span class="label-with-tip">启用立体标定（采集 floor_xy + 回放 Map）
+              <button type="button" class="field-tip" data-tip="勾选并保存后：采集时由立体底面计算 floor_xy_m 写入 floor_foot.parquet；回放显示 Ground/Left/Right Map。需完成 8 角点。">?</button>
+            </span>
           </label>
         </div>
+        <div class="row spatial-column-layer-row">
+          <p class="hint spatial-column-layer-hint">
+            <span class="label-with-tip">地面列
+              <button type="button" class="field-tip" data-tip="列界：第 1 点在左纵深边 BL–FL，第 2 点在右纵深边 BR–FR。保存时反算纵深 boundaries_y_m（沿通道方向分列）。">?</button>
+            </span>
+            <strong id="spatial-column-count-display">0 条分割线 → 1 列</strong>
+          </p>
+          <label class="toggle-row">
+            <input type="checkbox" id="spatial-left-face-enabled" checked />
+            <span class="label-with-tip">启用左侧货架
+              <button type="button" class="field-tip" data-tip="机位只看到左侧货架时保持勾选；仅右侧可见时取消。禁用后不绘制左侧层线与 Left Map。">?</button>
+            </span>
+          </label>
+          <p class="hint spatial-column-layer-hint">
+            <span class="label-with-tip">左侧层
+              <button type="button" class="field-tip" data-tip="在左侧面线框棱边上左键两点画水平层线（自动吸附）。层线数 +1 即层数。">?</button>
+            </span>
+            <strong id="spatial-left-layer-count-display">0 条层线 → 1 层</strong>
+          </p>
+          <label class="toggle-row">
+            <input type="checkbox" id="spatial-right-face-enabled" checked />
+            <span class="label-with-tip">启用右侧货架
+              <button type="button" class="field-tip" data-tip="机位只看到右侧货架时保持勾选；仅左侧可见时取消。禁用后不绘制右侧层线与 Right Map。">?</button>
+            </span>
+          </label>
+          <p class="hint spatial-column-layer-hint">
+            <span class="label-with-tip">右侧层
+              <button type="button" class="field-tip" data-tip="在右侧面线框棱边上左键两点画水平层线（自动吸附）。可与左侧层数不同。">?</button>
+            </span>
+            <strong id="spatial-right-layer-count-display">0 条层线 → 1 层</strong>
+          </p>
+        </div>
+        <details class="spatial-volume-guide" open>
+          <summary class="hint spatial-volume-guide-summary">
+            8 角点含义与标点顺序
+            <button type="button" class="field-tip" data-tip="L/R=通道左右（宽 W）；近/远=纵深方向（深 D，近=靠近相机）；B/T=底/顶（高 H）。按序号依次左键标点。">?</button>
+          </summary>
+          <div class="spatial-volume-guide-body">
+            <p class="hint spatial-volume-guide-intro">
+              英文缩写：<strong>BL</strong>=Bottom Left（底·左），<strong>BR</strong>=Bottom Right，<strong>FR</strong>=Far Right（远·右），<strong>FL</strong>=Far Left；
+              顶面同理，<strong>TL/TR</strong> 为近端顶角，<strong>FR_top/FL_top</strong> 为远端顶角。
+            </p>
+            <ol class="spatial-volume-order-list hint">
+              <li><strong>BL</strong> 近左下 — 底面左前角（通道左侧、靠近相机）</li>
+              <li><strong>BR</strong> 近右下 — 底面右前角</li>
+              <li><strong>FR</strong> 远右下 — 底面右后角（沿通道向深处）</li>
+              <li><strong>FL</strong> 远左下 — 底面左后角</li>
+              <li><strong>TL</strong> 近左上 — 顶面左前角（高度 H）</li>
+              <li><strong>TR</strong> 近右上 — 顶面右前角</li>
+              <li><strong>FR_top</strong> 远右上 — 顶面右后角</li>
+              <li><strong>FL_top</strong> 远左上 — 顶面左后角</li>
+            </ol>
+            <p class="hint spatial-volume-guide-note">
+              底面 4 点先标完（近左→近右→远右→远左），再标顶面 4 点（同样顺序）。标完后设置 W/D/H 并点「预览」查看线框。
+            </p>
+          </div>
+        </details>
         <div class="spatial-actions">
           <button type="button" id="spatial-load" class="primary-btn">加载</button>
           <button type="button" id="spatial-undo">撤销一点</button>
           <button type="button" id="spatial-clear">清空点</button>
-          <button type="button" id="spatial-preview">预览网格</button>
+          <button type="button" id="spatial-preview">预览全部</button>
           <button type="button" id="spatial-save">保存标定</button>
           <button type="button" id="spatial-reload">重新加载</button>
         </div>
@@ -323,8 +402,8 @@
       <div class="spatial-stage">
         <canvas id="spatial-canvas" class="hidden"></canvas>
         <p class="spatial-stage-hint">
-          <span class="hint">左键依次标点 · 右键撤销 · 共 10 点</span>
-          <button type="button" class="field-tip" data-tip="顺序：远-左、远-右、远2-左、远2-右、中-左、中-右、近2-左、近2-右、近-左、近-右。点应落在可见地面网格交点附近。">?</button>
+          <span class="hint">左键按顺序标点 · 右键撤销 · 当前步骤提示见上方</span>
+          <button type="button" class="field-tip" data-tip="① 8 角点：BL→BR→FR→FL→TL→TR→FR_top→FL_top。② 地面列/层线：在对应线框棱边上左键两点（自动吸附）。">?</button>
         </p>
       </div>
     </section>
@@ -601,6 +680,10 @@
                 <input type="checkbox" id="playback-show-foot-trail" disabled />
                 <span>足部轨迹</span>
               </label>
+              <label class="playback-det-bbox-label toggle-row" title="叠加显示立体作业空间线框与层线（需 volume 标定）">
+                <input type="checkbox" id="playback-show-volume-wireframe" />
+                <span>立体空间</span>
+              </label>
               <label class="playback-speed-label">
                 倍速
                 <select id="playback-speed" title="播放倍速">
@@ -630,10 +713,20 @@
           </div>
           <p id="playback-info" class="hint"></p>
           <p id="playback-floor-coords" class="playback-floor-coords hint"></p>
-          <section id="playback-floor-map-panel" class="playback-floor-map-panel hidden" aria-live="polite">
-            <h3 class="playback-floor-map-title">Ground Map</h3>
-            <canvas id="playback-floor-map" class="playback-floor-map-canvas" width="320" height="220"></canvas>
-          </section>
+          <div id="playback-spatial-maps-row" class="playback-spatial-maps-row">
+            <section id="playback-floor-map-panel" class="playback-floor-map-panel hidden" aria-live="polite">
+              <h3 class="playback-floor-map-title">Ground Map</h3>
+              <canvas id="playback-floor-map" class="playback-floor-map-canvas" width="320" height="220"></canvas>
+            </section>
+            <section id="playback-left-map-panel" class="playback-floor-map-panel hidden" aria-live="polite">
+              <h3 class="playback-floor-map-title">Left Map · 左手腕</h3>
+              <canvas id="playback-left-map" class="playback-floor-map-canvas" width="320" height="220"></canvas>
+            </section>
+            <section id="playback-right-map-panel" class="playback-floor-map-panel hidden" aria-live="polite">
+              <h3 class="playback-floor-map-title">Right Map · 右手腕</h3>
+              <canvas id="playback-right-map" class="playback-floor-map-canvas" width="320" height="220"></canvas>
+            </section>
+          </div>
           <section id="playback-wrist-features" class="playback-wrist-features hidden" aria-live="polite">
             <div class="playback-wrist-features-head">
               <h3 class="playback-wrist-features-title">手腕特征 · 帧 <span id="playback-wrist-features-frame">—</span></h3>
@@ -802,11 +895,11 @@
   <script src="app/07-playback-stage.js?v=71"></script>
   <script src="app/08-event-review.js?v=79"></script>
   <script src="app/09-playback-events.js?v=81"></script>
-  <script src="app/10-render-collision.js?v=88"></script>
+  <script src="app/10-render-collision.js?v=89"></script>
   <script src="app/11-playback-controls.js?v=81"></script>
   <script src="app/12-playback-wrist-features.js?v=3"></script>
-  <script src="app/14-playback-floor-map.js?v=7"></script>
-  <script src="spatialCalibrate.js?v=4"></script>
+  <script src="app/14-playback-floor-map.js?v=15"></script>
+  <script src="spatialCalibrate.js?v=18"></script>
   <script src="annotate.js?v=17"></script>
   <script src="accuracy.js?v=13"></script>
 </body>

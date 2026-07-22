@@ -1586,6 +1586,9 @@ function drawSkeletonPlaybackOnly(frame, inferW, inferH) {
   if (typeof drawSpatialGroundGridOverlay === "function") {
     drawSpatialGroundGridOverlay(inferW, inferH);
   }
+  if (typeof drawVolumeWireframeOverlay === "function") {
+    drawVolumeWireframeOverlay(inferW, inferH);
+  }
   if (frame && annotationBoxes.length) {
     const collisionSets = collisionSetsForPlaybackFrame(frame, inferW, inferH);
     drawAnnotationBoxesCollisionOnly(frame, inferW, inferH, collisionSets);
@@ -1610,12 +1613,15 @@ function drawSkeletonPlaybackOnly(frame, inferW, inferH) {
     ctx.stroke();
   }
 
+  const playbackOverlayFi =
+    Number(frame?.frame_idx) ||
+    Number(typeof lastRenderedFrameIdx !== "undefined" ? lastRenderedFrameIdx : 0) ||
+    0;
   if (typeof drawPlaybackFootTrailOverlay === "function") {
-    const fi =
-      Number(frame?.frame_idx) ||
-      Number(typeof lastRenderedFrameIdx !== "undefined" ? lastRenderedFrameIdx : 0) ||
-      0;
-    drawPlaybackFootTrailOverlay(frame, inferW, inferH, layout, fi);
+    drawPlaybackFootTrailOverlay(frame, inferW, inferH, layout, playbackOverlayFi);
+  }
+  if (typeof drawPlaybackWristVolumeOverlay === "function") {
+    drawPlaybackWristVolumeOverlay(frame, inferW, inferH, layout, playbackOverlayFi);
   }
 }
 
@@ -1630,6 +1636,9 @@ function drawSkeleton(frame, inferW, inferH, collisionSets = null) {
   ctx.clearRect(0, 0, cw, ch);
   if (typeof drawSpatialGroundGridOverlay === "function") {
     drawSpatialGroundGridOverlay(inferW, inferH);
+  }
+  if (typeof drawVolumeWireframeOverlay === "function") {
+    drawVolumeWireframeOverlay(inferW, inferH);
   }
   drawAnnotationBoxes(frame, inferW, inferH, collisionSets);
   drawDetBboxes(frame, inferW, inferH);
@@ -1665,9 +1674,15 @@ function drawSkeleton(frame, inferW, inferH, collisionSets = null) {
     });
   }
 
+  const playbackOverlayFi =
+    Number(frame?.frame_idx) ||
+    Number(typeof lastRenderedFrameIdx !== "undefined" ? lastRenderedFrameIdx : 0) ||
+    0;
   if (typeof drawPlaybackFootTrailOverlay === "function") {
-    const fi = Number(frame?.frame_idx) || Number(typeof lastRenderedFrameIdx !== "undefined" ? lastRenderedFrameIdx : 0) || 0;
-    drawPlaybackFootTrailOverlay(frame, inferW, inferH, layout, fi);
+    drawPlaybackFootTrailOverlay(frame, inferW, inferH, layout, playbackOverlayFi);
+  }
+  if (typeof drawPlaybackWristVolumeOverlay === "function") {
+    drawPlaybackWristVolumeOverlay(frame, inferW, inferH, layout, playbackOverlayFi);
   }
 }
 

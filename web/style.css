@@ -2371,6 +2371,69 @@ button.danger-btn {
   margin-bottom: 0.35rem;
 }
 
+.spatial-volume-guide {
+  margin: 0.65rem 0 0;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid #2a3441;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.spatial-volume-guide-summary {
+  cursor: pointer;
+  font-weight: 500;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.spatial-volume-guide-summary::-webkit-details-marker {
+  display: none;
+}
+
+.spatial-volume-guide-body {
+  margin-top: 0.55rem;
+}
+
+.spatial-volume-guide-intro {
+  margin: 0 0 0.45rem;
+  line-height: 1.5;
+}
+
+.spatial-volume-order-list {
+  margin: 0 0 0.45rem 1.1rem;
+  padding: 0;
+  line-height: 1.55;
+}
+
+.spatial-volume-order-list li {
+  margin-bottom: 0.2rem;
+}
+
+.spatial-volume-guide-note {
+  margin: 0;
+  color: #93c5fd;
+}
+
+.spatial-column-layer-row {
+  align-items: center;
+  gap: 0.75rem 1.25rem;
+}
+
+.spatial-column-layer-hint {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.spatial-column-layer-hint strong {
+  color: #93c5fd;
+  font-weight: 600;
+}
+
 .spatial-actions {
   display: flex;
   flex-wrap: wrap;
@@ -2774,6 +2837,19 @@ button.danger-btn {
 
 .playback-floor-map-panel.hidden {
   display: none;
+}
+
+.playback-spatial-maps-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin: 0.5rem 0 1rem;
+}
+
+.playback-spatial-maps-row .playback-floor-map-panel {
+  flex: 1 1 220px;
+  max-width: 360px;
+  margin: 0;
 }
 
 .playback-floor-map-title {
