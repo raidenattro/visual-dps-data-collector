@@ -1,17 +1,27 @@
-"""脚踝 2D → floor_xy_m 投射与平滑。"""
+"""脚踝/手腕 2D → floor_xy 与立体作业空间投射。"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Literal
 
 import numpy as np
 
 from spatial_pose.calibration import SpatialCalibration, transform_points
+from spatial_pose.column_grid import floor_xy_to_column, floor_y_to_column, ground_columns_block
+from spatial_pose.volume_calibration import (
+    image_point_to_face_yz,
+    shelf_face_enabled,
+    volume_runtime,
+    yz_to_layer_index,
+)
 
-# COCO17: left_ankle=15, right_ankle=16
+# COCO17: left_ankle=15, right_ankle=16, left_wrist=9, right_wrist=10
 ANKLE_LEFT = 15
 ANKLE_RIGHT = 16
+WRIST_LEFT = 9
+WRIST_RIGHT = 10
+FaceSide = Literal["left", "right"]
 
 
 def _pt(keypoints: list, idx: int) -> tuple[float, float, float] | None:
@@ -66,6 +76,39 @@ def foot_uv_from_person(
         return None
     arr = np.mean(np.array(feet, dtype=np.float64), axis=0)
     return float(arr[0]), float(arr[1])
+
+
+def wrist_uv_from_person(
+    person: dict[str, Any],
+    *,
+    score_min: float = 0.35,
+) -> tuple[float, float] | None:
+    """左右腕中点（兼容旧逻辑）。"""
+    kpts = person.get("keypoints") or []
+    wrists: list[tuple[float, float]] = []
+    for idx in (WRIST_LEFT, WRIST_RIGHT):
+        pt = _pt(kpts, idx)
+        if pt and pt[2] >= score_min:
+            wrists.append((pt[0], pt[1]))
+    if not wrists:
+        return None
+    arr = np.mean(np.array(wrists, dtype=np.float64), axis=0)
+    return float(arr[0]), float(arr[1])
+
+
+def single_wrist_uv_from_person(
+    person: dict[str, Any],
+    which: Literal["left", "right"],
+    *,
+    score_min: float = 0.35,
+) -> tuple[float, float] | None:
+    """单手腕 uv：left→左腕，right→右腕。"""
+    kpts = person.get("keypoints") or []
+    idx = WRIST_LEFT if which == "left" else WRIST_RIGHT
+    pt = _pt(kpts, idx)
+    if pt and pt[2] >= score_min:
+        return pt[0], pt[1]
+    return None
 
 
 def project_uv_to_floor(
@@ -240,3 +283,161 @@ def project_foot_for_frame(
     else:
         result.floor_xy_m = [raw_xy[0], raw_xy[1]]
     return result
+
+
+@dataclass
+class VolumeProjectionResult:
+    wrist_uv_px: list[float] | None = None
+    floor_xy_m: list[float] | None = None
+    column: int | None = None
+    side: FaceSide | None = None
+    layer: int | None = None
+    face_y_m: float | None = None
+    face_z_m: float | None = None
+
+
+def project_wrist_volume(
+    cal: SpatialCalibration,
+    wrist_uv: tuple[float, float],
+    floor_xy: tuple[float, float] | None = None,
+    *,
+    face_side: FaceSide | None = None,
+) -> VolumeProjectionResult:
+    """手腕 uv → 列（地面 x）+ 层（侧面 z）；face_side 指定左/右侧面。"""
+    result = VolumeProjectionResult(wrist_uv_px=[wrist_uv[0], wrist_uv[1]])
+    if floor_xy is not None:
+        result.floor_xy_m = [floor_xy[0], floor_xy[1]]
+    else:
+        xy = project_uv_to_floor(cal, wrist_uv)
+        if xy is not None:
+            result.floor_xy_m = [xy[0], xy[1]]
+            floor_xy = xy
+
+    gc = ground_columns_block(cal.config)
+    if floor_xy is not None:
+        if gc.get("column_axis") == "y":
+            col = floor_y_to_column(floor_xy[1], gc["boundaries_y_m"])
+        else:
+            col = floor_xy_to_column(floor_xy[0], gc["boundaries_x_m"])
+        if col is not None:
+            result.column = col
+
+    runtime = volume_runtime(cal.config)
+    if not runtime:
+        return result
+
+    side = face_side
+    if side is None:
+        return result
+    if not shelf_face_enabled(cal.config, side):
+        return result
+
+    face = runtime["faces"].get(side) or {}
+    if not face.get("enabled", True):
+        return result
+    h_i2yz = face.get("h_image_to_yz")
+    if h_i2yz is None:
+        return result
+    result.side = side
+    p = runtime["physical"]
+    yz = image_point_to_face_yz(
+        wrist_uv,
+        np.array(h_i2yz, dtype=np.float64),
+        depth_m=p["depth_m"],
+        height_m=p["height_m"],
+    )
+    if yz is None:
+        return result
+    if not is_within_face_yz(yz, depth_m=p["depth_m"], height_m=p["height_m"]):
+        return result
+    result.face_y_m = yz[0]
+    result.face_z_m = yz[1]
+    layer = yz_to_layer_index(yz[1], face.get("layer_z_m") or [])
+    if layer is not None:
+        result.layer = layer
+    return result
+
+
+def project_single_wrist_volume(
+    cal: SpatialCalibration,
+    person: dict[str, Any],
+    which: Literal["left", "right"],
+    *,
+    floor_xy: tuple[float, float] | None = None,
+) -> VolumeProjectionResult:
+    """左/右手腕分别投射到对应侧面（左腕→左面，右腕→右面）。"""
+    score_min = float(cal.runtime().get("wrist_score_min", 0.35))
+    wrist_uv = single_wrist_uv_from_person(person, which, score_min=score_min)
+    if wrist_uv is None:
+        return VolumeProjectionResult()
+    if floor_xy is None:
+        foot_uv = foot_uv_from_person(person, score_min=score_min)
+        floor_xy = project_uv_to_floor(cal, foot_uv) if foot_uv else None
+        if floor_xy is None:
+            floor_xy = project_uv_to_floor(cal, wrist_uv)
+    return project_wrist_volume(cal, wrist_uv, floor_xy=floor_xy, face_side=which)
+
+
+@dataclass
+class DualWristVolumeResult:
+    left: VolumeProjectionResult | None = None
+    right: VolumeProjectionResult | None = None
+
+
+def project_wrists_for_frame(
+    cal: SpatialCalibration,
+    persons: list[dict[str, Any]],
+    *,
+    person: dict[str, Any] | None = None,
+) -> DualWristVolumeResult:
+    """左右手腕分别投射（不取中点）。"""
+    chosen = person or pick_primary_person(persons)
+    if chosen is None:
+        return DualWristVolumeResult()
+    score_min = float(cal.runtime().get("wrist_score_min", 0.35))
+    foot_uv = foot_uv_from_person(chosen, score_min=score_min)
+    floor_xy = project_uv_to_floor(cal, foot_uv) if foot_uv else None
+    left = project_single_wrist_volume(cal, chosen, "left", floor_xy=floor_xy)
+    right = project_single_wrist_volume(cal, chosen, "right", floor_xy=floor_xy)
+    return DualWristVolumeResult(
+        left=left if left.wrist_uv_px else None,
+        right=right if right.wrist_uv_px else None,
+    )
+
+
+def project_wrist_for_frame(
+    cal: SpatialCalibration,
+    persons: list[dict[str, Any]],
+    *,
+    person: dict[str, Any] | None = None,
+) -> VolumeProjectionResult:
+    """兼容：返回可见侧优先的单手腕结果（左腕优先）。"""
+    dual = project_wrists_for_frame(cal, persons, person=person)
+    if dual.left and dual.left.wrist_uv_px:
+        return dual.left
+    if dual.right and dual.right.wrist_uv_px:
+        return dual.right
+    return VolumeProjectionResult()
+
+
+def is_within_face_yz(
+    yz: tuple[float, float],
+    *,
+    depth_m: float,
+    height_m: float,
+) -> bool:
+    """侧面 Y×Z 是否在有效作业面范围内。"""
+    y, z = float(yz[0]), float(yz[1])
+    depth = max(0.01, float(depth_m))
+    height = max(0.01, float(height_m))
+    return 0.0 <= y <= depth + 1e-6 and 0.0 <= z <= height + 1e-6
+
+
+def project_foot_column(
+    cal: SpatialCalibration,
+    floor_xy: tuple[float, float],
+) -> int | None:
+    gc = ground_columns_block(cal.config)
+    if gc.get("column_axis") == "y":
+        return floor_y_to_column(floor_xy[1], gc["boundaries_y_m"])
+    return floor_xy_to_column(floor_xy[0], gc["boundaries_x_m"])

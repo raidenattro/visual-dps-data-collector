@@ -7,6 +7,23 @@ from spatial_pose.floor_projection import FloorSmoothState, project_foot_for_fra
 from tests.test_spatial_calibration import _synthetic_calibration_config
 
 
+def test_project_foot_from_volume_bottom():
+    from spatial_pose.calibration import build_spatial_calibration
+    from tests.test_spatial_calibration import _synthetic_volume_config
+
+    cal = build_spatial_calibration(_synthetic_volume_config(), infer_width=640, infer_height=480)
+    person = {
+        "person_id": 0,
+        "keypoints": [[0, 0, 0]] * 17,
+    }
+    person["keypoints"][15] = [300.0, 450.0, 0.9]
+    person["keypoints"][16] = [310.0, 450.0, 0.9]
+    smooth = FloorSmoothState()
+    out = project_foot_for_frame(cal, [person], smooth)
+    assert out.foot_uv_px is not None
+    assert out.floor_xy_m is not None
+
+
 def test_project_foot_from_ankles():
     cfg = _synthetic_calibration_config()
     cal = compute_and_update_config(cfg, infer_width=640, infer_height=480)

@@ -1,5 +1,5 @@
 {
-  "schema": 1,
+  "schema": 2,
   "camera_slug": "",
   "enabled": false,
   "physical": {
@@ -10,6 +10,33 @@
   "calibration": {
     "resolution": [0, 0],
     "image_points_px": []
+  },
+  "volume": {
+    "enabled": false,
+    "width_m": 2.0,
+    "depth_m": 9.6,
+    "height_m": 2.4,
+    "corners_image_px": [],
+    "corner_labels": ["BL", "BR", "FR", "FL", "TL", "TR", "FR_top", "FL_top"]
+  },
+  "ground_columns": {
+    "column_count": 1,
+    "column_axis": "y",
+    "boundaries_x_m": [],
+    "boundaries_y_m": [],
+    "boundaries_image_px": []
+  },
+  "shelf_faces": {
+    "left": {
+      "layer_count": 4,
+      "layer_lines_image_px": [],
+      "layer_z_m": []
+    },
+    "right": {
+      "layer_count": 4,
+      "layer_lines_image_px": [],
+      "layer_z_m": []
+    }
   },
   "computed": {},
   "tuning": {
@@ -26,9 +53,11 @@
       "y_max": 12.5
     },
     "foot_score_min": 0.35,
+    "wrist_score_min": 0.35,
     "smooth_alpha_normal": 0.2,
     "smooth_alpha_jump": 0.08,
-    "smooth_jump_threshold_m": 1.4
+    "smooth_jump_threshold_m": 1.4,
+    "trail_tail_frames": 90
   },
   "visualization": {
     "grid_width_m": 2.0,

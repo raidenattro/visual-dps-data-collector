@@ -14,8 +14,11 @@ import numpy as np
 from spatial_pose.schema import (
     EXPECTED_CONTROL_POINTS,
     empty_spatial_config,
+    has_volume_floor_ready,
     normalize_spatial_config,
     validate_calibration_ready,
+    validate_floor_calibration_ready,
+    validate_volume_ready,
 )
 
 
@@ -57,9 +60,8 @@ def _find_homography_dlt(src: np.ndarray, dst: np.ndarray) -> np.ndarray:
 def _find_homography(src: np.ndarray, dst: np.ndarray) -> np.ndarray:
     if hasattr(cv2, "findHomography"):
         h, _ = cv2.findHomography(src.astype(np.float64), dst.astype(np.float64), method=0)
-        if h is None:
-            raise RuntimeError("findHomography 失败")
-        return h
+        if h is not None:
+            return h
     return _find_homography_dlt(src, dst)
 
 
@@ -162,14 +164,21 @@ class SpatialCalibration:
 
     def manifest_summary(self) -> dict[str, Any]:
         rel = self.config.get("_calibration_rel") or f"spatial/{self.camera_slug}.json"
-        return {
+        vol = self.config.get("volume") if isinstance(self.config.get("volume"), dict) else {}
+        computed = self.config.get("computed") if isinstance(self.config.get("computed"), dict) else {}
+        summary = {
             "enabled": self.enabled,
             "calibration_file": rel,
             "ground_control_rmse_px": self.ground_control_rmse_px,
             "floor_xy_enabled": True,
+            "floor_source": computed.get("floor_source") or "volume_bottom",
             "infer_width": self.infer_width,
             "infer_height": self.infer_height,
         }
+        if vol.get("enabled"):
+            summary["volume_enabled"] = True
+            summary["volume_rmse_px"] = computed.get("volume_rmse_px")
+        return summary
 
 
 def calibration_path_for_slug(spatial_dir: Path, camera_slug: str) -> Path:
@@ -196,23 +205,79 @@ def _world_points_array(config: dict[str, Any]) -> np.ndarray:
     return build_world_points_from_physical(physical)
 
 
-def compute_and_update_config(
-    config: dict[str, Any],
-    *,
-    infer_width: int | None = None,
-    infer_height: int | None = None,
-) -> SpatialCalibration:
-    """根据 config 计算 homography 并写回 computed 字段。"""
-    norm = normalize_spatial_config(config, camera_slug=str(config.get("camera_slug") or ""))
-    validate_calibration_ready(norm)
+def has_ground_control_points(config: dict[str, Any]) -> bool:
+    pts = config.get("calibration", {}).get("image_points_px") or []
+    return len(pts) == EXPECTED_CONTROL_POINTS
 
+
+def has_ground_control_points(config: dict[str, Any]) -> bool:
+    pts = config.get("calibration", {}).get("image_points_px") or []
+    return len(pts) == EXPECTED_CONTROL_POINTS
+
+
+def _sync_visualization_from_volume(norm: dict[str, Any]) -> None:
+    from spatial_pose.volume_calibration import volume_physical
+
+    vol = norm.get("volume") if isinstance(norm.get("volume"), dict) else {}
+    if not vol.get("enabled"):
+        return
+    p = volume_physical(norm)
+    vis = norm.setdefault("visualization", {})
+    if isinstance(vis, dict):
+        vis["grid_width_m"] = p["width_m"]
+        vis["grid_depth_m"] = p["depth_m"]
+    physical = norm.setdefault("physical", {})
+    if isinstance(physical, dict):
+        physical["aisle_width_m"] = p["width_m"]
+
+
+def _write_floor_homography_computed(
+    computed: dict[str, Any],
+    *,
+    h_image_to_world: np.ndarray,
+    h_world_to_image: np.ndarray,
+    rmse: float,
+    errors: np.ndarray,
+    floor_source: str,
+    target_w: int,
+    target_h: int,
+) -> None:
+    computed.update(
+        {
+            "floor_source": floor_source,
+            "image_to_ground_homography": h_image_to_world.tolist(),
+            "ground_to_image_homography": h_world_to_image.tolist(),
+            "ground_control_rmse_px": rmse,
+            "ground_control_errors_px": errors.tolist(),
+            "infer_width": target_w,
+            "infer_height": target_h,
+        }
+    )
+
+
+def _build_floor_homography(
+    norm: dict[str, Any],
+    *,
+    target_w: int,
+    target_h: int,
+) -> tuple[np.ndarray, np.ndarray, float, np.ndarray, str]:
+    """优先立体底面，其次旧版 10 地面点。"""
+    if has_volume_floor_ready(norm):
+        from spatial_pose.volume_calibration import compute_bottom_floor_homography
+
+        h_world_to_image, h_image_to_world, rmse, errors = compute_bottom_floor_homography(
+            norm,
+            infer_width=target_w,
+            infer_height=target_h,
+        )
+        return h_world_to_image, h_image_to_world, rmse, errors, "volume_bottom"
+
+    validate_calibration_ready(norm)
+    image_points = _image_points_array(norm)
     calib_res = norm["calibration"]["resolution"]
     calib_w, calib_h = int(calib_res[0]), int(calib_res[1])
-    target_w = int(infer_width or calib_w)
-    target_h = int(infer_height or calib_h)
-
-    image_points = _image_points_array(norm)
-    image_points = scale_image_points(image_points, calib_w, calib_h, target_w, target_h)
+    if calib_w > 0 and calib_h > 0:
+        image_points = scale_image_points(image_points, calib_w, calib_h, target_w, target_h)
     world_points = _world_points_array(norm)
 
     tuning = norm.get("tuning") or {}
@@ -227,18 +292,45 @@ def compute_and_update_config(
         h_world_to_image, h_image_to_world, rmse, errors = compute_homography(
             world_points, image_points
         )
+    return h_world_to_image, h_image_to_world, rmse, errors, "ground_points"
 
-    norm["computed"] = {
-        "image_to_ground_homography": h_image_to_world.tolist(),
-        "ground_to_image_homography": h_world_to_image.tolist(),
-        "ground_control_rmse_px": rmse,
-        "ground_control_errors_px": errors.tolist(),
-        "infer_width": target_w,
-        "infer_height": target_h,
-    }
-    norm["enabled"] = True
 
-    cal = SpatialCalibration(
+def build_spatial_calibration(
+    config: dict[str, Any],
+    *,
+    infer_width: int | None = None,
+    infer_height: int | None = None,
+    update_config_computed: bool = True,
+) -> SpatialCalibration:
+    """从 config 构建运行时标定（floor homography 来自立体底面或旧版 10 点）。"""
+    norm = normalize_spatial_config(config, camera_slug=str(config.get("camera_slug") or ""))
+    validate_floor_calibration_ready(norm)
+
+    calib_res = norm["calibration"]["resolution"]
+    calib_w, calib_h = int(calib_res[0]), int(calib_res[1])
+    target_w = int(infer_width or calib_w or 852)
+    target_h = int(infer_height or calib_h or 480)
+
+    computed: dict[str, Any] = dict(norm.get("computed") or {})
+    h_world_to_image, h_image_to_world, rmse, errors, floor_source = _build_floor_homography(
+        norm,
+        target_w=target_w,
+        target_h=target_h,
+    )
+    if update_config_computed:
+        _write_floor_homography_computed(
+            computed,
+            h_image_to_world=h_image_to_world,
+            h_world_to_image=h_world_to_image,
+            rmse=rmse,
+            errors=errors,
+            floor_source=floor_source,
+            target_w=target_w,
+            target_h=target_h,
+        )
+        norm["computed"] = computed
+
+    return SpatialCalibration(
         config=norm,
         infer_width=target_w,
         infer_height=target_h,
@@ -246,6 +338,99 @@ def compute_and_update_config(
         h_world_to_image=h_world_to_image,
         ground_control_rmse_px=rmse,
     )
+
+
+def prepare_spatial_config_for_save(
+    config: dict[str, Any],
+    *,
+    infer_width: int | None = None,
+    infer_height: int | None = None,
+) -> tuple[dict[str, Any], SpatialCalibration | None]:
+    """合并 volume 计算结果；floor homography 由立体底面自动计算。"""
+    norm = normalize_spatial_config(config, camera_slug=str(config.get("camera_slug") or ""))
+    has_ground = has_ground_control_points(norm)
+    vol = norm.get("volume") if isinstance(norm.get("volume"), dict) else {}
+    has_volume = bool(vol.get("enabled"))
+
+    if not has_volume and not has_ground:
+        raise ValueError("请完成立体框 8 角点标定")
+
+    calib_res = norm["calibration"]["resolution"]
+    calib_w, calib_h = int(calib_res[0]), int(calib_res[1])
+    target_w = int(infer_width or calib_w or 852)
+    target_h = int(infer_height or calib_h or 480)
+
+    computed: dict[str, Any] = dict(norm.get("computed") or {})
+    cal: SpatialCalibration | None = None
+
+    if has_volume:
+        validate_volume_ready(norm)
+        _sync_visualization_from_volume(norm)
+
+    if has_volume or has_ground:
+        h_world_to_image, h_image_to_world, rmse, errors, floor_source = _build_floor_homography(
+            norm,
+            target_w=target_w,
+            target_h=target_h,
+        )
+        _write_floor_homography_computed(
+            computed,
+            h_image_to_world=h_image_to_world,
+            h_world_to_image=h_world_to_image,
+            rmse=rmse,
+            errors=errors,
+            floor_source=floor_source,
+            target_w=target_w,
+            target_h=target_h,
+        )
+        want_enabled = bool(norm.get("enabled"))
+        if has_volume and want_enabled:
+            norm["enabled"] = True
+        elif has_ground and want_enabled:
+            norm["enabled"] = True
+        elif has_volume and not has_ground:
+            # 仅立体标定：默认启用 floor_xy（除非显式 enabled=false）
+            norm["enabled"] = want_enabled
+        cal = SpatialCalibration(
+            config=norm,
+            infer_width=target_w,
+            infer_height=target_h,
+            h_image_to_world=h_image_to_world,
+            h_world_to_image=h_world_to_image,
+            ground_control_rmse_px=rmse,
+        )
+
+    try:
+        validate_volume_ready(norm)
+        from spatial_pose.volume_calibration import compute_volume_computed_fields
+
+        vol_computed = compute_volume_computed_fields(norm, cal=cal)
+        if vol_computed:
+            computed.update(vol_computed)
+    except ValueError:
+        if has_volume:
+            raise
+
+    norm["computed"] = computed
+    if cal is not None:
+        cal.config = norm
+    return norm, cal
+
+
+def compute_and_update_config(
+    config: dict[str, Any],
+    *,
+    infer_width: int | None = None,
+    infer_height: int | None = None,
+) -> SpatialCalibration:
+    """根据 config 计算 homography 并写回 computed 字段。"""
+    norm, cal = prepare_spatial_config_for_save(
+        config,
+        infer_width=infer_width,
+        infer_height=infer_height,
+    )
+    if cal is None:
+        raise ValueError("标定不完整，无法构建 floor homography")
     return cal
 
 
@@ -281,14 +466,18 @@ def load_calibration(
     if require_enabled and not norm.get("enabled"):
         return None
     try:
-        validate_calibration_ready(norm)
+        validate_floor_calibration_ready(norm)
     except ValueError:
         return None
-    return compute_and_update_config(
-        norm,
-        infer_width=infer_width,
-        infer_height=infer_height,
-    )
+    try:
+        return build_spatial_calibration(
+            norm,
+            infer_width=infer_width,
+            infer_height=infer_height,
+            update_config_computed=False,
+        )
+    except (ValueError, RuntimeError):
+        return None
 
 
 def load_calibration_json(spatial_dir: Path, camera_slug: str) -> dict[str, Any] | None:
