@@ -44,6 +44,11 @@ const boxAnnotationTouchedKeys = new Set();
 const pendingPersonIdByKey = new Map();
 /** 用户已手动选择/重置过 person_id 的事件 */
 const personIdTouchedKeys = new Set();
+/** 区间增强标真：首帧 / 尾帧（含，null 表示未设置） */
+let rangeAnnotStartFrame = null;
+let rangeAnnotEndFrame = null;
+/** 首帧 person_id + 货框模板（切换事件后仍可用于区间标真） */
+let rangeAnnotTemplateSnapshot = null;
 let eventReviewSaveTimer = null;
 let eventReviewSaveSeq = 0;
 /** 标真并下一条后，上一条优先回到此事件（已标真事件不在「未标真」队列中） */

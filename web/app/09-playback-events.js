@@ -280,6 +280,7 @@ async function loadPlaybackEvents(recordId = null) {
   boxAnnotationTouchedKeys.clear();
   pendingPersonIdByKey.clear();
   personIdTouchedKeys.clear();
+  if (typeof clearRangeAnnotBounds === "function") clearRangeAnnotBounds();
   eventReviewStatusEventKey = null;
   reviewBackKey = null;
   currentEventReviewStatus = "not_started";
@@ -718,6 +719,7 @@ function clearPlaybackEvents() {
   boxAnnotationTouchedKeys.clear();
   pendingPersonIdByKey.clear();
   personIdTouchedKeys.clear();
+  if (typeof clearRangeAnnotBounds === "function") clearRangeAnnotBounds();
   eventReviewStatusEventKey = null;
   reviewBackKey = null;
   if (eventReviewSaveTimer) {

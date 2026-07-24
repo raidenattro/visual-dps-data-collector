@@ -654,6 +654,7 @@ async function setConfirmedBoxesForEvent(ev, tokens) {
   updateReviewDock();
   if (typeof updateStageBoxPickMode === "function") updateStageBoxPickMode();
   redrawCurrentFrame();
+  if (typeof refreshRangeAnnotTemplateSnapshot === "function") refreshRangeAnnotTemplateSnapshot();
   const detN = normalizeBoxTokenList(ev.box_tokens).length;
   setEventReviewSaveStatus(
     `货框 ${formatConfirmedBoxes(list) || "（无）"}${buildBoxPickStatusHint(ev, list, detN)}`,
@@ -673,6 +674,7 @@ async function setPersonIdForEvent(ev, personId) {
   setEventPersonId(ev, normalized);
   updateReviewDock();
   redrawCurrentFrame();
+  if (typeof refreshRangeAnnotTemplateSnapshot === "function") refreshRangeAnnotTemplateSnapshot();
   const pendingNote = hasPendingPersonIdAnnotation(ev) ? " · 暂选未落盘，按 Y 写入" : "";
   setEventReviewSaveStatus(
     normalized != null
@@ -1409,6 +1411,7 @@ function renderEventReviewPersonUi(ev) {
 }
 
 function finishUpdateReviewDock(options = {}) {
+  if (typeof updateRangeAnnotUi === "function") updateRangeAnnotUi();
   if (typeof invalidatePlaybackAccuracyOverlay === "function") invalidatePlaybackAccuracyOverlay();
   if (typeof updateStageBoxPickMode === "function") updateStageBoxPickMode();
   if (typeof updateEventReviewFrameNavUi === "function") updateEventReviewFrameNavUi();

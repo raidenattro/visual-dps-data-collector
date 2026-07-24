@@ -587,6 +587,7 @@
                 <button type="button" id="event-review-complete-btn" class="btn-review-complete">标记复核完成</button>
               </div>
               <div class="event-review-dock-scroll">
+              <div class="event-review-dock-block event-review-dock-block--summary">
               <div id="event-review-current" class="event-review-current">
                 <div class="event-review-current-head">
                   <div class="event-review-current-main">
@@ -605,6 +606,8 @@
                   <p id="event-review-person-hint" class="event-review-person-hint hint" aria-live="polite"></p>
                 </section>
               </div>
+              </div>
+              <div class="event-review-dock-block event-review-dock-block--transport">
               <div class="event-review-frame-nav">
                 <button type="button" id="event-prev-frame-btn" class="btn-review-frame-nav" title="快捷键 ←">◀ 上一帧</button>
                 <span id="event-review-frame-pos" class="event-review-frame-pos">帧 —</span>
@@ -616,6 +619,28 @@
                 <button type="button" id="event-mark-true-next-btn" class="btn-review-true" title="快捷键 Y">✓ 标为真 · 下一条</button>
                 <button type="button" id="event-unmark-btn" class="btn-review-unmark" title="快捷键 U">取消标真 · 下一条</button>
               </div>
+              </div>
+              <div class="event-review-dock-block event-review-dock-block--extras">
+              <details class="event-review-range-details">
+                <summary>区间增强标真</summary>
+                <div class="event-review-range-panel">
+                  <div class="event-review-range-bounds">
+                    <span id="event-range-start-label" class="event-range-bound">首帧：—</span>
+                    <span id="event-range-end-label" class="event-range-bound">尾帧：—</span>
+                  </div>
+                  <div class="event-review-range-actions">
+                    <button type="button" id="event-range-set-start-btn" class="btn-review-range-set">当前帧 → 首帧</button>
+                    <button type="button" id="event-range-set-end-btn" class="btn-review-range-set">当前帧 → 尾帧</button>
+                    <button type="button" id="event-range-clear-btn" class="btn-review-range-clear">清除区间</button>
+                  </div>
+                  <p id="event-range-hint" class="event-review-range-hint hint" aria-live="polite">
+                    在首帧选择 person_id 与货框，设置尾帧后一键标真区间内全部事件
+                  </p>
+                  <button type="button" id="event-range-apply-btn" class="btn-review-range-apply" disabled>
+                    区间标真
+                  </button>
+                </div>
+              </details>
               <details class="event-review-bulk-details">
                 <summary>批量操作</summary>
                 <div class="event-review-actions event-review-actions--bulk">
@@ -624,6 +649,7 @@
                 </div>
               </details>
               <p class="event-review-kbd-hint">Y 标真 · ←→ 逐帧 · ↑↓ 切换事件 · 点击骨架选 person_id</p>
+              </div>
               </div>
             </div>
             <details id="event-review-list-details" class="event-review-list-details">
@@ -665,6 +691,7 @@
   <script src="app/06-records.js?v=54"></script>
   <script src="app/07-playback-stage.js?v=71"></script>
   <script src="app/08-event-review.js?v=79"></script>
+  <script src="app/08-event-review-range.js?v=1"></script>
   <script src="app/09-playback-events.js?v=92"></script>
   <script src="app/10-render-collision.js?v=105"></script>
   <script src="app/11-playback-controls.js?v=88"></script>

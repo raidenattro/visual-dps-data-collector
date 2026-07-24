@@ -257,6 +257,14 @@ function initEventReviewControls() {
   $("#event-unmark-all-btn")?.addEventListener("click", () => void markAllEventsVerified(false));
   $("#event-review-complete-btn")?.addEventListener("click", () => void markEventReviewCompleted());
 
+  $("#event-range-set-start-btn")?.addEventListener("click", () => setRangeAnnotStartFromCurrent());
+  $("#event-range-set-end-btn")?.addEventListener("click", () => setRangeAnnotEndFromCurrent());
+  $("#event-range-clear-btn")?.addEventListener("click", () => {
+    clearRangeAnnotBounds();
+    setEventReviewSaveStatus("已清除区间标真设置", "");
+  });
+  $("#event-range-apply-btn")?.addEventListener("click", () => void applyRangeAnnotVerified());
+
   canvas?.addEventListener("click", (e) => {
     if (!eventsPanel || eventsPanel.classList.contains("hidden")) return;
     const ev = getActiveEvent() ?? getActiveFilteredEvent();
