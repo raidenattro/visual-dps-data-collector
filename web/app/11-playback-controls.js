@@ -259,24 +259,27 @@ function initEventReviewControls() {
 
   canvas?.addEventListener("click", (e) => {
     if (!eventsPanel || eventsPanel.classList.contains("hidden")) return;
-    if (!annotationBoxes.length) {
-      setEventReviewSaveStatus("请先加载标注 JSON", "error");
-      return;
-    }
     const ev = getActiveEvent() ?? getActiveFilteredEvent();
     if (!ev) {
       setEventReviewSaveStatus("请先在右侧选择一条碰撞/告警事件", "");
       return;
     }
+    const personHit = hitTestPersonAtClient(e.clientX, e.clientY);
+    if (personHit != null) {
+      void setPersonIdForEvent(ev, personHit);
+      return;
+    }
+    if (!annotationBoxes.length) {
+      setEventReviewSaveStatus("请先加载标注 JSON", "error");
+      return;
+    }
     const hit = hitTestAnnotationBoxAtClient(e.clientX, e.clientY);
     if (!hit) {
-      setEventReviewSaveStatus("未点中货框，请点击画面中的货架货框", "");
+      setEventReviewSaveStatus("未点中货框或骨架，请点击货架货框或骨架标签", "");
       return;
     }
     void toggleConfirmedBoxForEvent(ev, hit);
   });
-
-  $("#event-reset-box-btn")?.addEventListener("click", () => void resetActiveEventBoxAnnotation());
 
   $("#event-review-list-details")?.addEventListener("toggle", (e) => {
     if (e.target.open) renderEventReviewTable();

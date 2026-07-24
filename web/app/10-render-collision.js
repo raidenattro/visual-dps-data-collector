@@ -1491,6 +1491,100 @@ function drawDetBboxes(frame, inferW, inferH) {
   ctx.restore();
 }
 
+/** 骨架旁 person_id 标签（复核时区分多人；选中项高亮） */
+function drawPersonIdLabels(frame, inferW, inferH, opts = {}) {
+  const framePersons = frame?.persons || [];
+  if (!framePersons.length) return;
+
+  const mode = opts.mode === "full" ? "full" : "lite";
+  const reviewActive =
+    typeof eventsPanel !== "undefined" &&
+    eventsPanel &&
+    !eventsPanel.classList.contains("hidden") &&
+    typeof playbackEvents !== "undefined" &&
+    playbackEvents.length > 0;
+  if (mode === "lite" && (!reviewActive || framePersons.length < 2)) return;
+
+  let selectedPid = null;
+  if (typeof getPinnedPlaybackEvent === "function" && typeof getEventPersonId === "function") {
+    const ev = getPinnedPlaybackEvent();
+    const frameIdx = parseInt(frame?.frame_idx ?? frame?.source_frame_idx, 10) || 0;
+    if (
+      ev &&
+      typeof eventMatchesPlaybackFrame === "function" &&
+      eventMatchesPlaybackFrame(ev, frameIdx)
+    ) {
+      selectedPid = getEventPersonId(ev);
+    }
+  }
+
+  const layout = opts.layout || getDisplayLayout();
+  ctx.save();
+  ctx.font = "bold 14px system-ui, sans-serif";
+
+  framePersons.forEach((person, idx) => {
+    const pid = person.person_id != null ? person.person_id : idx;
+    const { ax, ay } = resolvePersonLabelAnchor(person);
+    if (!Number.isFinite(ax) || !Number.isFinite(ay)) return;
+
+    const [dx, dy] = mapInferToDisplay(ax, ay, inferW, inferH, layout);
+    const text = `P${pid}`;
+    const padX = 6;
+    const padY = 3;
+    const metrics = ctx.measureText(text);
+    const boxW = metrics.width + padX * 2;
+    const boxH = 20;
+    const left = dx - boxW / 2;
+    const top = dy - 36;
+    const isSelected = selectedPid != null && Number(selectedPid) === Number(pid);
+
+    ctx.fillStyle = isSelected ? "rgba(168, 85, 247, 0.92)" : "rgba(15, 23, 42, 0.82)";
+    ctx.fillRect(left, top, boxW, boxH);
+    ctx.strokeStyle = isSelected ? "rgba(233, 213, 255, 0.98)" : "rgba(56, 189, 248, 0.95)";
+    ctx.lineWidth = isSelected ? 2.5 : 2;
+    ctx.strokeRect(left, top, boxW, boxH);
+    ctx.fillStyle = "#f8fafc";
+    ctx.fillText(text, left + padX, top + boxH - padY - 2);
+  });
+
+  ctx.restore();
+}
+
+/** 画面坐标点击命中骨架人员（返回 person_id） */
+function hitTestPersonAtClient(clientX, clientY) {
+  if (typeof frameCache === "undefined") return null;
+  const ev = typeof getPinnedPlaybackEvent === "function" ? getPinnedPlaybackEvent() : null;
+  if (!ev) return null;
+  const fi = parseInt(ev.frame_idx, 10) || 0;
+  const frame = frameCache.get(fi);
+  if (!frame?.persons?.length) return null;
+
+  const rect = canvas.getBoundingClientRect();
+  const x = clientX - rect.left;
+  const y = clientY - rect.top;
+  const inferW = frame.infer_width || poseData?.infer_width || 0;
+  const inferH = frame.infer_height || poseData?.infer_height || 0;
+  const layout = pausedPlaybackLayout || frozenPlaybackLayout || getDisplayLayout();
+  const hitRadius = 22;
+
+  let best = null;
+  let bestDist = hitRadius;
+
+  frame.persons.forEach((person, idx) => {
+    const pid = person.person_id != null ? person.person_id : idx;
+    const { ax, ay } = resolvePersonLabelAnchor(person);
+    if (!Number.isFinite(ax) || !Number.isFinite(ay)) return;
+    const [dx, dy] = mapInferToDisplay(ax, ay, inferW, inferH, layout);
+    const dist = Math.hypot(x - dx, y - (dy - 26));
+    if (dist <= bestDist) {
+      bestDist = dist;
+      best = Number(pid);
+    }
+  });
+
+  return best;
+}
+
 /** 骨骼特征 track 标签（锚点跟随当前帧骨架，不依赖 API 缓存坐标） */
 function resolvePersonLabelAnchor(person) {
   const kpts = person?.keypoints || [];
@@ -1942,6 +2036,7 @@ function drawSkeletonFrame(frame, inferW, inferH, opts = {}) {
   if (mode === "full") {
     drawSkeletonKeypoints(frame, inferW, inferH, layout);
   }
+  drawPersonIdLabels(frame, inferW, inferH, { mode, layout });
   drawPersonFeatureTrackLabels(frame, inferW, inferH);
 }
 

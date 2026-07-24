@@ -40,6 +40,10 @@ const verifiedTrueKeys = new Set();
 const pendingConfirmedBoxesByKey = new Map();
 /** 用户已手动点选/重置过 box 的事件（重置后不再自动回填检测框） */
 const boxAnnotationTouchedKeys = new Set();
+/** 画面上点选的 person_id（按 Y 标真时一并写入 event_review.json） */
+const pendingPersonIdByKey = new Map();
+/** 用户已手动选择/重置过 person_id 的事件 */
+const personIdTouchedKeys = new Set();
 let eventReviewSaveTimer = null;
 let eventReviewSaveSeq = 0;
 /** 标真并下一条后，上一条优先回到此事件（已标真事件不在「未标真」队列中） */

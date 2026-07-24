@@ -278,6 +278,8 @@ async function loadPlaybackEvents(recordId = null) {
   verifiedTrueKeys.clear();
   pendingConfirmedBoxesByKey.clear();
   boxAnnotationTouchedKeys.clear();
+  pendingPersonIdByKey.clear();
+  personIdTouchedKeys.clear();
   eventReviewStatusEventKey = null;
   reviewBackKey = null;
   currentEventReviewStatus = "not_started";
@@ -714,6 +716,8 @@ function clearPlaybackEvents() {
   verifiedTrueKeys.clear();
   pendingConfirmedBoxesByKey.clear();
   boxAnnotationTouchedKeys.clear();
+  pendingPersonIdByKey.clear();
+  personIdTouchedKeys.clear();
   eventReviewStatusEventKey = null;
   reviewBackKey = null;
   if (eventReviewSaveTimer) {
