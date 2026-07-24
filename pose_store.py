@@ -814,6 +814,13 @@ def normalize_review_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
     confirmed_list = extract_confirmed_box_tokens(entry)
     if confirmed_list:
         out["confirmed_box_tokens"] = confirmed_list
+    if "person_id" in entry and entry.get("person_id") is not None:
+        try:
+            person_id = int(entry.get("person_id"))
+        except (TypeError, ValueError):
+            person_id = -1
+        if person_id >= 0:
+            out["person_id"] = person_id
     return out
 
 
@@ -1169,6 +1176,11 @@ def enrich_events_with_review(
         confirmed_list = extract_confirmed_box_tokens(review_item or {})
         if confirmed_list:
             row["confirmed_box_tokens"] = confirmed_list
+        if review_item and review_item.get("person_id") is not None:
+            try:
+                row["person_id"] = int(review_item.get("person_id"))
+            except (TypeError, ValueError):
+                pass
         out.append(row)
     return out
 

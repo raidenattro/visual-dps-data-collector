@@ -1231,6 +1231,17 @@ def _patch_record_event_review_locked(
                             entry_norm["confirmed_box_tokens"] = old_list
                     if "confirmed_box_tokens" not in entry_norm:
                         entry_norm["confirmed_box_tokens"] = list(norm["box_tokens"])
+            if "person_id" in raw_entry:
+                try:
+                    person_id = int(raw_entry.get("person_id"))
+                except (TypeError, ValueError):
+                    person_id = -1
+                if person_id >= 0:
+                    entry_norm["person_id"] = person_id
+                else:
+                    entry_norm.pop("person_id", None)
+            elif isinstance(by_sig.get(sig), dict) and by_sig[sig].get("person_id") is not None:
+                entry_norm["person_id"] = by_sig[sig]["person_id"]
             by_sig[sig] = entry_norm
         else:
             by_sig.pop(sig, None)
