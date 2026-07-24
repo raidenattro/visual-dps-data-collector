@@ -588,47 +588,22 @@
               </div>
               <div class="event-review-dock-scroll">
               <div id="event-review-current" class="event-review-current">
-                <div class="event-review-current-main">
-                  <span id="event-review-badge" class="event-badge collision">—</span>
+                <div class="event-review-current-head">
+                  <div class="event-review-current-main">
+                    <span id="event-review-badge" class="event-badge collision">—</span>
+                    <span id="event-review-verified-tag" class="event-review-verified-tag hidden">已标真</span>
+                  </div>
                   <span id="event-review-meta" class="event-review-meta">请选择或等待加载事件</span>
-                  <span id="event-review-verified-tag" class="event-review-verified-tag hidden">已标真</span>
+                  <div id="event-review-tokens" class="event-review-tokens" aria-hidden="true">&nbsp;</div>
                 </div>
-                <div id="event-review-tokens" class="event-review-tokens" aria-hidden="true">&nbsp;</div>
-                <p id="event-review-box-confirm" class="event-review-box-confirm hint" aria-live="polite">
-                  点选货框标紫；按 Y 标真落盘
-                </p>
-                <details class="event-review-box-legend">
-                  <summary>画面货框颜色说明</summary>
-                  <ul class="box-legend-grid">
-                    <li>
-                      <span class="box-legend-swatch box-legend-swatch--shelf" aria-hidden="true"></span>
-                      <span>淡绿细线 · 普通货架</span>
-                    </li>
-                    <li>
-                      <span class="box-legend-swatch box-legend-swatch--confirmed-active" aria-hidden="true"></span>
-                      <span>紫色填充 · 当前已选人工 box（含暂选，保留碰撞/告警描边）</span>
-                    </li>
-                    <li>
-                      <span class="box-legend-swatch box-legend-swatch--collision" aria-hidden="true"></span>
-                      <span>黄色描边 · 碰撞</span>
-                    </li>
-                    <li>
-                      <span class="box-legend-swatch box-legend-swatch--alarm" aria-hidden="true"></span>
-                      <span>红色描边 · 告警</span>
-                    </li>
-                    <li>
-                      <span class="box-legend-swatch box-legend-swatch--miss" aria-hidden="true"></span>
-                      <span>黑色描边 · 漏报段（标真范本段内无匹配告警，每段计 1 次）</span>
-                    </li>
-                    <li>
-                      <span class="box-legend-swatch box-legend-swatch--false-alarm" aria-hidden="true"></span>
-                      <span>白色描边 · 误报（告警不在任标真范本段内）</span>
-                    </li>
-                  </ul>
-                </details>
-                <button type="button" id="event-reset-box-btn" class="btn-review-reset-box">
-                  重置box标注
-                </button>
+
+                <section class="event-review-section event-review-section--person">
+                  <div id="event-review-person-select" class="event-review-person-select hidden">
+                    <span class="event-review-section-title">人员 person_id</span>
+                    <div id="event-review-person-options" class="event-review-person-options" role="radiogroup" aria-label="选择碰撞人员 person_id"></div>
+                  </div>
+                  <p id="event-review-person-hint" class="event-review-person-hint hint" aria-live="polite"></p>
+                </section>
               </div>
               <div class="event-review-frame-nav">
                 <button type="button" id="event-prev-frame-btn" class="btn-review-frame-nav" title="快捷键 ←">◀ 上一帧</button>
@@ -648,7 +623,7 @@
                   <button type="button" id="event-unmark-all-btn" class="btn-review-bulk-unmark">全部取消标真</button>
                 </div>
               </details>
-              <p class="event-review-kbd-hint">Y 标真 · ←→ 逐帧 · ↑↓ 切换事件 · N/U 跳过/取消</p>
+              <p class="event-review-kbd-hint">Y 标真 · ←→ 逐帧 · ↑↓ 切换事件 · 点击骨架选 person_id</p>
               </div>
             </div>
             <details id="event-review-list-details" class="event-review-list-details">
