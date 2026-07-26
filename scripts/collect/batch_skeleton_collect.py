@@ -12,6 +12,10 @@
 
   python scripts/collect/batch_skeleton_collect.py D:/videos/1-1-1 --camera-label 1-1-1 --skip-existing
 
+  # 3 线程按机组文件夹并行（默认）；单线程与旧版一致
+  python scripts/collect/batch_skeleton_collect.py D:/videos --group-by-subfolder --workers 3
+  python scripts/collect/batch_skeleton_collect.py D:/videos --group-by-subfolder --workers 1
+
 说明:
   - 递归包含所有子文件夹中的视频
   - 结果写入 localdata/json/{rtmpose-t|s|m}/{机位slug}/{视频主名}_{backend}/
@@ -21,6 +25,8 @@
   - --with-collision：按机位从 reflection.json 解析标注并计算 collisions / alarm_collisions
   - 碰撞模式下复用 annotations/{编号}.json，不为每个视频新建 clip_*.json
   - 保存配套视频时仅复制到 localdata/video，绝不移动或删除源目录中的 MP4
+  - --workers：并行线程数（默认 3）；按机组文件夹调度，某文件夹处理完自动接下一个
+  - GPU 下多线程会各占一份模型显存，显存不足时请减小 --workers 或改用 --device cpu
 """
 
 from __future__ import annotations
@@ -30,10 +36,14 @@ import json
 import re
 import shutil
 import sys
+import threading
 import time
 import uuid
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -41,6 +51,7 @@ if str(ROOT) not in sys.path:
 
 from collect_core import run_collect_job, validate_video_path
 from collect_core import parse_variant as _parse_variant
+from rtmpose_infer import RTMPosePipeline
 from config_loader import (
     allocate_camera_storage_slug,
     build_settings,
@@ -70,6 +81,8 @@ try:
     REFLECTION_OK = True
 except ImportError:
     REFLECTION_OK = False
+
+DEFAULT_WORKERS = 3
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -142,6 +155,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--with-collision",
         action="store_true",
         help="按机位从 reflection.json 加载标注并计算碰撞（默认仅骨架）",
+    )
+    p.add_argument(
+        "--workers",
+        "-j",
+        type=int,
+        default=DEFAULT_WORKERS,
+        help=f"并行线程数，按机组文件夹调度（默认 {DEFAULT_WORKERS}；1=单线程串行）",
     )
     return p
 
@@ -251,6 +271,48 @@ def attach_source_annotation_to_record(
     return src
 
 
+@dataclass(frozen=True)
+class VideoWorkItem:
+    video_path: Path
+    rel_name: str
+    camera_label: str
+    camera_slug: str
+    index: int
+
+
+@dataclass
+class VideoWorkResult:
+    relative_path: str
+    status: str
+    message: str
+
+
+_thread_local = threading.local()
+_print_lock = threading.Lock()
+
+
+def _locked_print(*args, print_fn: Callable[..., None] | None = None, **kwargs) -> None:
+    fn = print_fn or print
+    with _print_lock:
+        fn(*args, **kwargs)
+
+
+def _thread_pipeline(settings) -> RTMPosePipeline:
+    """每线程复用一份 RTMPosePipeline，避免同文件夹内重复加载模型。"""
+    pipeline = getattr(_thread_local, "pipeline", None)
+    if pipeline is None:
+        pipeline = RTMPosePipeline(
+            variant=_parse_variant(settings.variant),
+            det_variant=settings.det_variant,
+            models_dir=settings.models_dir,
+            device=settings.device,
+            backend=settings.ort_backend,
+        )
+        pipeline.load()
+        _thread_local.pipeline = pipeline
+    return pipeline
+
+
 def collect_one_video(
     *,
     video_path: Path,
@@ -267,8 +329,11 @@ def collect_one_video(
     total: int,
     camera_annotation: ResolveResult | None = None,
     with_collision: bool = False,
+    pipeline: RTMPosePipeline | None = None,
+    print_fn: Callable[..., None] | None = None,
 ) -> tuple[str, str]:
     """处理单个视频，返回 (status, message)。status: ok | skip | error"""
+    _print = print_fn or _locked_print
     video_stem = sanitize_file_stem(video_path.stem)
     source_name = Path(rel_name).name
 
@@ -293,15 +358,16 @@ def collect_one_video(
             return "skip", f"已存在 {expected.relative_to(paths.json_dir)}"
 
     job_id = f"{batch_id}_{index}"
-    print(f"\n[{index + 1}/{total}] {rel_name} → 机位 {camera_label} ({camera_slug})")
+    _print(f"\n[{index + 1}/{total}] {rel_name} → 机位 {camera_label} ({camera_slug})")
     t0 = time.perf_counter()
 
     def on_progress(current: int, frame_total: int) -> None:
         if frame_total > 0 and current % max(1, frame_total // 10) == 0:
             pct = round(current / frame_total * 100)
-            print(f"  帧 {current}/{frame_total} ({pct}%)", end="\r", flush=True)
+            _print(f"  帧 {current}/{frame_total} ({pct}%)", end="\r", flush=True)
 
     inference_ann = camera_annotation.annotation_path if camera_annotation else None
+    active_pipeline = pipeline or _thread_pipeline(settings)
 
     try:
         validate_video_path(video_path)
@@ -322,6 +388,7 @@ def collect_one_video(
             annotation_path=str(inference_ann) if inference_ann else None,
             alarm_min_consecutive_frames=settings.alarm_min_consecutive_frames,
             alarm_cooldown_frames=settings.alarm_cooldown_frames,
+            pipeline=active_pipeline,
         )
     except Exception as exc:
         return "error", str(exc)
@@ -416,6 +483,144 @@ def collect_one_video(
     return "ok", f"{record_id} · {frames} 帧 · {elapsed:.1f}s"
 
 
+def process_folder_videos(
+    *,
+    folder_key: str,
+    items: list[VideoWorkItem],
+    settings,
+    paths,
+    collect_config: dict,
+    save_video: bool,
+    skip_existing: bool,
+    batch_id: str,
+    total: int,
+    annotation_by_camera: dict[str, ResolveResult],
+    with_collision: bool,
+) -> list[VideoWorkResult]:
+    """处理单个机组文件夹内的全部视频（同线程内串行，复用 thread-local pipeline）。"""
+    cam_label = items[0].camera_label if items else folder_key
+    _locked_print(f"\n📂 开始机组文件夹: {folder_key}（{len(items)} 个视频 · 机位 {cam_label}）")
+    folder_results: list[VideoWorkResult] = []
+    for item in items:
+        per_config = {
+            **collect_config,
+            "camera_label": item.camera_label,
+            "camera_slug": item.camera_slug,
+        }
+        status, msg = collect_one_video(
+            video_path=item.video_path,
+            rel_name=item.rel_name,
+            camera_label=item.camera_label,
+            camera_slug=item.camera_slug,
+            settings=settings,
+            paths=paths,
+            collect_config=per_config,
+            save_video=save_video,
+            skip_existing=skip_existing,
+            batch_id=batch_id,
+            index=item.index,
+            total=total,
+            camera_annotation=annotation_by_camera.get(item.camera_label) if with_collision else None,
+            with_collision=with_collision,
+        )
+        folder_results.append(
+            VideoWorkResult(relative_path=item.rel_name, status=status, message=msg)
+        )
+        if status == "ok":
+            _locked_print(f"  ✅ [{folder_key}] {msg}")
+        elif status == "skip":
+            _locked_print(f"  ⏭️ [{folder_key}] {msg}")
+        else:
+            _locked_print(f"  ❌ [{folder_key}] {msg}")
+    _locked_print(f"📂 完成机组文件夹: {folder_key}")
+    return folder_results
+
+
+def run_collect_batch(
+    *,
+    folder_work: list[tuple[str, list[VideoWorkItem]]],
+    workers: int,
+    settings,
+    paths,
+    collect_config: dict,
+    save_video: bool,
+    skip_existing: bool,
+    batch_id: str,
+    total: int,
+    annotation_by_camera: dict[str, ResolveResult],
+    with_collision: bool,
+) -> tuple[int, int, int, list[dict], list[dict]]:
+    """按机组文件夹调度批采集，返回 (ok, skip, err, results, errors)。"""
+    ok = skip = err = 0
+    results: list[dict] = []
+    errors: list[dict] = []
+
+    def _consume(folder_results: list[VideoWorkResult]) -> None:
+        nonlocal ok, skip, err
+        for item in folder_results:
+            if item.status == "ok":
+                ok += 1
+                results.append(
+                    {"relative_path": item.relative_path, "record_id": item.message.split(" · ", 1)[0]}
+                )
+            elif item.status == "skip":
+                skip += 1
+            else:
+                err += 1
+                errors.append({"relative_path": item.relative_path, "error": item.message})
+
+    if workers <= 1:
+        for folder_key, items in folder_work:
+            folder_results = process_folder_videos(
+                folder_key=folder_key,
+                items=items,
+                settings=settings,
+                paths=paths,
+                collect_config=collect_config,
+                save_video=save_video,
+                skip_existing=skip_existing,
+                batch_id=batch_id,
+                total=total,
+                annotation_by_camera=annotation_by_camera,
+                with_collision=with_collision,
+            )
+            _consume(folder_results)
+        return ok, skip, err, results, errors
+
+    max_workers = min(workers, len(folder_work))
+    _locked_print(f"🧵 并行模式: {max_workers} 线程 · {len(folder_work)} 个机组文件夹")
+    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="collect") as executor:
+        futures = {
+            executor.submit(
+                process_folder_videos,
+                folder_key=folder_key,
+                items=items,
+                settings=settings,
+                paths=paths,
+                collect_config=collect_config,
+                save_video=save_video,
+                skip_existing=skip_existing,
+                batch_id=batch_id,
+                total=total,
+                annotation_by_camera=annotation_by_camera,
+                with_collision=with_collision,
+            ): folder_key
+            for folder_key, items in folder_work
+        }
+        for future in as_completed(futures):
+            folder_key = futures[future]
+            try:
+                folder_results = future.result()
+            except Exception as exc:
+                err += 1
+                errors.append({"relative_path": folder_key, "error": str(exc)})
+                _locked_print(f"  ❌ 机组文件夹 {folder_key} 异常: {exc}")
+                continue
+            _consume(folder_results)
+
+    return ok, skip, err, results, errors
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
     root = args.root.resolve()
@@ -432,6 +637,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.with_collision and not REFLECTION_OK:
         print("❌ --with-collision 需要 corner_label / reflection 模块", file=sys.stderr)
+        return 2
+
+    workers = int(args.workers)
+    if workers < 1:
+        print("❌ --workers 必须 >= 1", file=sys.stderr)
         return 2
 
     settings = build_settings(
@@ -502,6 +712,26 @@ def main(argv: list[str] | None = None) -> int:
     if args.limit and args.limit > 0:
         flat = flat[: args.limit]
 
+    folder_work: list[tuple[str, list[VideoWorkItem]]] = []
+    folder_items: dict[str, list[VideoWorkItem]] = defaultdict(list)
+    for i, (video_path, rel, cam_label, cam_slug) in enumerate(flat):
+        folder_key = folder_key_for_item(
+            rel,
+            group_by_subfolder=args.group_by_subfolder,
+            fallback_camera=fallback_camera,
+        )
+        folder_items[folder_key].append(
+            VideoWorkItem(
+                video_path=video_path,
+                rel_name=rel,
+                camera_label=cam_label,
+                camera_slug=cam_slug,
+                index=i,
+            )
+        )
+    for folder_key in sorted(folder_items.keys()):
+        folder_work.append((folder_key, folder_items[folder_key]))
+
     total = len(flat)
     print(f"📁 根目录: {root}")
     print(f"🎬 视频数: {total}（扩展名: {', '.join(sorted(VIDEO_EXTENSIONS))}）")
@@ -513,6 +743,10 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print("💾 保存配套视频: 否")
     print(f"🦴 模式: {'骨架 + 碰撞' if args.with_collision else '仅骨架（不算碰撞）'}")
+    if workers <= 1:
+        print("🧵 并行: 关闭（单线程串行）")
+    else:
+        print(f"🧵 并行: {min(workers, len(folder_work))} 线程 · 按机组文件夹调度（共 {len(folder_work)} 个）")
     if args.group_by_subfolder:
         print(f"📂 机位分组: 按第一级子目录（{len(slug_by_folder)} 个文件夹）")
         for folder_key in sorted(slug_by_folder):
@@ -560,45 +794,22 @@ def main(argv: list[str] | None = None) -> int:
         annotation_source="reflection" if args.with_collision else "skeleton_only",
         skeleton_only=not args.with_collision,
     )
+    collect_config["workers"] = workers
 
-    ok = skip = err = 0
     batch_t0 = time.perf_counter()
-    results: list[dict] = []
-    errors: list[dict] = []
-
-    for i, (video_path, rel, cam_label, cam_slug) in enumerate(flat):
-        per_config = {
-            **collect_config,
-            "camera_label": cam_label,
-            "camera_slug": cam_slug,
-        }
-        status, msg = collect_one_video(
-            video_path=video_path,
-            rel_name=rel,
-            camera_label=cam_label,
-            camera_slug=cam_slug,
-            settings=settings,
-            paths=paths,
-            collect_config=per_config,
-            save_video=settings.save_video,
-            skip_existing=args.skip_existing,
-            batch_id=batch_id,
-            index=i,
-            total=total,
-            camera_annotation=annotation_by_camera.get(cam_label) if args.with_collision else None,
-            with_collision=args.with_collision,
-        )
-        if status == "ok":
-            ok += 1
-            print(f"  ✅ {msg}")
-            results.append({"relative_path": rel, "record_id": msg.split(" · ", 1)[0]})
-        elif status == "skip":
-            skip += 1
-            print(f"  ⏭️ {msg}")
-        else:
-            err += 1
-            print(f"  ❌ {msg}")
-            errors.append({"relative_path": rel, "error": msg})
+    ok, skip, err, results, errors = run_collect_batch(
+        folder_work=folder_work,
+        workers=workers,
+        settings=settings,
+        paths=paths,
+        collect_config=collect_config,
+        save_video=settings.save_video,
+        skip_existing=args.skip_existing,
+        batch_id=batch_id,
+        total=total,
+        annotation_by_camera=annotation_by_camera,
+        with_collision=args.with_collision,
+    )
 
     total_elapsed = round(time.perf_counter() - batch_t0, 1)
     print(

@@ -326,6 +326,7 @@ def run_collect_job(
     annotation_path: str | Path | None = None,
     alarm_min_consecutive_frames: int = 3,
     alarm_cooldown_frames: int = 12,
+    pipeline: RTMPosePipeline | None = None,
 ) -> dict[str, Any]:
     video_path = validate_video_path(video_path)
     resize = _resolve_collect_resize(video_path, width, height)
@@ -337,13 +338,14 @@ def run_collect_job(
     else:
         print("ℹ️ 推理缩放: 关闭（未指定 inference.height）")
 
-    pipeline = RTMPosePipeline(
-        variant=parse_variant(variant),
-        det_variant=det_variant,
-        models_dir=models_dir,
-        device=device,
-        backend=ort_backend,
-    )
+    if pipeline is None:
+        pipeline = RTMPosePipeline(
+            variant=parse_variant(variant),
+            det_variant=det_variant,
+            models_dir=models_dir,
+            device=device,
+            backend=ort_backend,
+        )
 
     t0 = time.perf_counter()
     data = collect_from_video(
