@@ -349,6 +349,18 @@ function buildBoxPickStatusHint(ev, confirmed, detN) {
   return `${countNote}${pendingNote} · 按 Y 写入`;
 }
 
+function appendPerBoxEvents(events, { eventType, boxTokens, frameIdx, sourceFrameIdx, timestampSec }) {
+  (boxTokens || []).forEach((token) => {
+    events.push({
+      event_type: eventType,
+      frame_idx: frameIdx,
+      source_frame_idx: sourceFrameIdx,
+      timestamp_sec: timestampSec,
+      box_tokens: [token],
+    });
+  });
+}
+
 function buildEventsFromFrames(frames) {
   const events = [];
   (frames || []).forEach((fr) => {
@@ -359,23 +371,23 @@ function buildEventsFromFrames(frames) {
     const alarms = canonicalizeBoxTokenList(fr.alarm_collisions || []);
     const collisions = canonicalizeBoxTokenList(fr.collisions || []);
     if (alarms.length) {
-      events.push({
-        event_type: "alarm",
-        frame_idx: fi,
-        source_frame_idx: sfi,
-        timestamp_sec: ts,
-        box_tokens: alarms,
+      appendPerBoxEvents(events, {
+        eventType: "alarm",
+        boxTokens: alarms,
+        frameIdx: fi,
+        sourceFrameIdx: sfi,
+        timestampSec: ts,
       });
     }
     const alarmSet = new Set(alarms);
     const collOnly = collisions.filter((t) => !alarmSet.has(t));
     if (collOnly.length) {
-      events.push({
-        event_type: "collision",
-        frame_idx: fi,
-        source_frame_idx: sfi,
-        timestamp_sec: ts,
-        box_tokens: collOnly,
+      appendPerBoxEvents(events, {
+        eventType: "collision",
+        boxTokens: collOnly,
+        frameIdx: fi,
+        sourceFrameIdx: sfi,
+        timestampSec: ts,
       });
     }
   });

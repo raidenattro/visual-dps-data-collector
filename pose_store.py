@@ -618,8 +618,30 @@ def load_timeline(locator: RecordLocator, *, include_events: bool = False) -> li
     return out
 
 
+def _append_per_box_events(
+    events: list[dict[str, Any]],
+    *,
+    event_type: str,
+    box_tokens: list[str],
+    frame_idx: int,
+    source_frame_idx: int,
+    timestamp_sec: float,
+) -> None:
+    """按单个货框追加事件（每 box 一条）。"""
+    for token in box_tokens:
+        events.append(
+            {
+                "event_type": event_type,
+                "frame_idx": frame_idx,
+                "source_frame_idx": source_frame_idx,
+                "timestamp_sec": timestamp_sec,
+                "box_tokens": [token],
+            }
+        )
+
+
 def load_events(locator: RecordLocator) -> list[dict[str, Any]]:
-    """碰撞/告警事件列表（每帧每类型一条，供回放跳转）。"""
+    """碰撞/告警事件列表（每帧每类型每货框一条，供回放跳转）。"""
     from event_engine.box_identity import canonicalize_box_token_list
 
     rows = load_timeline(locator, include_events=True)
@@ -635,26 +657,24 @@ def load_events(locator: RecordLocator) -> list[dict[str, Any]]:
             [str(t) for t in (row.get("collisions") or []) if str(t).strip()]
         )
         if alarms:
-            events.append(
-                {
-                    "event_type": "alarm",
-                    "frame_idx": fi,
-                    "source_frame_idx": sfi,
-                    "timestamp_sec": ts,
-                    "box_tokens": alarms,
-                }
+            _append_per_box_events(
+                events,
+                event_type="alarm",
+                box_tokens=alarms,
+                frame_idx=fi,
+                source_frame_idx=sfi,
+                timestamp_sec=ts,
             )
         alarm_set = set(alarms)
         coll_only = [t for t in collisions if t not in alarm_set]
         if coll_only:
-            events.append(
-                {
-                    "event_type": "collision",
-                    "frame_idx": fi,
-                    "source_frame_idx": sfi,
-                    "timestamp_sec": ts,
-                    "box_tokens": coll_only,
-                }
+            _append_per_box_events(
+                events,
+                event_type="collision",
+                box_tokens=coll_only,
+                frame_idx=fi,
+                source_frame_idx=sfi,
+                timestamp_sec=ts,
             )
     return events
 
