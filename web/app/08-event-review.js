@@ -1158,6 +1158,63 @@ function scrollActiveEventRowIntoView() {
   row?.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
+/** 播放中轻量更新事件表高亮行，避免整表重绘 */
+function patchEventReviewTableActiveState() {
+  if (!eventJumpList) return;
+  eventJumpList.querySelectorAll(".event-review-row").forEach((row) => {
+    row.classList.toggle("active", row.dataset.eventKey === activeEventKey);
+  });
+}
+
+/** 播放中更新右侧 meta 中的画面帧号 */
+function updatePlaybackReviewFrameMeta(frameIdx = null) {
+  const metaEl = $("#event-review-meta");
+  const ev = getPinnedPlaybackEvent();
+  if (!metaEl || !ev) return;
+  const eventFi = parseInt(ev.frame_idx, 10) || 0;
+  const playbackFi =
+    frameIdx != null && Number(frameIdx) > 0
+      ? Number(frameIdx)
+      : typeof getResolvedPlaybackFrameIdx === "function"
+        ? getResolvedPlaybackFrameIdx()
+        : null;
+  let accuracyNote = "";
+  if (typeof isPlaybackEventFalseAlarm === "function" && isPlaybackEventFalseAlarm(ev)) {
+    accuracyNote = " · 误报";
+  } else if (
+    (typeof isPlaybackEventInMissSegment === "function" && isPlaybackEventInMissSegment(ev)) ||
+    (typeof isPlaybackEventMiss === "function" && isPlaybackEventMiss(ev))
+  ) {
+    accuracyNote = " · 漏报段内";
+  }
+  const frameNote =
+    playbackFi && eventFi && playbackFi !== eventFi
+      ? `画面 帧 ${playbackFi} · 事件 帧 ${eventFi}`
+      : playbackFi
+        ? `帧 ${playbackFi}`
+        : `帧 ${eventFi}`;
+  metaEl.textContent = `${formatTime(ev.timestamp_sec)} · ${frameNote}${accuracyNote}`;
+}
+
+/** 播放中更新「第 N / M 条」位置文案 */
+function updatePlaybackReviewPositionUi({ linkNearest = false } = {}) {
+  const posEl = $("#event-review-position");
+  const ev = getPinnedPlaybackEvent();
+  if (!posEl || !ev || !playbackEvents.length) return;
+  const list = filteredPlaybackEvents();
+  const evInFilter = list.some((item) => eventRowKey(item) === eventRowKey(ev));
+  const globalIdx = playbackEvents.findIndex((item) => eventRowKey(item) === eventRowKey(ev));
+  const globalNote =
+    globalIdx >= 0 ? ` · 总序 ${globalIdx + 1}/${playbackEvents.length}` : "";
+  const linkNote = linkNearest || !playbackEventLinkExact ? " · 最近" : "";
+  if (evInFilter) {
+    const idx = list.findIndex((item) => eventRowKey(item) === eventRowKey(ev));
+    posEl.textContent = `第 ${idx + 1} / ${list.length} 条${linkNote}${list.length !== playbackEvents.length ? `（队列）${globalNote}` : globalNote}`;
+  } else {
+    posEl.textContent = `已标真 / 不在当前队列${linkNote}${globalNote}`;
+  }
+}
+
 /** 按右栏面板剩余高度限制「全部事件列表」滚动区（details 无法可靠参与 flex 限高） */
 let eventReviewListScrollSyncRaf = 0;
 

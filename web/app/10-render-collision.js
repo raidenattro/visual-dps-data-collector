@@ -2517,6 +2517,15 @@ function playbackRenderLoop(now, metadata) {
     if (nextIdx > 0 && nextIdx !== tickVideoFrameIdx) {
       tickVideoFrameIdx = nextIdx;
       syncRenderPlaybackFrame(timeSec, { playback: true });
+      if (nextIdx !== lastEventSyncFrameIdx && typeof syncActiveEventFromPlaybackPosition === "function") {
+        lastEventSyncFrameIdx = nextIdx;
+        syncActiveEventFromPlaybackPosition({
+          timeSec,
+          frameIdx: nextIdx,
+          skipRedraw: true,
+          duringPlayback: true,
+        });
+      }
     }
   }
 

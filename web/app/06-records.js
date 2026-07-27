@@ -1200,6 +1200,9 @@ async function prepareAndLoadRecordVideo(recordId, displayName = "") {
 async function startVideoPlayback(hintPrefix = "") {
   try {
     readPlaybackSpeedFromSelect();
+    playbackEventLinkExact = false;
+    lastEventSyncFrameIdx = -1;
+    if (typeof clearPlaybackAuthorityFrameIdx === "function") clearPlaybackAuthorityFrameIdx();
     await videoEl.play();
     if (typeof ensurePlaybackRenderLoop === "function") {
       ensurePlaybackRenderLoop();

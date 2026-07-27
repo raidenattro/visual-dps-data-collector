@@ -507,14 +507,26 @@ function findEventForPlaybackPosition(timeSec, frameIdx = null) {
   return best;
 }
 
+/** 播放中刷新右侧帧号/事件 meta（同事件时也需更新画面帧） */
+function refreshPlaybackReviewUiDuringPlay(frameIdx, timeSec) {
+  if (typeof updateEventReviewFrameNavUi === "function") updateEventReviewFrameNavUi();
+  if (typeof updatePlaybackReviewFrameMeta === "function") {
+    updatePlaybackReviewFrameMeta(frameIdx);
+  }
+  if (typeof updatePlaybackReviewPositionUi === "function") {
+    updatePlaybackReviewPositionUi({ linkNearest: true });
+  }
+}
+
 /** 进度条/播放位置变化时，同步事件复核栏的当前关联事件 */
 function syncActiveEventFromPlaybackPosition(opts = {}) {
   if (!playbackEvents.length) return;
+  const duringPlayback = opts.duringPlayback === true;
   const timeSec = opts.timeSec ?? getCurrentPlaybackTimeSec();
   const frameIdx = opts.frameIdx ?? getCurrentPlaybackFrameIdx();
 
-  // 钉住事件时：禁止 sync 解除钉住或切换事件；画面漂移则拉回事件帧
-  if (!opts.force && playbackEventLinkExact && activeEventKey) {
+  // 钉住事件时：禁止 sync 解除钉住或切换事件；画面漂移则拉回事件帧（播放跟随模式除外）
+  if (!opts.force && !duringPlayback && playbackEventLinkExact && activeEventKey) {
     const pinned =
       typeof getPinnedPlaybackEvent === "function"
         ? getPinnedPlaybackEvent()
@@ -549,19 +561,27 @@ function syncActiveEventFromPlaybackPosition(opts = {}) {
   const exact = isExactEventAtPosition(ev, timeSec, frameIdx);
   // 同一事件因视频漂移不同步时：保持钉住并拉回，不改为「最近」
   if (!opts.force && key === activeEventKey) {
-    if (playbackEventLinkExact && !exact) {
+    if (!duringPlayback && playbackEventLinkExact && !exact) {
       void realignPlaybackToPinnedEvent();
+      return;
+    }
+    if (duringPlayback) {
+      refreshPlaybackReviewUiDuringPlay(frameIdx, timeSec);
       return;
     }
     if (playbackEventLinkExact === exact) return;
   }
   activeEventKey = key;
-  playbackEventLinkExact = exact;
+  // 播放跟随时不可设为钉住，否则会阻断后续帧/事件同步
+  if (!duringPlayback) playbackEventLinkExact = exact;
   if (!opts.keepReviewBack && reviewBackKey && key !== reviewBackKey) {
     reviewBackKey = null;
   }
   updateReviewDock({ skipRedraw: opts.skipRedraw });
-  if ($("#event-review-list-details")?.open) renderEventReviewTable();
+  if (duringPlayback) {
+    if (typeof patchEventReviewTableActiveState === "function") patchEventReviewTableActiveState();
+    if (typeof scrollActiveEventRowIntoView === "function") scrollActiveEventRowIntoView();
+  } else if ($("#event-review-list-details")?.open) renderEventReviewTable();
   updateEventMarkerActiveState();
   if (typeof updateStageBoxPickMode === "function") updateStageBoxPickMode();
   if (!opts.skipRedraw && typeof redrawCurrentFrame === "function") redrawCurrentFrame();

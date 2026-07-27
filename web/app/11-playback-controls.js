@@ -110,6 +110,9 @@ async function startPlaybackTransport() {
   if (videoEl.src) {
     videoEl.style.display = "block";
     readPlaybackSpeedFromSelect();
+    playbackEventLinkExact = false;
+    lastEventSyncFrameIdx = -1;
+    if (typeof clearPlaybackAuthorityFrameIdx === "function") clearPlaybackAuthorityFrameIdx();
     try {
       await videoEl.play();
     } catch (err) {
@@ -170,6 +173,8 @@ videoEl.addEventListener("loadedmetadata", () => {
 /** 视频开始播放时启动唯一一条骨架渲染循环（底部按钮与 play 事件共用） */
 videoEl.addEventListener("play", () => {
   if (typeof clearPlaybackAuthorityFrameIdx === "function") clearPlaybackAuthorityFrameIdx();
+  playbackEventLinkExact = false;
+  lastEventSyncFrameIdx = -1;
   readPlaybackSpeedFromSelect();
   if (typeof ensurePlaybackRenderLoop === "function") ensurePlaybackRenderLoop();
   if (typeof onPlaybackVideoPlayStateChange === "function") onPlaybackVideoPlayStateChange();
