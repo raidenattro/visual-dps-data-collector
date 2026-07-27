@@ -1263,6 +1263,36 @@ function timelineSecFromVideoClock() {
   return cur;
 }
 
+/** 统一 timeline 时间：连续播放、逐帧 seek、暂停均与事件 timestamp_sec 同轴 */
+function playbackTimelineSecFromVideo() {
+  if (!videoEl?.duration || !Number.isFinite(videoEl.duration) || videoEl.duration <= 0) {
+    return 0;
+  }
+  if (!videoEl.paused && !videoEl.ended && lastPlaybackMediaTimeSec != null) {
+    const fromRvfc = resolveRvfcMediaTime(lastPlaybackMediaTimeSec);
+    if (fromRvfc != null) return fromRvfc;
+  }
+  const fromClock = timelineSecFromVideoClock();
+  if (!playbackVideoClockUsesPtsSeek && timelineUsesZeroBase()) {
+    const pts = containerPtsOffsetSec();
+    if (pts > 0) return Math.max(0, fromClock - pts);
+  }
+  return fromClock;
+}
+
+/** 进度条/时间标签与事件 marker 共用 timeline 轴，避免播放与 seek 间跳动 */
+function updatePlaybackSeekBarUi(timeSec = null) {
+  if (!seekBar || !videoEl?.duration || !Number.isFinite(videoEl.duration) || videoEl.duration <= 0) {
+    return;
+  }
+  const t =
+    timeSec != null && Number.isFinite(Number(timeSec))
+      ? Math.max(0, Number(timeSec))
+      : playbackTimelineSecFromVideo();
+  seekBar.value = String((t / videoEl.duration) * 1000);
+  if (timeLabel) timeLabel.textContent = formatTime(t);
+}
+
 function syncCanvasSize(opts = {}) {
   const force = opts.force === true;
   if (!force && playbackRenderLoopActive && frozenPlaybackCanvasCss) {
@@ -2259,32 +2289,12 @@ function redrawCurrentFrame() {
   if (playbackRenderLoopActive && videoEl && !videoEl.paused) return;
   renderGeneration++;
   const gen = renderGeneration;
-  const pinnedFi =
-    typeof pinnedEventFrameIdx === "function" ? pinnedEventFrameIdx() : null;
-  const authorityFi =
-    typeof getPlaybackAuthorityFrameIdx === "function" ? getPlaybackAuthorityFrameIdx() : null;
   const heldFi = lastRenderedFrameIdx >= 1 ? lastRenderedFrameIdx : null;
-  const targetFi = pinnedFi || authorityFi || heldFi;
+  const currentFi =
+    typeof getCurrentPlaybackFrameIdx === "function" ? getCurrentPlaybackFrameIdx() : null;
+  const targetFi = heldFi ?? currentFi;
   if (videoEl?.src && videoEl.paused && videoEl.readyState >= 2) {
-    const layout = pausedPlaybackLayout || frozenPlaybackLayout;
-    const drawOpts = {
-      mode: "full",
-      skipIfSame: false,
-      layout,
-      playback: true,
-    };
-    if (pinnedFi || authorityFi) {
-      const hit =
-        typeof frameEntryByIdx === "function"
-          ? frameEntryByIdx(targetFi)
-          : frameByTime?.find((e) => e.frameIdx === targetFi) || null;
-      const timeSec =
-        hit && Number.isFinite(Number(hit.t))
-          ? Math.max(0, Number(hit.t))
-          : Math.max(0, Number(videoEl?.currentTime) || 0);
-      renderPlaybackFrameAtTime(timeSec, drawOpts);
-      return;
-    }
+    // 标注/复核 UI 刷新：保持当前暂停画面，不因钉住事件跳回事件帧
     renderPausedPlaybackFrame({ mediaTime: lastPlaybackMediaTimeSec, frameIdx: targetFi });
     return;
   }
@@ -2532,10 +2542,7 @@ function playbackRenderLoop(now, metadata) {
   const perfNow = typeof now === "number" && Number.isFinite(now) ? now : performance.now();
   if (perfNow - lastPlaybackUiSyncMs >= 120) {
     lastPlaybackUiSyncMs = perfNow;
-    if (videoEl.duration && Number.isFinite(videoEl.duration)) {
-      seekBar.value = String((videoEl.currentTime / videoEl.duration) * 1000);
-      timeLabel.textContent = formatTime(videoEl.currentTime);
-    }
+    updatePlaybackSeekBarUi();
   }
 
   if (!videoEl.paused && videoEl.readyState >= 2) {

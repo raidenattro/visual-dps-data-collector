@@ -189,7 +189,14 @@ videoEl.addEventListener("pause", () => {
     if (typeof cancelPlaybackRenderLoop === "function") {
       cancelPlaybackRenderLoop({ preserveLayout: true });
     }
-    if (videoEl.duration && Number.isFinite(videoEl.duration)) {
+    const resumeMediaTime = lastPlaybackMediaTimeSec;
+    const resumeFrameIdx = lastRenderedFrameIdx >= 1 ? lastRenderedFrameIdx : null;
+    if (typeof renderPausedPlaybackFrame === "function") {
+      renderPausedPlaybackFrame({ mediaTime: resumeMediaTime, frameIdx: resumeFrameIdx });
+    }
+    if (typeof updateEventReviewFrameNavUi === "function") updateEventReviewFrameNavUi();
+    if (typeof updatePlaybackSeekBarUi === "function") updatePlaybackSeekBarUi();
+    else if (videoEl.duration && Number.isFinite(videoEl.duration)) {
       seekBar.value = String((videoEl.currentTime / videoEl.duration) * 1000);
       timeLabel.textContent = formatTime(videoEl.currentTime);
     }
@@ -223,7 +230,8 @@ videoEl.addEventListener("pause", () => {
     renderPausedPlaybackFrame({ mediaTime: resumeMediaTime, frameIdx: resumeFrameIdx });
   }
   if (typeof onPlaybackVideoPlayStateChange === "function") onPlaybackVideoPlayStateChange();
-  if (videoEl.duration && Number.isFinite(videoEl.duration)) {
+  if (typeof updatePlaybackSeekBarUi === "function") updatePlaybackSeekBarUi();
+  else if (videoEl.duration && Number.isFinite(videoEl.duration)) {
     seekBar.value = String((videoEl.currentTime / videoEl.duration) * 1000);
     timeLabel.textContent = formatTime(videoEl.currentTime);
   }

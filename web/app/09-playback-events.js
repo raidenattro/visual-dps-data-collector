@@ -138,8 +138,13 @@ async function realignPlaybackToPinnedEvent() {
     } finally {
       explicitFrameSeekInFlight = false;
     }
-    if (seekBar) seekBar.value = String((videoEl.currentTime / videoEl.duration) * 1000);
-    if (timeLabel) timeLabel.textContent = formatTime(videoEl.currentTime);
+    const displayT =
+      typeof videoTimeForFrameIdx === "function" ? videoTimeForFrameIdx(fi) : hit.t;
+    if (typeof updatePlaybackSeekBarUi === "function") updatePlaybackSeekBarUi(displayT);
+    else if (seekBar) seekBar.value = String((displayT / videoEl.duration) * 1000);
+    if (timeLabel && typeof updatePlaybackSeekBarUi !== "function") {
+      timeLabel.textContent = formatTime(displayT);
+    }
   } else {
     await renderExplicitPlaybackFrame(fi);
   }
@@ -336,9 +341,11 @@ async function loadPlaybackEvents(recordId = null) {
 
 function getCurrentPlaybackTimeSec() {
   if (videoEl.duration && Number.isFinite(videoEl.duration) && videoEl.duration > 0) {
-    return typeof timelineSecFromVideoClock === "function"
-      ? timelineSecFromVideoClock()
-      : videoEl.currentTime;
+    return typeof playbackTimelineSecFromVideo === "function"
+      ? playbackTimelineSecFromVideo()
+      : typeof timelineSecFromVideoClock === "function"
+        ? timelineSecFromVideoClock()
+        : videoEl.currentTime;
   }
   if (!frameByTime.length) return 0;
   const idx = Math.floor((parseInt(seekBar.value, 10) / 1000) * frameByTime.length);
@@ -351,13 +358,7 @@ function getCurrentPlaybackFrameIdx() {
     typeof getPlaybackAuthorityFrameIdx === "function" ? getPlaybackAuthorityFrameIdx() : null;
   if (authority != null && authority > 0) return authority;
   const hasVideo = !!(videoEl?.src && Number(videoEl.duration) > 0);
-  const timeSec = hasVideo
-    ? typeof timelineSecFromVideoClock === "function"
-      ? timelineSecFromVideoClock()
-      : typeof resolvePlaybackMediaTime === "function"
-        ? resolvePlaybackMediaTime()
-        : getCurrentPlaybackTimeSec()
-    : getCurrentPlaybackTimeSec();
+  const timeSec = hasVideo ? getCurrentPlaybackTimeSec() : getCurrentPlaybackTimeSec();
   if (typeof frameIdxAtVideoTime === "function") {
     const fi = frameIdxAtVideoTime(timeSec, { playback: hasVideo });
     return fi > 0 ? fi : null;
