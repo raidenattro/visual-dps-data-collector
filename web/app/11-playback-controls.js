@@ -280,13 +280,13 @@ function initEventReviewControls() {
 
   canvas?.addEventListener("click", (e) => {
     if (!eventsPanel || eventsPanel.classList.contains("hidden")) return;
-    const ev = getActiveEvent() ?? getActiveFilteredEvent();
-    if (!ev) {
-      setEventReviewSaveStatus("请先在右侧选择一条碰撞/告警事件", "");
-      return;
-    }
+    let ev = getActiveEvent() ?? getActiveFilteredEvent();
     const personHit = hitTestPersonAtClient(e.clientX, e.clientY);
     if (personHit != null) {
+      if (!ev) {
+        setEventReviewSaveStatus("请先在右侧选择一条碰撞/告警事件", "");
+        return;
+      }
       void setPersonIdForEvent(ev, personHit);
       return;
     }
@@ -298,6 +298,24 @@ function initEventReviewControls() {
     if (!hit) {
       setEventReviewSaveStatus("未点中货框或骨架，请点击货架货框或骨架标签", "");
       return;
+    }
+    ev =
+      typeof resolveEventForBoxAnnotation === "function"
+        ? resolveEventForBoxAnnotation(hit)
+        : getActiveEvent() ?? getActiveFilteredEvent();
+    if (!ev) {
+      setEventReviewSaveStatus("请先在右侧选择一条碰撞/告警事件", "");
+      return;
+    }
+    const key = eventRowKey(ev);
+    if (key !== activeEventKey) {
+      activeEventKey = key;
+      playbackEventLinkExact =
+        typeof eventMatchesPlaybackFrame === "function" &&
+        typeof getResolvedPlaybackFrameIdx === "function" &&
+        eventMatchesPlaybackFrame(ev, getResolvedPlaybackFrameIdx());
+      if (typeof updateReviewDock === "function") updateReviewDock({ skipRedraw: true });
+      if (typeof updateEventMarkerActiveState === "function") updateEventMarkerActiveState();
     }
     void toggleConfirmedBoxForEvent(ev, hit);
   });

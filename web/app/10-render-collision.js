@@ -1357,14 +1357,27 @@ function getReviewBoxHighlightContext(frameIdx = null) {
 
   const confirmedByToken = new Map();
 
+  const addTokensToHighlight = (tokens) => {
+    normalizeBoxTokenList(tokens).forEach((token) => {
+      for (const key of boxTokenLookupKeys(token)) {
+        confirmedByToken.set(key, true);
+      }
+    });
+  };
+
+  // 复核高亮仅落在该帧真实标真事件上，不用连续范本段范围（避免相邻帧/事件误涂紫）
   if (segmentFi != null && segmentFi > 0) {
-    for (const seg of buildVerifiedGroundTruthSegments()) {
-      if (segmentFi < seg.frame_start || segmentFi > seg.frame_end) continue;
-      seg.tokens.forEach((token) => {
-        for (const key of boxTokenLookupKeys(token)) {
-          confirmedByToken.set(key, true);
-        }
-      });
+    for (const ev of playbackEvents) {
+      if (typeof isEventVerified !== "function" || !isEventVerified(ev)) continue;
+      if (
+        typeof eventMatchesPlaybackFrame === "function" &&
+        !eventMatchesPlaybackFrame(ev, segmentFi)
+      ) {
+        continue;
+      }
+      const boxes =
+        typeof getEventConfirmedBoxes === "function" ? getEventConfirmedBoxes(ev) : [];
+      if (boxes.length) addTokensToHighlight(boxes);
     }
   }
 
@@ -1389,11 +1402,7 @@ function getReviewBoxHighlightContext(frameIdx = null) {
     if (includeActiveConfirmed) {
       const boxes =
         typeof getEventConfirmedBoxes === "function" ? getEventConfirmedBoxes(activeEv) : [];
-      boxes.forEach((token) => {
-        for (const key of boxTokenLookupKeys(token)) {
-          confirmedByToken.set(key, true);
-        }
-      });
+      addTokensToHighlight(boxes);
     }
   }
 

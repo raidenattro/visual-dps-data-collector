@@ -33,7 +33,41 @@ function eventRowKey(ev) {
 
 function getEventsOnFrame(frameIdx) {
   const fi = parseInt(frameIdx, 10) || 0;
-  return playbackEvents.filter((e) => (parseInt(e.frame_idx, 10) || 0) === fi);
+  return playbackEvents.filter((e) => eventMatchesPlaybackFrame(e, fi));
+}
+
+/** 货框点选时定位应操作的事件：优先当前帧且含该货框的事件 */
+function resolveEventForBoxAnnotation(token) {
+  const hit = canonicalBoxToken(token);
+  if (!hit) return getActiveEvent() ?? getActiveFilteredEvent();
+
+  const frameIdx =
+    typeof getResolvedPlaybackFrameIdx === "function" ? getResolvedPlaybackFrameIdx() : null;
+
+  const eventHasToken = (ev) => {
+    if (!ev) return false;
+    const boxes = [...getEventConfirmedBoxes(ev), ...normalizeBoxTokenList(ev.box_tokens)];
+    return boxes.some((t) => canonicalBoxToken(t) === hit);
+  };
+
+  if (frameIdx != null && frameIdx > 0) {
+    const onFrame = getEventsOnFrame(frameIdx).filter(eventHasToken);
+    if (onFrame.length === 1) return onFrame[0];
+    if (onFrame.length > 1) {
+      const verified = onFrame.find((e) => isEventVerified(e));
+      return verified || onFrame.find((e) => e.event_type === "alarm") || onFrame[0];
+    }
+  }
+
+  const active = getActiveEvent() ?? getActiveFilteredEvent();
+  if (active && eventHasToken(active)) return active;
+
+  if (frameIdx != null && frameIdx > 0) {
+    const anyOnFrame = getEventsOnFrame(frameIdx);
+    if (anyOnFrame.length === 1) return anyOnFrame[0];
+  }
+
+  return active;
 }
 
 function getVerifiedEventsOnFrame(frameIdx) {
@@ -715,8 +749,21 @@ async function toggleConfirmedBoxForEvent(ev, token) {
     setEventReviewSaveStatus(`货框 ${hit} 不在标注列表中`, "error");
     return;
   }
+  const canonical = canonicalBoxToken(hit);
   const current = getEventConfirmedBoxes(ev);
-  const next = current.includes(hit) ? current.filter((t) => t !== hit) : [...current, hit];
+  const hasToken = current.some((t) => canonicalBoxToken(t) === canonical);
+  const next = hasToken
+    ? current.filter((t) => canonicalBoxToken(t) !== canonical)
+    : [...current, hit];
+  if (isEventVerified(ev) && currentRecordId) {
+    setEventConfirmedBoxes(ev, next, { commitToEvent: true });
+    updateReviewDock();
+    if (typeof updateStageBoxPickMode === "function") updateStageBoxPickMode();
+    redrawCurrentFrame();
+    if (typeof refreshRangeAnnotTemplateSnapshot === "function") refreshRangeAnnotTemplateSnapshot();
+    await persistEventReviewConfirmedBoxes(ev, next);
+    return;
+  }
   await setConfirmedBoxesForEvent(ev, next);
 }
 
