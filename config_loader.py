@@ -123,6 +123,13 @@ def variant_to_backend(variant: str) -> str:
 
 # 数据目录按姿态模型分层：localdata/json|video/rtmpose-{t,s,m}/{机位slug}/...
 POSE_MODEL_TIERS = frozenset({"rtmpose-t", "rtmpose-s", "rtmpose-m"})
+# 纯骨架批采集专用存储层（与 rtmpose-t/s/m 并列，不含机位子目录）
+ONLY_SKELETON_STORAGE_TIER = "only-skeleton"
+STORAGE_TIERS = POSE_MODEL_TIERS | frozenset({ONLY_SKELETON_STORAGE_TIER})
+
+
+def is_storage_tier(name: str) -> bool:
+    return str(name or "").strip().lower() in STORAGE_TIERS
 
 
 def pose_model_tier_from_variant(variant: str) -> str:

@@ -16,6 +16,10 @@
   python scripts/collect/batch_skeleton_collect.py D:/videos --group-by-subfolder --workers 3
   python scripts/collect/batch_skeleton_collect.py D:/videos --group-by-subfolder --workers 1
 
+  # 纯骨架批采集：视频级多线程，写入 localdata/json/only-skeleton/（无需机位/reflection）
+  python scripts/collect/batch_skeleton_collect.py D:/videos --skeleton-only-batch --workers 3
+  python scripts/collect/batch_skeleton_collect.py D:/videos --skeleton-only-batch --variant s --det-variant s -j 4
+
 说明:
   - 递归包含所有子文件夹中的视频
   - 结果写入 localdata/json/{rtmpose-t|s|m}/{机位slug}/{视频主名}_{backend}/
@@ -26,6 +30,7 @@
   - 碰撞模式下复用 annotations/{编号}.json，不为每个视频新建 clip_*.json
   - 保存配套视频时仅复制到 localdata/video，绝不移动或删除源目录中的 MP4
   - --workers：并行线程数（默认 3）；按机组文件夹调度，某文件夹处理完自动接下一个
+  - --skeleton-only-batch：纯骨架批模式，按视频并行，写入 json/only-skeleton/（仍用 --variant/--det-variant 选模型）
   - GPU 下多线程会各占一份模型显存，显存不足时请减小 --workers 或改用 --device cpu
 """
 
@@ -53,6 +58,7 @@ from collect_core import run_collect_job, validate_video_path
 from collect_core import parse_variant as _parse_variant
 from rtmpose_infer import RTMPosePipeline
 from config_loader import (
+    ONLY_SKELETON_STORAGE_TIER,
     allocate_camera_storage_slug,
     build_settings,
     camera_storage_slug,
@@ -161,7 +167,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "-j",
         type=int,
         default=DEFAULT_WORKERS,
-        help=f"并行线程数，按机组文件夹调度（默认 {DEFAULT_WORKERS}；1=单线程串行）",
+        help=f"并行线程数（默认 {DEFAULT_WORKERS}；机位模式按文件夹调度，纯骨架模式按视频调度）",
+    )
+    p.add_argument(
+        "--skeleton-only-batch",
+        action="store_true",
+        help="纯骨架批采集：无需机位/reflection，按视频多线程，默认写入 json/only-skeleton/",
+    )
+    p.add_argument(
+        "--output-tier",
+        default=ONLY_SKELETON_STORAGE_TIER,
+        help=f"纯骨架批模式的存储层目录名（默认 {ONLY_SKELETON_STORAGE_TIER}，位于 json_dir 下）",
     )
     return p
 
@@ -195,15 +211,23 @@ def folder_key_for_item(
     return fallback_camera
 
 
+def storage_video_stem(video_path: Path, rel_name: str, *, flat_skeleton: bool) -> str:
+    """纯骨架扁平存储时用相对路径生成唯一 stem，避免不同子目录同名视频冲突。"""
+    if flat_skeleton:
+        rel_stem = Path(rel_name).with_suffix("").as_posix()
+        return sanitize_file_stem(rel_stem.replace("/", "_").replace("\\", "_"))
+    return sanitize_file_stem(video_path.stem)
+
+
 def base_record_dir(
     paths,
     *,
     backend: str,
     video_stem: str,
     camera_slug: str,
-    pose_tier: str,
+    storage_tier: str,
 ) -> Path:
-    base = json_bucket_dir(paths, camera_slug or None, pose_tier=pose_tier)
+    base = json_bucket_dir(paths, camera_slug or None, pose_tier=storage_tier)
     prefix = sanitize_file_stem(video_stem)
     safe_backend = re.sub(r"[^\w.-]", "_", backend)
     return base / f"{prefix}_{safe_backend}"
@@ -278,6 +302,8 @@ class VideoWorkItem:
     camera_label: str
     camera_slug: str
     index: int
+    storage_tier: str = ""
+    flat_skeleton: bool = False
 
 
 @dataclass
@@ -331,34 +357,43 @@ def collect_one_video(
     with_collision: bool = False,
     pipeline: RTMPosePipeline | None = None,
     print_fn: Callable[..., None] | None = None,
+    storage_tier: str | None = None,
+    flat_skeleton: bool = False,
 ) -> tuple[str, str]:
     """处理单个视频，返回 (status, message)。status: ok | skip | error"""
     _print = print_fn or _locked_print
-    video_stem = sanitize_file_stem(video_path.stem)
+    video_stem = storage_video_stem(video_path, rel_name, flat_skeleton=flat_skeleton)
     source_name = Path(rel_name).name
 
-    pose_tier = pose_model_tier_from_backend(settings.backend)
+    tier = storage_tier or pose_model_tier_from_backend(settings.backend)
+    inference_tier = pose_model_tier_from_backend(settings.backend)
     pose_path = default_pose_json_path(
         paths,
         backend=settings.backend,
         video_stem=video_stem,
         job_id=f"{batch_id}_{index}",
-        camera_slug=camera_slug or None,
-        pose_tier=pose_tier,
+        camera_slug=None if flat_skeleton else (camera_slug or None),
+        pose_tier=tier,
     )
     if skip_existing:
         expected = base_record_dir(
             paths,
             backend=settings.backend,
             video_stem=video_stem,
-            camera_slug=camera_slug,
-            pose_tier=pose_tier,
+            camera_slug="" if flat_skeleton else camera_slug,
+            storage_tier=tier,
         )
         if record_already_exists(expected):
             return "skip", f"已存在 {expected.relative_to(paths.json_dir)}"
 
     job_id = f"{batch_id}_{index}"
-    _print(f"\n[{index + 1}/{total}] {rel_name} → 机位 {camera_label} ({camera_slug})")
+    if flat_skeleton:
+        _print(
+            f"\n[{index + 1}/{total}] {rel_name} → {tier}/"
+            f"（RTMPose-{settings.variant.upper()} + RTMDet-{settings.det_variant}）"
+        )
+    else:
+        _print(f"\n[{index + 1}/{total}] {rel_name} → 机位 {camera_label} ({camera_slug})")
     t0 = time.perf_counter()
 
     def on_progress(current: int, frame_total: int) -> None:
@@ -414,7 +449,7 @@ def collect_one_video(
             saved_video_path = persist_record_video(
                 video_path,
                 pose_path,
-                camera_slug=camera_slug or None,
+                camera_slug=None if flat_skeleton else (camera_slug or None),
             )
         except OSError as exc:
             return "error", f"保存配套视频失败: {exc}"
@@ -432,7 +467,8 @@ def collect_one_video(
         "video_stem": video_stem,
         "camera_label": camera_label or None,
         "camera_slug": camera_slug or None,
-        "pose_model_tier": pose_tier,
+        "pose_model_tier": tier,
+        "inference_pose_tier": inference_tier,
         "storage": data.get("storage") or STORAGE_V2_PARQUET,
         "pose_file": f"{record_id}/manifest.json",
         "source_video": source_name,
@@ -449,6 +485,7 @@ def collect_one_video(
         "save_video": bool(save_video),
         "has_annotation": bool(source_annotation or data.get("annotation")),
         "collision_enabled": collision_computed,
+        "skeleton_only": flat_skeleton or not with_collision,
         "collect_config": per_config,
     }
     if source_annotation and source_annotation.is_file():
@@ -481,6 +518,52 @@ def collect_one_video(
     elapsed = time.perf_counter() - t0
     frames = data.get("frame_count", 0)
     return "ok", f"{record_id} · {frames} 帧 · {elapsed:.1f}s"
+
+
+def process_one_video(
+    item: VideoWorkItem,
+    *,
+    settings,
+    paths,
+    collect_config: dict,
+    save_video: bool,
+    skip_existing: bool,
+    batch_id: str,
+    total: int,
+    annotation_by_camera: dict[str, ResolveResult],
+    with_collision: bool,
+) -> VideoWorkResult:
+    """处理单个视频（纯骨架批模式，供视频级线程池调用）。"""
+    per_config = {
+        **collect_config,
+        "camera_label": item.camera_label or None,
+        "camera_slug": item.camera_slug or None,
+    }
+    status, msg = collect_one_video(
+        video_path=item.video_path,
+        rel_name=item.rel_name,
+        camera_label=item.camera_label,
+        camera_slug=item.camera_slug,
+        settings=settings,
+        paths=paths,
+        collect_config=per_config,
+        save_video=save_video,
+        skip_existing=skip_existing,
+        batch_id=batch_id,
+        index=item.index,
+        total=total,
+        camera_annotation=annotation_by_camera.get(item.camera_label) if with_collision else None,
+        with_collision=with_collision,
+        storage_tier=item.storage_tier or None,
+        flat_skeleton=item.flat_skeleton,
+    )
+    if status == "ok":
+        _locked_print(f"  ✅ {msg}")
+    elif status == "skip":
+        _locked_print(f"  ⏭️ {msg}")
+    else:
+        _locked_print(f"  ❌ {msg}")
+    return VideoWorkResult(relative_path=item.rel_name, status=status, message=msg)
 
 
 def process_folder_videos(
@@ -522,6 +605,8 @@ def process_folder_videos(
             total=total,
             camera_annotation=annotation_by_camera.get(item.camera_label) if with_collision else None,
             with_collision=with_collision,
+            storage_tier=item.storage_tier or None,
+            flat_skeleton=item.flat_skeleton,
         )
         folder_results.append(
             VideoWorkResult(relative_path=item.rel_name, status=status, message=msg)
@@ -621,6 +706,100 @@ def run_collect_batch(
     return ok, skip, err, results, errors
 
 
+def _consume_video_results(
+    video_results: list[VideoWorkResult],
+    *,
+    results: list[dict],
+    errors: list[dict],
+) -> tuple[int, int, int]:
+    ok = skip = err = 0
+    for item in video_results:
+        if item.status == "ok":
+            ok += 1
+            results.append(
+                {"relative_path": item.relative_path, "record_id": item.message.split(" · ", 1)[0]}
+            )
+        elif item.status == "skip":
+            skip += 1
+        else:
+            err += 1
+            errors.append({"relative_path": item.relative_path, "error": item.message})
+    return ok, skip, err
+
+
+def run_collect_batch_videos(
+    *,
+    video_items: list[VideoWorkItem],
+    workers: int,
+    settings,
+    paths,
+    collect_config: dict,
+    save_video: bool,
+    skip_existing: bool,
+    batch_id: str,
+    total: int,
+) -> tuple[int, int, int, list[dict], list[dict]]:
+    """纯骨架模式：按视频并行调度。"""
+    ok = skip = err = 0
+    results: list[dict] = []
+    errors: list[dict] = []
+
+    if workers <= 1:
+        for item in video_items:
+            one = process_one_video(
+                item,
+                settings=settings,
+                paths=paths,
+                collect_config=collect_config,
+                save_video=save_video,
+                skip_existing=skip_existing,
+                batch_id=batch_id,
+                total=total,
+                annotation_by_camera={},
+                with_collision=False,
+            )
+            c_ok, c_skip, c_err = _consume_video_results([one], results=results, errors=errors)
+            ok += c_ok
+            skip += c_skip
+            err += c_err
+        return ok, skip, err, results, errors
+
+    max_workers = min(workers, len(video_items))
+    _locked_print(f"🧵 纯骨架并行: {max_workers} 线程 · {len(video_items)} 个视频（按视频调度）")
+    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="skel") as executor:
+        futures = {
+            executor.submit(
+                process_one_video,
+                item,
+                settings=settings,
+                paths=paths,
+                collect_config=collect_config,
+                save_video=save_video,
+                skip_existing=skip_existing,
+                batch_id=batch_id,
+                total=total,
+                annotation_by_camera={},
+                with_collision=False,
+            ): item
+            for item in video_items
+        }
+        for future in as_completed(futures):
+            item = futures[future]
+            try:
+                one = future.result()
+            except Exception as exc:
+                err += 1
+                errors.append({"relative_path": item.rel_name, "error": str(exc)})
+                _locked_print(f"  ❌ {item.rel_name} 异常: {exc}")
+                continue
+            c_ok, c_skip, c_err = _consume_video_results([one], results=results, errors=errors)
+            ok += c_ok
+            skip += c_skip
+            err += c_err
+
+    return ok, skip, err, results, errors
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
     root = args.root.resolve()
@@ -631,8 +810,20 @@ def main(argv: list[str] | None = None) -> int:
     elif args.save_video:
         save_video_cli = True
 
-    if not args.group_by_subfolder and not str(args.camera_label or "").strip():
-        print("❌ 请指定 --camera-label，或使用 --group-by-subfolder 按子目录分组", file=sys.stderr)
+    skeleton_only_batch = bool(args.skeleton_only_batch)
+    output_tier = str(args.output_tier or ONLY_SKELETON_STORAGE_TIER).strip()
+    if not output_tier:
+        print("❌ --output-tier 不能为空", file=sys.stderr)
+        return 2
+
+    if skeleton_only_batch:
+        if args.with_collision:
+            print("❌ --skeleton-only-batch 与 --with-collision 不能同时使用", file=sys.stderr)
+            return 2
+        if args.group_by_subfolder or str(args.camera_label or "").strip():
+            print("⚠️ 纯骨架批模式忽略 --group-by-subfolder / --camera-label", file=sys.stderr)
+    elif not args.group_by_subfolder and not str(args.camera_label or "").strip():
+        print("❌ 请指定 --camera-label，或使用 --group-by-subfolder / --skeleton-only-batch", file=sys.stderr)
         return 2
 
     if args.with_collision and not REFLECTION_OK:
@@ -674,80 +865,110 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     fallback_camera = str(args.camera_label or "").strip()
-    grouped: dict[str, list[tuple[Path, str]]] = defaultdict(list)
-    for video_path, rel in videos:
-        folder_key = folder_key_for_item(
-            rel,
-            group_by_subfolder=args.group_by_subfolder,
-            fallback_camera=fallback_camera,
-        )
-        if not folder_key:
-            print(f"❌ 无法确定机位: {rel}（请设置 --camera-label）", file=sys.stderr)
-            return 2
-        grouped[folder_key].append((video_path, rel))
-
-    pose_tier = pose_model_tier_from_backend(settings.backend)
     flat: list[tuple[Path, str, str, str]] = []
     label_by_folder: dict[str, str] = {}
     slug_by_folder: dict[str, str] = {}
-    for folder_key in sorted(grouped.keys()):
-        if args.group_by_subfolder:
-            cam_label, cam_slug = camera_storage_slug_for_folder(
-                paths, folder_key, pose_tier=pose_tier
-            )
-        else:
-            cam_label, dup_n = parse_camera_folder_name(folder_key)
-            cam_label = cam_label or folder_key
-            if dup_n is not None:
-                cam_slug = f"{camera_storage_slug(cam_label)}-({dup_n})"
-            else:
-                cam_slug = allocate_camera_storage_slug(
-                    paths, cam_label, pose_tier=pose_tier
-                )
-        label_by_folder[folder_key] = cam_label
-        slug_by_folder[folder_key] = cam_slug
-        for video_path, rel in grouped[folder_key]:
-            flat.append((video_path, rel, cam_label, cam_slug))
-
-    if args.limit and args.limit > 0:
-        flat = flat[: args.limit]
-
+    video_items: list[VideoWorkItem] = []
     folder_work: list[tuple[str, list[VideoWorkItem]]] = []
-    folder_items: dict[str, list[VideoWorkItem]] = defaultdict(list)
-    for i, (video_path, rel, cam_label, cam_slug) in enumerate(flat):
-        folder_key = folder_key_for_item(
-            rel,
-            group_by_subfolder=args.group_by_subfolder,
-            fallback_camera=fallback_camera,
-        )
-        folder_items[folder_key].append(
-            VideoWorkItem(
-                video_path=video_path,
-                rel_name=rel,
-                camera_label=cam_label,
-                camera_slug=cam_slug,
-                index=i,
-            )
-        )
-    for folder_key in sorted(folder_items.keys()):
-        folder_work.append((folder_key, folder_items[folder_key]))
+    storage_tier = output_tier if skeleton_only_batch else pose_model_tier_from_backend(settings.backend)
 
-    total = len(flat)
+    if skeleton_only_batch:
+        limited = videos[: args.limit] if args.limit and args.limit > 0 else videos
+        for i, (video_path, rel) in enumerate(limited):
+            video_items.append(
+                VideoWorkItem(
+                    video_path=video_path,
+                    rel_name=rel,
+                    camera_label="",
+                    camera_slug="",
+                    index=i,
+                    storage_tier=storage_tier,
+                    flat_skeleton=True,
+                )
+            )
+        total = len(video_items)
+    else:
+        grouped: dict[str, list[tuple[Path, str]]] = defaultdict(list)
+        for video_path, rel in videos:
+            folder_key = folder_key_for_item(
+                rel,
+                group_by_subfolder=args.group_by_subfolder,
+                fallback_camera=fallback_camera,
+            )
+            if not folder_key:
+                print(f"❌ 无法确定机位: {rel}（请设置 --camera-label）", file=sys.stderr)
+                return 2
+            grouped[folder_key].append((video_path, rel))
+
+        pose_tier = pose_model_tier_from_backend(settings.backend)
+        for folder_key in sorted(grouped.keys()):
+            if args.group_by_subfolder:
+                cam_label, cam_slug = camera_storage_slug_for_folder(
+                    paths, folder_key, pose_tier=pose_tier
+                )
+            else:
+                cam_label, dup_n = parse_camera_folder_name(folder_key)
+                cam_label = cam_label or folder_key
+                if dup_n is not None:
+                    cam_slug = f"{camera_storage_slug(cam_label)}-({dup_n})"
+                else:
+                    cam_slug = allocate_camera_storage_slug(
+                        paths, cam_label, pose_tier=pose_tier
+                    )
+            label_by_folder[folder_key] = cam_label
+            slug_by_folder[folder_key] = cam_slug
+            for video_path, rel in grouped[folder_key]:
+                flat.append((video_path, rel, cam_label, cam_slug))
+
+        if args.limit and args.limit > 0:
+            flat = flat[: args.limit]
+
+        folder_items: dict[str, list[VideoWorkItem]] = defaultdict(list)
+        for i, (video_path, rel, cam_label, cam_slug) in enumerate(flat):
+            folder_key = folder_key_for_item(
+                rel,
+                group_by_subfolder=args.group_by_subfolder,
+                fallback_camera=fallback_camera,
+            )
+            folder_items[folder_key].append(
+                VideoWorkItem(
+                    video_path=video_path,
+                    rel_name=rel,
+                    camera_label=cam_label,
+                    camera_slug=cam_slug,
+                    index=i,
+                )
+            )
+        for folder_key in sorted(folder_items.keys()):
+            folder_work.append((folder_key, folder_items[folder_key]))
+        total = len(flat)
+
     print(f"📁 根目录: {root}")
     print(f"🎬 视频数: {total}（扩展名: {', '.join(sorted(VIDEO_EXTENSIONS))}）")
-    print(f"📦 姿态: {settings.backend} · 检测: {settings.det_backend} · 数据层: {pose_tier}/")
+    if skeleton_only_batch:
+        print(f"📦 推理模型: RTMPose-{settings.variant.upper()} ({settings.backend}) · RTMDet-{settings.det_variant} ({settings.det_backend})")
+        print(f"💾 存储层: {paths.json_dir}/{storage_tier}/{{视频stem}}_{settings.backend}/")
+    else:
+        print(f"📦 姿态: {settings.backend} · 检测: {settings.det_backend} · 数据层: {storage_tier}/")
     print(f"🏷️ 标注目录: {paths.annotation_dir}")
     print(f"⏱️ 采集节拍 frame_rate={settings.frame_rate}（0=全速）")
     if settings.save_video:
         print("💾 保存配套视频: 是（复制到 localdata/video，不移动源文件）")
     else:
         print("💾 保存配套视频: 否")
-    print(f"🦴 模式: {'骨架 + 碰撞' if args.with_collision else '仅骨架（不算碰撞）'}")
-    if workers <= 1:
+    print(f"🦴 模式: {'纯骨架批采集' if skeleton_only_batch else ('骨架 + 碰撞' if args.with_collision else '仅骨架（不算碰撞）')}")
+    if skeleton_only_batch:
+        if workers <= 1:
+            print("🧵 并行: 关闭（单线程串行）")
+        else:
+            print(f"🧵 并行: {min(workers, total)} 线程 · 按视频调度")
+    elif workers <= 1:
         print("🧵 并行: 关闭（单线程串行）")
     else:
         print(f"🧵 并行: {min(workers, len(folder_work))} 线程 · 按机组文件夹调度（共 {len(folder_work)} 个）")
-    if args.group_by_subfolder:
+    if skeleton_only_batch:
+        print(f"📂 输出: {json_bucket_dir(paths, None, pose_tier=storage_tier)}")
+    elif args.group_by_subfolder:
         print(f"📂 机位分组: 按第一级子目录（{len(slug_by_folder)} 个文件夹）")
         for folder_key in sorted(slug_by_folder):
             cam = label_by_folder[folder_key]
@@ -760,12 +981,17 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.dry_run:
         print("\n[dry-run] 待处理列表:")
-        for i, (_, rel, cam, slug) in enumerate(flat):
-            print(f"  {i + 1:4d}. [{cam} / {slug}] {rel}")
+        if skeleton_only_batch:
+            for i, item in enumerate(video_items):
+                stem = storage_video_stem(item.video_path, item.rel_name, flat_skeleton=True)
+                print(f"  {i + 1:4d}. [{storage_tier}] {item.rel_name} → {stem}_{settings.backend}/")
+        else:
+            for i, (_, rel, cam, slug) in enumerate(flat):
+                print(f"  {i + 1:4d}. [{cam} / {slug}] {rel}")
         return 0
 
     annotation_by_camera: dict[str, ResolveResult] = {}
-    if args.with_collision:
+    if args.with_collision and not skeleton_only_batch:
         for cam_label in sorted(set(label_by_folder.values())):
             try:
                 annotation_by_camera[cam_label] = resolve_annotation_for_camera_label(paths, cam_label)
@@ -791,25 +1017,41 @@ def main(argv: list[str] | None = None) -> int:
         camera_label=fallback_camera or None,
         camera_slug=slug_by_folder.get(fallback_camera) if fallback_camera else None,
         batch_id=batch_id,
-        annotation_source="reflection" if args.with_collision else "skeleton_only",
-        skeleton_only=not args.with_collision,
+        annotation_source="skeleton_only" if skeleton_only_batch else ("reflection" if args.with_collision else "skeleton_only"),
+        skeleton_only=skeleton_only_batch or not args.with_collision,
     )
     collect_config["workers"] = workers
+    if skeleton_only_batch:
+        collect_config["output_tier"] = storage_tier
+        collect_config["skeleton_only_batch"] = True
 
     batch_t0 = time.perf_counter()
-    ok, skip, err, results, errors = run_collect_batch(
-        folder_work=folder_work,
-        workers=workers,
-        settings=settings,
-        paths=paths,
-        collect_config=collect_config,
-        save_video=settings.save_video,
-        skip_existing=args.skip_existing,
-        batch_id=batch_id,
-        total=total,
-        annotation_by_camera=annotation_by_camera,
-        with_collision=args.with_collision,
-    )
+    if skeleton_only_batch:
+        ok, skip, err, results, errors = run_collect_batch_videos(
+            video_items=video_items,
+            workers=workers,
+            settings=settings,
+            paths=paths,
+            collect_config=collect_config,
+            save_video=settings.save_video,
+            skip_existing=args.skip_existing,
+            batch_id=batch_id,
+            total=total,
+        )
+    else:
+        ok, skip, err, results, errors = run_collect_batch(
+            folder_work=folder_work,
+            workers=workers,
+            settings=settings,
+            paths=paths,
+            collect_config=collect_config,
+            save_video=settings.save_video,
+            skip_existing=args.skip_existing,
+            batch_id=batch_id,
+            total=total,
+            annotation_by_camera=annotation_by_camera,
+            with_collision=args.with_collision,
+        )
 
     total_elapsed = round(time.perf_counter() - batch_t0, 1)
     print(
@@ -817,23 +1059,25 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(f"数据目录: {paths.json_dir}")
     if settings.save_video:
-        print(f"视频目录: {paths.video_dir}")
+        if skeleton_only_batch:
+            print(f"视频目录: {paths.video_dir}/{storage_tier}/")
+        else:
+            print(f"视频目录: {paths.video_dir}")
 
     try:
-        for folder_key, cam_slug in slug_by_folder.items():
-            cam_label = label_by_folder[folder_key]
-            bucket = json_bucket_dir(paths, cam_slug, pose_tier=pose_tier)
+        if skeleton_only_batch:
+            bucket = json_bucket_dir(paths, None, pose_tier=storage_tier)
             manifest_path = bucket / f"_batch_{batch_id}.json"
             with open(manifest_path, "w", encoding="utf-8") as f:
                 json.dump(
                     {
                         "batch_id": batch_id,
-                        "camera_label": cam_label,
-                        "camera_slug": cam_slug,
+                        "storage_tier": storage_tier,
                         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
                         "root": str(root),
-                        "skeleton_only": not args.with_collision,
-                        "with_collision": args.with_collision,
+                        "skeleton_only": True,
+                        "skeleton_only_batch": True,
+                        "with_collision": False,
                         "success_count": ok,
                         "error_count": err,
                         "skip_count": skip,
@@ -846,6 +1090,33 @@ def main(argv: list[str] | None = None) -> int:
                     ensure_ascii=False,
                     indent=2,
                 )
+        else:
+            for folder_key, cam_slug in slug_by_folder.items():
+                cam_label = label_by_folder[folder_key]
+                bucket = json_bucket_dir(paths, cam_slug, pose_tier=storage_tier)
+                manifest_path = bucket / f"_batch_{batch_id}.json"
+                with open(manifest_path, "w", encoding="utf-8") as f:
+                    json.dump(
+                        {
+                            "batch_id": batch_id,
+                            "camera_label": cam_label,
+                            "camera_slug": cam_slug,
+                            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                            "root": str(root),
+                            "skeleton_only": not args.with_collision,
+                            "with_collision": args.with_collision,
+                            "success_count": ok,
+                            "error_count": err,
+                            "skip_count": skip,
+                            "elapsed_sec": total_elapsed,
+                            "collect_config": collect_config,
+                            "results": [r for r in results],
+                            "errors": errors,
+                        },
+                        f,
+                        ensure_ascii=False,
+                        indent=2,
+                    )
     except OSError:
         pass
 
