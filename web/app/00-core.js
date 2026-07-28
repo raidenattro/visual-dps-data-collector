@@ -65,8 +65,11 @@ const FRAME_CHUNK_PREFETCH_PROGRESS = 0.5;
 const FRAME_CHUNK_PREFETCH_LOOKAHEAD_SEC = 2;
 const COLLISION_CFG_STORAGE_KEY = "datacollect_collision_cfg";
 const DET_BBOX_STORAGE_KEY = "datacollect_playback_show_det_bbox";
+const SKELETON_STORAGE_KEY = "datacollect_playback_show_skeleton";
 /** 回放叠加 RTMDet 人体框（person.bbox） */
 let showDetBbox = false;
+/** 回放叠加人体骨架（连线/关键点），默认关闭以免遮挡标注 */
+let showSkeleton = false;
 /** getDisplayLayout 缓存（窗口/视频尺寸变化时失效） */
 let cachedDisplayLayout = null;
 let cachedDisplayLayoutKey = "";

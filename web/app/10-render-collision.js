@@ -2006,7 +2006,7 @@ function bakePlaybackStaticLayer() {
 }
 
 function drawSkeletonConnections(frame, inferW, inferH, layout) {
-  if (!frame?.persons?.length) return;
+  if (!showSkeleton || !frame?.persons?.length) return;
   ctx.lineWidth = 2;
   ctx.strokeStyle = "rgba(34, 211, 238, 0.9)";
   ctx.beginPath();
@@ -2026,7 +2026,7 @@ function drawSkeletonConnections(frame, inferW, inferH, layout) {
 }
 
 function drawSkeletonKeypoints(frame, inferW, inferH, layout) {
-  if (!frame?.persons?.length) return;
+  if (!showSkeleton || !frame?.persons?.length) return;
   frame.persons.forEach((person) => {
     const kpts = person.keypoints || [];
     kpts.forEach((kp, i) => {

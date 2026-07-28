@@ -101,6 +101,35 @@ function initPlaybackDetBboxToggle() {
   });
 }
 
+function readShowSkeletonFromStorage() {
+  try {
+    return localStorage.getItem(SKELETON_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function persistShowSkeleton() {
+  try {
+    localStorage.setItem(SKELETON_STORAGE_KEY, showSkeleton ? "1" : "0");
+  } catch {
+    /* ignore */
+  }
+}
+
+function initPlaybackSkeletonToggle() {
+  const cb = $("#playback-show-skeleton");
+  if (!cb || cb.dataset.bound) return;
+  cb.dataset.bound = "1";
+  showSkeleton = readShowSkeletonFromStorage();
+  cb.checked = showSkeleton;
+  cb.addEventListener("change", () => {
+    showSkeleton = !!cb.checked;
+    persistShowSkeleton();
+    redrawCurrentFrame();
+  });
+}
+
 function isPlaybackActive() {
   if (jsonOnlyTimer) return true;
   return !!(videoEl.src && !videoEl.paused && !videoEl.ended);
@@ -441,6 +470,7 @@ seekBar.addEventListener("input", async () => {
 bindStageLayoutWatch();
 initPlaybackSpeedControl();
 initPlaybackDetBboxToggle();
+initPlaybackSkeletonToggle();
 initEventReviewControls();
 initPlaybackRecordFilter();
 void loadInferenceConfigDefaults();
