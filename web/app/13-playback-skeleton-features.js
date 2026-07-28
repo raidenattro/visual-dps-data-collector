@@ -117,6 +117,22 @@ function clearPlaybackSkeletonFeatures() {
   }
 }
 
+/** 骨骼特征侧栏是否应对当前记录可见 */
+function syncSkeletonFeaturesPanelVisibility() {
+  const panel = playbackFeaturesPanelEl();
+  if (!panel) return;
+  if (showSkeletonFeatures && playbackFeaturesRecordId) {
+    panel.classList.remove("hidden");
+  } else {
+    panel.classList.add("hidden");
+  }
+}
+
+/** 侧栏或特征ID标签任一开启时才更新/拉取特征 */
+function shouldUpdatePlaybackFeatures() {
+  return !!(showSkeletonFeatures || showFeatureTrackLabels);
+}
+
 function loadPlaybackSkeletonFeatures(recordId) {
   const rid = String(recordId || "").trim();
   if (!rid) return;
@@ -124,8 +140,7 @@ function loadPlaybackSkeletonFeatures(recordId) {
   playbackFeaturesCache.clear();
   playbackFeaturesCurrentPersons = [];
   playbackFeaturesFetchEnabled = false;
-  const panel = playbackFeaturesPanelEl();
-  if (panel) panel.classList.remove("hidden");
+  syncSkeletonFeaturesPanelVisibility();
   const meta = $("#playback-skeleton-features-meta");
   if (meta) meta.textContent = "暂停时显示本帧特征参数";
   const body = $("#playback-skeleton-features-body");
@@ -503,15 +518,16 @@ async function ensurePlaybackFeaturesForFrame(frameIdx) {
 }
 
 function updatePlaybackSkeletonFeaturesUi(frameIdx) {
+  if (!shouldUpdatePlaybackFeatures()) return;
   const panel = playbackFeaturesPanelEl();
-  if (!panel || panel.classList.contains("hidden")) return;
+  if (!panel) return;
   const fi = parseInt(frameIdx, 10);
   const frameLbl = $("#playback-skeleton-features-frame");
   if (frameLbl) frameLbl.textContent = Number.isFinite(fi) && fi > 0 ? String(fi) : "—";
 
   // 仅暂停时拉取并展示特征参数
   if (isPlaybackVideoPlaying()) {
-    renderPlaybackFeaturesPlayingPlaceholder();
+    if (showSkeletonFeatures) renderPlaybackFeaturesPlayingPlaceholder();
     return;
   }
 
@@ -521,7 +537,7 @@ function updatePlaybackSkeletonFeaturesUi(frameIdx) {
   playbackFeaturesDebounceTimer = setTimeout(() => {
     playbackFeaturesDebounceTimer = null;
     if (isPlaybackVideoPlaying()) {
-      renderPlaybackFeaturesPlayingPlaceholder();
+      if (showSkeletonFeatures) renderPlaybackFeaturesPlayingPlaceholder();
       return;
     }
     const targetFi = currentPlaybackFeaturesFrameIdx();
@@ -552,15 +568,18 @@ function getPlaybackFeaturePersonsForCanvas() {
 
 let showFeatureTrackLabels = false;
 const FEATURE_LABELS_STORAGE_KEY = "datacollect_playback_show_feature_labels";
+/** 回放骨骼特征侧栏，默认关闭以免占位干扰标注 */
+let showSkeletonFeatures = false;
+const SKELETON_FEATURES_STORAGE_KEY = "datacollect_playback_show_skeleton_features";
 
 function initPlaybackFeatureLabelToggle() {
   const cb = $("#playback-show-feature-labels");
-  if (!cb) return;
+  if (!cb || cb.dataset.bound) return;
+  cb.dataset.bound = "1";
   try {
-    const saved = localStorage.getItem(FEATURE_LABELS_STORAGE_KEY);
-    if (saved === "0") showFeatureTrackLabels = false;
+    showFeatureTrackLabels = localStorage.getItem(FEATURE_LABELS_STORAGE_KEY) === "1";
   } catch (_) {
-    /* ignore */
+    showFeatureTrackLabels = false;
   }
   cb.checked = showFeatureTrackLabels;
   cb.addEventListener("change", () => {
@@ -570,10 +589,43 @@ function initPlaybackFeatureLabelToggle() {
     } catch (_) {
       /* ignore */
     }
+    if (showFeatureTrackLabels && !isPlaybackVideoPlaying()) {
+      const fi = currentPlaybackFeaturesFrameIdx();
+      if (fi > 0) updatePlaybackSkeletonFeaturesUi(fi);
+    }
     scheduleFeatureLabelRepaint();
   });
 }
 
+function initPlaybackSkeletonFeaturesToggle() {
+  const cb = $("#playback-show-skeleton-features");
+  if (!cb || cb.dataset.bound) return;
+  cb.dataset.bound = "1";
+  try {
+    showSkeletonFeatures = localStorage.getItem(SKELETON_FEATURES_STORAGE_KEY) === "1";
+  } catch (_) {
+    showSkeletonFeatures = false;
+  }
+  cb.checked = showSkeletonFeatures;
+  syncSkeletonFeaturesPanelVisibility();
+  cb.addEventListener("change", () => {
+    showSkeletonFeatures = !!cb.checked;
+    try {
+      localStorage.setItem(SKELETON_FEATURES_STORAGE_KEY, showSkeletonFeatures ? "1" : "0");
+    } catch (_) {
+      /* ignore */
+    }
+    syncSkeletonFeaturesPanelVisibility();
+    if (showSkeletonFeatures && !isPlaybackVideoPlaying()) {
+      const fi = currentPlaybackFeaturesFrameIdx();
+      if (fi > 0) updatePlaybackSkeletonFeaturesUi(fi);
+    }
+  });
+}
+
 if (typeof document !== "undefined") {
-  document.addEventListener("DOMContentLoaded", initPlaybackFeatureLabelToggle);
+  document.addEventListener("DOMContentLoaded", () => {
+    initPlaybackFeatureLabelToggle();
+    initPlaybackSkeletonFeaturesToggle();
+  });
 }
