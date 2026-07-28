@@ -1371,7 +1371,10 @@ def _patch_record_event_review_locked(
             }
         )
 
-    next_status = "in_progress"
+    next_status: str | None = "in_progress"
+    # 仅更新已标真条目的货框确认时，不降级「已复核」；增删标真仍回到复核中
+    if action == "set_confirmed_box":
+        next_status = None
     event_total = event_total_hint if event_total_hint is not None else len(all_events)
 
     try:
