@@ -1016,29 +1016,50 @@ def ensure_no_collision_review_completed(
         return load_event_review(locator)
 
 
+def _timeline_by_frame_for_locator(locator: RecordLocator) -> dict[int, dict[str, Any]]:
+    """按 frame_idx 索引 timeline 行（写入 v2 时填充 box_tokens / event_type）。"""
+    try:
+        rows = load_timeline(locator, include_events=True)
+    except (RuntimeError, OSError, ValueError):
+        return {}
+    out: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        try:
+            fi = int(row.get("frame_idx") or 0)
+        except (TypeError, ValueError):
+            continue
+        if fi > 0:
+            out[fi] = row
+    return out
+
+
 def cache_event_review_total(locator: RecordLocator, event_total: int) -> dict[str, Any]:
     """仅缓存事件总数（不改变复核状态），避免列表反复扫描 timeline。"""
     with event_review_write_lock(locator):
-        review = load_event_review(locator)
+        raw, _ = _first_existing_event_review_raw(locator)
         total = max(0, int(event_total))
-        if review.get("event_total") == total:
-            return review
+        if raw and raw.get("event_total") == total:
+            return load_event_review(locator)
 
-        payload: dict[str, Any] = {
+        from review_store import extract_segment_window, load_meta_for_locator, review_key_for_record
+
+        meta = load_meta_for_locator(locator)
+        review_key = review_key_for_record(meta=meta, record_id=locator.record_id)
+        seg_start, seg_end = extract_segment_window(meta=meta, record_id=locator.record_id)
+        payload: dict[str, Any] = dict(raw) if raw else {
             "schema": EVENT_REVIEW_SCHEMA,
             "record_id": locator.record_id,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-            "verified_true": list(review.get("verified_true") or []),
-            "event_total": total,
+            "review_key": review_key,
+            "source_video": str(meta.get("source_video") or ""),
+            "segment_start": seg_start,
+            "segment_end": seg_end,
+            "verified_true": [],
+            "status": "",
         }
-        for key in ("review_key", "source_video", "segment_start", "segment_end"):
-            if review.get(key):
-                payload[key] = review.get(key)
-        st = str(review.get("status") or "").strip().lower()
-        if st:
-            payload["status"] = st
-        if review.get("completed_at"):
-            payload["completed_at"] = review.get("completed_at")
+        payload["event_total"] = total
+        payload["updated_at"] = datetime.now(timezone.utc).isoformat()
 
         _write_json_atomic(event_review_path(locator), payload)
         return load_event_review(locator)
@@ -1071,20 +1092,31 @@ def save_event_review(
     status: str | None = None,
     event_total: int | None = None,
 ) -> Path:
-    """保存人工复核结果到 review_dir（与 pose tier 解耦）。"""
+    """保存人工复核结果到 review_dir（schema v2：逐帧 + bindings）。"""
     with event_review_write_lock(locator):
+        from event_review_frame_v2 import (
+            EVENT_REVIEW_SCHEMA_V2,
+            is_frame_v2_entry,
+            migrate_verified_true_to_frame_v2,
+        )
         from review_store import extract_segment_window, load_meta_for_locator, review_key_for_record
 
         meta = load_meta_for_locator(locator)
         review_key = review_key_for_record(meta=meta, record_id=locator.record_id)
         seg_start, seg_end = extract_segment_window(meta=meta, record_id=locator.record_id)
+        raw, _ = _first_existing_event_review_raw(locator)
         existing = load_event_review(locator)
+        timeline_by_frame = _timeline_by_frame_for_locator(locator)
+
         if verified_true is None:
-            normalized = list(existing.get("verified_true") or [])
+            source_items = list((raw or {}).get("verified_true") or [])
         else:
-            normalized = []
+            source_items = []
             seen: set[str] = set()
             for item in verified_true:
+                if is_frame_v2_entry(item if isinstance(item, dict) else {}):
+                    source_items.append(item)
+                    continue
                 norm = normalize_review_entry(item if isinstance(item, dict) else {})
                 if not norm:
                     continue
@@ -1092,8 +1124,8 @@ def save_event_review(
                 if sig in seen:
                     continue
                 seen.add(sig)
-                normalized.append(norm)
-            normalized.sort(
+                source_items.append(norm)
+            source_items.sort(
                 key=lambda e: (
                     int(e.get("frame_idx") or 0),
                     str(e.get("event_type") or ""),
@@ -1101,15 +1133,20 @@ def save_event_review(
                 )
             )
 
+        v2_entries, _ = migrate_verified_true_to_frame_v2(
+            source_items,
+            timeline_by_frame=timeline_by_frame,
+        )
+
         payload: dict[str, Any] = {
-            "schema": EVENT_REVIEW_SCHEMA,
+            "schema": EVENT_REVIEW_SCHEMA_V2,
             "record_id": locator.record_id,
             "review_key": review_key,
             "source_video": str(meta.get("source_video") or existing.get("source_video") or ""),
             "segment_start": seg_start,
             "segment_end": seg_end,
             "updated_at": datetime.now(timezone.utc).isoformat(),
-            "verified_true": normalized,
+            "verified_true": v2_entries,
         }
 
         prev_status = resolve_event_review_status(existing)
@@ -1133,7 +1170,7 @@ def save_event_review(
             payload["status"] = prev_status
             if prev_status == REVIEW_STATUS_COMPLETED and existing.get("completed_at"):
                 payload["completed_at"] = existing.get("completed_at")
-        elif normalized or verified_true is not None:
+        elif v2_entries or verified_true is not None:
             payload["status"] = REVIEW_STATUS_IN_PROGRESS
         elif existing.get("status"):
             payload["status"] = existing.get("status")

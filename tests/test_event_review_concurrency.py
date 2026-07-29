@@ -111,13 +111,86 @@ class EventReviewConcurrencyTest(unittest.TestCase):
 
         saved = pose_store.load_event_review(self.locator)
         self.assertEqual(saved["event_total"], 939)
+        self.assertEqual(len(saved.get("verified_true") or []), 1)
+        self.assertEqual(saved["verified_true"][0]["frame_idx"], 1272)
+        self.assertEqual(saved["verified_true"][0]["confirmed_box_tokens"], ["Box_2015"])
 
         review_path = pose_store.event_review_path(self.locator)
         with review_path.open(encoding="utf-8") as f:
             on_disk = json.load(f)
         self.assertIsInstance(on_disk, dict)
+        self.assertEqual(on_disk.get("schema"), 2)
         self.assertEqual(len(on_disk.get("verified_true") or []), 1)
         self.assertEqual(on_disk["verified_true"][0]["frame_idx"], 1272)
+        self.assertIn("bindings", on_disk["verified_true"][0])
+
+    def test_save_event_review_writes_v2_and_loads_back(self) -> None:
+        entry = {
+            "event_type": "collision",
+            "frame_idx": 1272,
+            "source_frame_idx": 1272,
+            "box_tokens": ["Box_2015"],
+            "confirmed_box_tokens": ["Box_2015"],
+            "person_id": 0,
+        }
+        pose_store.save_event_review(
+            self.locator,
+            [entry],
+            status=pose_store.REVIEW_STATUS_IN_PROGRESS,
+            event_total=1,
+        )
+        loaded = pose_store.load_event_review(self.locator)
+        self.assertEqual(loaded.get("schema"), 2)
+        self.assertEqual(len(loaded.get("verified_true") or []), 1)
+        self.assertEqual(loaded["verified_true"][0]["confirmed_box_tokens"], ["Box_2015"])
+        self.assertEqual(loaded["verified_true"][0]["person_id"], 0)
+
+        on_disk = json.loads(
+            pose_store.event_review_path(self.locator).read_text(encoding="utf-8")
+        )
+        self.assertEqual(on_disk.get("schema"), 2)
+        frame_entry = on_disk["verified_true"][0]
+        self.assertEqual(frame_entry["frame_idx"], 1272)
+        self.assertEqual(
+            frame_entry["bindings"][0]["confirmed_box_tokens"],
+            ["Box_2015"],
+        )
+
+    def test_cache_event_review_total_preserves_v2_verified_true(self) -> None:
+        from event_review_frame_v2 import EVENT_REVIEW_SCHEMA_V2
+
+        review_path = pose_store.event_review_path(self.locator)
+        pose_store._write_json_atomic(
+            review_path,
+            {
+                "schema": EVENT_REVIEW_SCHEMA_V2,
+                "record_id": self.locator.record_id,
+                "verified_true": [
+                    {
+                        "frame_idx": 1272,
+                        "source_frame_idx": 1272,
+                        "event_type": "collision",
+                        "box_tokens": ["Box_2015"],
+                        "bindings": [
+                            {"confirmed_box_tokens": ["Box_2015"], "person_id": 0},
+                        ],
+                    }
+                ],
+                "event_total": 1,
+            },
+        )
+
+        pose_store.cache_event_review_total(self.locator, 939)
+
+        on_disk = json.loads(review_path.read_text(encoding="utf-8"))
+        self.assertEqual(on_disk.get("schema"), EVENT_REVIEW_SCHEMA_V2)
+        self.assertEqual(on_disk.get("event_total"), 939)
+        self.assertEqual(len(on_disk.get("verified_true") or []), 1)
+        self.assertIn("bindings", on_disk["verified_true"][0])
+
+        loaded = pose_store.load_event_review(self.locator)
+        self.assertEqual(len(loaded.get("verified_true") or []), 1)
+        self.assertEqual(loaded["verified_true"][0]["confirmed_box_tokens"], ["Box_2015"])
 
     def test_zero_event_refresh_preserves_on_disk_annotation_without_status(self) -> None:
         entry = {
@@ -277,6 +350,8 @@ class EventReviewConcurrencyTest(unittest.TestCase):
             "frame_idx": 1272,
             "source_frame_idx": 1272,
             "box_tokens": ["Box_2014", "Box_2015"],
+            "confirmed_box_tokens": ["Box_2015"],
+            "person_id": 0,
         }
 
         with patch.object(http_routes, "refresh_record_summary"):
@@ -296,7 +371,10 @@ class EventReviewConcurrencyTest(unittest.TestCase):
         )["verified_true"]
         migrated_target = [entry for entry in migrated if entry["frame_idx"] == 1272]
         self.assertEqual(len(migrated_target), 1)
-        self.assertEqual(migrated_target[0]["box_tokens"], ["Box_2014", "Box_2015"])
+        self.assertEqual(
+            migrated_target[0]["bindings"][0]["confirmed_box_tokens"],
+            ["Box_2015"],
+        )
         self.assertEqual(len([entry for entry in migrated if entry["frame_idx"] == 1273]), 1)
 
         with patch.object(http_routes, "refresh_record_summary"):

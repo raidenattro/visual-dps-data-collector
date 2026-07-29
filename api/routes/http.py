@@ -1245,9 +1245,13 @@ def _patch_record_event_review_locked(
         if want is None:
             want = sig not in by_sig
         if bool(want):
-            # 旧版同一帧可能有多条逐货框记录。标真当前帧时先清掉旧条目，
-            # 再写入唯一的帧级记录，避免一个帧在 UI 中重复出现或联动。
-            legacy_frame_entries = drop_review_frame(norm["frame_idx"])
+            # 标真前先收集同帧旧条目中的 confirmed / person_id，再清掉旧条目。
+            legacy_frame_entries = [
+                old
+                for old in by_sig.values()
+                if isinstance(old, dict) and int(old.get("frame_idx") or 0) == norm["frame_idx"]
+            ]
+            drop_review_frame(norm["frame_idx"])
             entry_norm = dict(norm)
             raw_entry = entry if isinstance(entry, dict) else {}
             if "confirmed_box_tokens" in raw_entry or "confirmed_box_token" in raw_entry:
@@ -1270,8 +1274,8 @@ def _patch_record_event_review_locked(
                         old_list = extract_confirmed_box_tokens(existing)
                         if old_list:
                             entry_norm["confirmed_box_tokens"] = old_list
-                    if "confirmed_box_tokens" not in entry_norm:
-                        entry_norm["confirmed_box_tokens"] = list(norm["box_tokens"])
+            if not extract_confirmed_box_tokens(entry_norm):
+                raise HTTPException(400, "标真须选择确认货框")
             if "person_id" in raw_entry:
                 try:
                     person_id = int(raw_entry.get("person_id"))
