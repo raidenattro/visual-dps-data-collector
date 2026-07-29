@@ -293,8 +293,8 @@ function initEventReviewControls() {
   $("#event-prev-frame-btn")?.addEventListener("click", () => void navigatePlaybackFrame(-1));
   $("#event-next-frame-btn")?.addEventListener("click", () => void navigatePlaybackFrame(1));
   $("#event-skip-next-btn")?.addEventListener("click", () => void skipToNextEvent());
-  $("#event-mark-true-next-btn")?.addEventListener("click", () => void confirmTrueAndNext());
-  $("#event-unmark-btn")?.addEventListener("click", () => void unmarkTrueAndNext());
+  $("#event-mark-true-next-btn")?.addEventListener("click", () => void confirmTrueAndNextFrame());
+  $("#event-unmark-btn")?.addEventListener("click", () => void unmarkTrueAndNextFrame());
   $("#event-mark-all-true-btn")?.addEventListener("click", () => void markAllEventsVerified(true));
   $("#event-unmark-all-btn")?.addEventListener("click", () => void markAllEventsVerified(false));
   $("#event-review-complete-btn")?.addEventListener("click", () => void markEventReviewCompleted());
@@ -379,13 +379,13 @@ function initEventReviewControls() {
     if (!playbackEvents.length) return;
     if (e.key === "y" || e.key === "Y") {
       e.preventDefault();
-      void confirmTrueAndNext();
+      void confirmTrueAndNextFrame();
     } else if (e.key === "n" || e.key === "N" || e.key === "j" || e.key === "J") {
       e.preventDefault();
       void skipToNextEvent();
     } else if (e.key === "u" || e.key === "U") {
       e.preventDefault();
-      void unmarkTrueAndNext();
+      void unmarkTrueAndNextFrame();
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
       navigateReviewEvent(1);

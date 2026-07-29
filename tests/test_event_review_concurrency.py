@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import pose_store
 import review_store
+from api.routes import http as http_routes
 from config_loader import resolve_app_paths
 
 
@@ -144,7 +145,43 @@ class EventReviewConcurrencyTest(unittest.TestCase):
             pose_store.REVIEW_STATUS_NO_COLLISION,
         )
 
-    def test_same_frame_boxes_keep_independent_verified_state(self) -> None:
+    def test_load_events_returns_one_row_for_every_frame(self) -> None:
+        rows = [
+            {
+                "frame_idx": 1,
+                "source_frame_idx": 1,
+                "timestamp_sec": 0.0,
+                "collisions": ["Box_2015", "Box_2014"],
+                "alarm_collisions": [],
+            },
+            {
+                "frame_idx": 2,
+                "source_frame_idx": 2,
+                "timestamp_sec": 0.04,
+                "collisions": [],
+                "alarm_collisions": [],
+            },
+            {
+                "frame_idx": 3,
+                "source_frame_idx": 3,
+                "timestamp_sec": 0.08,
+                "collisions": ["Box_2014", "Box_2015"],
+                "alarm_collisions": ["Box_2015"],
+            },
+        ]
+
+        with patch.object(pose_store, "load_timeline", return_value=rows):
+            events = pose_store.load_events(self.locator)
+
+        self.assertEqual([event["frame_idx"] for event in events], [1, 2, 3])
+        self.assertEqual(events[0]["event_type"], "collision")
+        self.assertEqual(events[0]["box_tokens"], ["Box_2014", "Box_2015"])
+        self.assertEqual(events[1]["event_type"], "frame")
+        self.assertEqual(events[1]["box_tokens"], [])
+        self.assertEqual(events[2]["event_type"], "alarm")
+        self.assertEqual(events[2]["box_tokens"], ["Box_2014", "Box_2015"])
+
+    def test_legacy_per_box_review_is_aggregated_into_one_frame(self) -> None:
         marked = {
             "event_type": "collision",
             "frame_idx": 1272,
@@ -164,6 +201,23 @@ class EventReviewConcurrencyTest(unittest.TestCase):
                 "event_type": "collision",
                 "frame_idx": 1272,
                 "source_frame_idx": 1272,
+                "box_tokens": ["Box_2014", "Box_2015"],
+            },
+        ]
+
+        enriched = pose_store.enrich_events_with_review(events, self.locator)
+
+        self.assertEqual(len(enriched), 1)
+        self.assertTrue(enriched[0]["verified_true"])
+        self.assertEqual(enriched[0]["confirmed_box_tokens"], ["Box_2015"])
+        self.assertEqual(enriched[0]["person_id"], 0)
+
+    def test_frame_toggle_removes_all_legacy_entries_only_on_target_frame(self) -> None:
+        old_entries = [
+            {
+                "event_type": "collision",
+                "frame_idx": 1272,
+                "source_frame_idx": 1272,
                 "box_tokens": ["Box_2014"],
             },
             {
@@ -172,13 +226,99 @@ class EventReviewConcurrencyTest(unittest.TestCase):
                 "source_frame_idx": 1272,
                 "box_tokens": ["Box_2015"],
             },
+            {
+                "event_type": "collision",
+                "frame_idx": 1273,
+                "source_frame_idx": 1273,
+                "box_tokens": ["Box_2015"],
+            },
         ]
+        pose_store.save_event_review(
+            self.locator,
+            old_entries,
+            status=pose_store.REVIEW_STATUS_IN_PROGRESS,
+            event_total=2,
+        )
+        frame_event = {
+            "event_type": "collision",
+            "frame_idx": 1272,
+            "source_frame_idx": 1272,
+            "box_tokens": ["Box_2014", "Box_2015"],
+        }
 
-        enriched = pose_store.enrich_events_with_review(events, self.locator)
+        with patch.object(http_routes, "refresh_record_summary"):
+            http_routes._patch_record_event_review_locked(
+                self.locator.record_id,
+                self.locator,
+                {
+                    "action": "toggle",
+                    "event": frame_event,
+                    "verified_true": True,
+                    "event_total": 2,
+                },
+            )
 
-        self.assertFalse(enriched[0]["verified_true"])
-        self.assertTrue(enriched[1]["verified_true"])
-        self.assertEqual(enriched[1]["person_id"], 0)
+        migrated = pose_store.load_event_review(self.locator)["verified_true"]
+        migrated_target = [entry for entry in migrated if entry["frame_idx"] == 1272]
+        self.assertEqual(len(migrated_target), 1)
+        self.assertEqual(migrated_target[0]["box_tokens"], ["Box_2014", "Box_2015"])
+        self.assertEqual(len([entry for entry in migrated if entry["frame_idx"] == 1273]), 1)
+
+        with patch.object(http_routes, "refresh_record_summary"):
+            http_routes._patch_record_event_review_locked(
+                self.locator.record_id,
+                self.locator,
+                {
+                    "action": "toggle",
+                    "event": frame_event,
+                    "verified_true": False,
+                    "event_total": 2,
+                },
+            )
+
+        saved = pose_store.load_event_review(self.locator)["verified_true"]
+        self.assertEqual(len(saved), 1)
+        self.assertEqual(saved[0]["frame_idx"], 1273)
+
+    def test_plain_frame_can_be_marked_only_with_confirmed_box(self) -> None:
+        empty_frame = {
+            "event_type": "frame",
+            "frame_idx": 100,
+            "source_frame_idx": 100,
+            "box_tokens": [],
+        }
+        self.assertIsNone(pose_store.normalize_review_entry(empty_frame))
+
+        marked_frame = {
+            **empty_frame,
+            "confirmed_box_tokens": ["Box_2015"],
+            "person_id": 0,
+        }
+        normalized = pose_store.normalize_review_entry(marked_frame)
+        self.assertIsNotNone(normalized)
+        self.assertEqual(normalized["confirmed_box_tokens"], ["Box_2015"])
+
+        pose_store.save_event_review(
+            self.locator,
+            [marked_frame],
+            status=pose_store.REVIEW_STATUS_IN_PROGRESS,
+            event_total=1,
+        )
+        with patch.object(http_routes, "refresh_record_summary"):
+            http_routes._patch_record_event_review_locked(
+                self.locator.record_id,
+                self.locator,
+                {
+                    "action": "toggle",
+                    "event": empty_frame,
+                    "verified_true": False,
+                    "event_total": 1,
+                },
+            )
+        self.assertEqual(
+            pose_store.load_event_review(self.locator)["verified_true"],
+            [],
+        )
 
 
 if __name__ == "__main__":

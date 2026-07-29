@@ -1138,6 +1138,20 @@ def _patch_record_event_review_locked(
         if isinstance(v, dict)
     }
 
+    def drop_review_frame(frame_idx: int) -> list[dict[str, Any]]:
+        """删除同帧旧条目并返回它们；帧级复核一次操作只影响当前帧。"""
+        removed: list[dict[str, Any]] = []
+        for old_sig, old_entry in list(by_sig.items()):
+            try:
+                old_frame = int(old_entry.get("frame_idx") or 0)
+            except (TypeError, ValueError):
+                old_frame = 0
+            if old_frame != frame_idx:
+                continue
+            removed.append(old_entry)
+            by_sig.pop(old_sig, None)
+        return removed
+
     requested_status = str(body.get("status") or "").strip().lower()
     if requested_status == "completed":
         if "verified_true" in body and isinstance(body.get("verified_true"), list):
@@ -1199,10 +1213,27 @@ def _patch_record_event_review_locked(
         else:
             verified = []
     elif action == "toggle":
+        light_response = True
         entry = body.get("event")
         if not isinstance(entry, dict):
             raise HTTPException(400, "toggle 须包含 event 对象")
         norm = normalize_review_entry(entry)
+        if norm is None and body.get("verified_true") is False:
+            # 取消普通帧只需要帧号；该帧可能没有检测框，也可能在前端
+            # 乐观清空标真状态后不再携带 confirmed_box_tokens。
+            try:
+                frame_idx = int(entry.get("frame_idx") or 0)
+                source_frame_idx = int(entry.get("source_frame_idx") or frame_idx)
+            except (TypeError, ValueError):
+                frame_idx = 0
+                source_frame_idx = 0
+            if str(entry.get("event_type") or "").strip() == "frame" and frame_idx > 0:
+                norm = {
+                    "event_type": "frame",
+                    "frame_idx": frame_idx,
+                    "source_frame_idx": source_frame_idx,
+                    "box_tokens": [],
+                }
         if not norm:
             raise HTTPException(400, "event 字段无效")
         sig = event_signature(norm["event_type"], norm["frame_idx"], norm["box_tokens"])
@@ -1210,6 +1241,9 @@ def _patch_record_event_review_locked(
         if want is None:
             want = sig not in by_sig
         if bool(want):
+            # 旧版同一帧可能有多条逐货框记录。标真当前帧时先清掉旧条目，
+            # 再写入唯一的帧级记录，避免一个帧在 UI 中重复出现或联动。
+            legacy_frame_entries = drop_review_frame(norm["frame_idx"])
             entry_norm = dict(norm)
             raw_entry = entry if isinstance(entry, dict) else {}
             if "confirmed_box_tokens" in raw_entry or "confirmed_box_token" in raw_entry:
@@ -1224,7 +1258,10 @@ def _patch_record_event_review_locked(
                 if confirmed_list:
                     entry_norm["confirmed_box_tokens"] = confirmed_list
                 else:
-                    existing = by_sig.get(sig)
+                    existing = next(
+                        (old for old in legacy_frame_entries if isinstance(old, dict)),
+                        None,
+                    )
                     if isinstance(existing, dict):
                         old_list = extract_confirmed_box_tokens(existing)
                         if old_list:
@@ -1240,11 +1277,21 @@ def _patch_record_event_review_locked(
                     entry_norm["person_id"] = person_id
                 else:
                     entry_norm.pop("person_id", None)
-            elif isinstance(by_sig.get(sig), dict) and by_sig[sig].get("person_id") is not None:
-                entry_norm["person_id"] = by_sig[sig]["person_id"]
+            else:
+                existing_person = next(
+                    (
+                        old.get("person_id")
+                        for old in legacy_frame_entries
+                        if isinstance(old, dict) and old.get("person_id") is not None
+                    ),
+                    None,
+                )
+                if existing_person is not None:
+                    entry_norm["person_id"] = existing_person
             by_sig[sig] = entry_norm
         else:
-            by_sig.pop(sig, None)
+            # 取消标真只清当前帧；兼容并移除该帧旧版逐货框条目。
+            drop_review_frame(norm["frame_idx"])
         verified = list(by_sig.values())
     elif action == "set_confirmed_box":
         light_response = True
@@ -1265,9 +1312,24 @@ def _patch_record_event_review_locked(
             token = str(body.get("confirmed_box_token") or "").strip()
             confirmed_list = canonicalize_box_token_list([token] if token else [])
         sig = event_signature(norm["event_type"], norm["frame_idx"], norm["box_tokens"])
-        if sig not in by_sig:
-            raise HTTPException(400, "该事件尚未标真，请先标真或标真时一并提交货框编号")
-        stored = dict(by_sig[sig])
+        exact_entry = by_sig.get(sig)
+        frame_entries = drop_review_frame(norm["frame_idx"])
+        if exact_entry is None:
+            if not frame_entries:
+                raise HTTPException(400, "该帧尚未标真，请先标真或标真时一并提交货框编号")
+            stored = dict(norm)
+            legacy_person = next(
+                (
+                    old.get("person_id")
+                    for old in frame_entries
+                    if isinstance(old, dict) and old.get("person_id") is not None
+                ),
+                None,
+            )
+            if legacy_person is not None:
+                stored["person_id"] = legacy_person
+        else:
+            stored = dict(exact_entry)
         if confirmed_list:
             stored["confirmed_box_tokens"] = confirmed_list
         else:

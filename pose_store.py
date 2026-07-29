@@ -645,30 +645,8 @@ def load_timeline(locator: RecordLocator, *, include_events: bool = False) -> li
     return out
 
 
-def _append_per_box_events(
-    events: list[dict[str, Any]],
-    *,
-    event_type: str,
-    box_tokens: list[str],
-    frame_idx: int,
-    source_frame_idx: int,
-    timestamp_sec: float,
-) -> None:
-    """按单个货框追加事件（每 box 一条）。"""
-    for token in box_tokens:
-        events.append(
-            {
-                "event_type": event_type,
-                "frame_idx": frame_idx,
-                "source_frame_idx": source_frame_idx,
-                "timestamp_sec": timestamp_sec,
-                "box_tokens": [token],
-            }
-        )
-
-
 def load_events(locator: RecordLocator) -> list[dict[str, Any]]:
-    """碰撞/告警事件列表（每帧每类型每货框一条，供回放跳转）。"""
+    """逐帧复核列表（每个视频帧一条，同帧事件货框合并）。"""
     from event_engine.box_identity import canonicalize_box_token_list
 
     rows = load_timeline(locator, include_events=True)
@@ -683,26 +661,17 @@ def load_events(locator: RecordLocator) -> list[dict[str, Any]]:
         collisions = canonicalize_box_token_list(
             [str(t) for t in (row.get("collisions") or []) if str(t).strip()]
         )
-        if alarms:
-            _append_per_box_events(
-                events,
-                event_type="alarm",
-                box_tokens=alarms,
-                frame_idx=fi,
-                source_frame_idx=sfi,
-                timestamp_sec=ts,
-            )
-        alarm_set = set(alarms)
-        coll_only = [t for t in collisions if t not in alarm_set]
-        if coll_only:
-            _append_per_box_events(
-                events,
-                event_type="collision",
-                box_tokens=coll_only,
-                frame_idx=fi,
-                source_frame_idx=sfi,
-                timestamp_sec=ts,
-            )
+        frame_tokens = canonicalize_box_token_list([*alarms, *collisions])
+        events.append(
+            {
+                # 同帧只保留一个复核节点；没有检测事件的帧也保留，供人工逐帧标注。
+                "event_type": "alarm" if alarms else "collision" if collisions else "frame",
+                "frame_idx": fi,
+                "source_frame_idx": sfi,
+                "timestamp_sec": ts,
+                "box_tokens": frame_tokens,
+            }
+        )
     return events
 
 
@@ -834,7 +803,7 @@ def normalize_review_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
     from event_engine.box_identity import canonicalize_box_token_list
 
     event_type = str(entry.get("event_type") or "").strip()
-    if event_type not in ("alarm", "collision"):
+    if event_type not in ("alarm", "collision", "frame"):
         return None
     try:
         frame_idx = int(entry.get("frame_idx") or 0)
@@ -845,7 +814,10 @@ def normalize_review_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
     tokens = canonicalize_box_token_list(
         [str(t).strip() for t in (entry.get("box_tokens") or []) if str(t).strip()]
     )
-    if not tokens:
+    confirmed_list = extract_confirmed_box_tokens(entry)
+    # 普通帧没有模型检测框，允许用人工确认框形成一条帧级标真；
+    # 未选择任何货框的空普通帧不写入 verified_true。
+    if not tokens and not (event_type == "frame" and confirmed_list):
         return None
     try:
         source_frame_idx = int(entry.get("source_frame_idx") or frame_idx)
@@ -857,7 +829,6 @@ def normalize_review_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
         "source_frame_idx": source_frame_idx,
         "box_tokens": tokens,
     }
-    confirmed_list = extract_confirmed_box_tokens(entry)
     if confirmed_list:
         out["confirmed_box_tokens"] = confirmed_list
     if "person_id" in entry and entry.get("person_id") is not None:
@@ -1173,31 +1144,16 @@ def enrich_events_with_review(
 ) -> list[dict[str, Any]]:
     from collections import defaultdict
 
-    from event_engine.box_identity import box_id_from_token
-
     verified_by_sig = load_verified_review_by_signature(locator)
     review = load_event_review(locator)
     verified_items = [
         item for item in (review.get("verified_true") or []) if isinstance(item, dict)
     ]
-    by_frame_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
-
-    def _entry_box_ids(entry: dict[str, Any]) -> set[str]:
-        ids: set[str] = set()
-        for raw in entry.get("box_tokens") or []:
-            bid = box_id_from_token(str(raw))
-            if bid:
-                ids.add(bid)
-        for raw in extract_confirmed_box_tokens(entry):
-            bid = box_id_from_token(str(raw))
-            if bid:
-                ids.add(bid)
-        return ids
+    by_frame: dict[int, list[dict[str, Any]]] = defaultdict(list)
 
     for item in verified_items:
-        et = str(item.get("event_type") or "").strip()
         fi = int(item.get("frame_idx") or 0)
-        by_frame_type[f"{et}:{fi}"].append(item)
+        by_frame[fi].append(item)
 
     out: list[dict[str, Any]] = []
     for ev in events:
@@ -1209,14 +1165,36 @@ def enrich_events_with_review(
         )
         review_item = verified_by_sig.get(sig)
         if review_item is None:
-            ev_ids = _entry_box_ids(ev)
-            if ev_ids:
-                et = str(ev.get("event_type") or "").strip()
-                fi = int(ev.get("frame_idx") or 0)
-                for cand in by_frame_type.get(f"{et}:{fi}", []):
-                    if ev_ids & _entry_box_ids(cand):
-                        review_item = cand
-                        break
+            # 兼容旧版「每帧每货框一条」的复核文件：同帧旧条目在 UI 中
+            # 聚合成一个帧级结果；再次标真/取消时由 PATCH 迁移为单条帧记录。
+            fi = int(ev.get("frame_idx") or 0)
+            legacy_items = by_frame.get(fi, [])
+            if legacy_items:
+                from event_engine.box_identity import canonicalize_box_token_list
+
+                confirmed: list[str] = []
+                person_id: int | None = None
+                for cand in legacy_items:
+                    cand_confirmed = extract_confirmed_box_tokens(cand)
+                    confirmed.extend(cand_confirmed or list(cand.get("box_tokens") or []))
+                    if person_id is None and cand.get("person_id") is not None:
+                        try:
+                            parsed_person_id = int(cand.get("person_id"))
+                        except (TypeError, ValueError):
+                            parsed_person_id = -1
+                        if parsed_person_id >= 0:
+                            person_id = parsed_person_id
+                review_item = {
+                    "event_type": str(ev.get("event_type") or "collision"),
+                    "frame_idx": fi,
+                    "source_frame_idx": int(ev.get("source_frame_idx") or fi),
+                    "box_tokens": list(ev.get("box_tokens") or []),
+                }
+                confirmed = canonicalize_box_token_list(confirmed)
+                if confirmed:
+                    review_item["confirmed_box_tokens"] = confirmed
+                if person_id is not None:
+                    review_item["person_id"] = person_id
         row["verified_true"] = review_item is not None
         confirmed_list = extract_confirmed_box_tokens(review_item or {})
         if confirmed_list:

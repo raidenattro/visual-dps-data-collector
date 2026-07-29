@@ -2311,6 +2311,11 @@ main:has(#panel-playback.active) {
   color: #ffd166;
 }
 
+.event-badge.frame {
+  background: rgba(112, 128, 152, 0.22);
+  color: #aebbd0;
+}
+
 
 #time-label {
   font-variant-numeric: tabular-nums;

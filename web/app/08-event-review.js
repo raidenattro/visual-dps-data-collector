@@ -36,13 +36,29 @@ function getEventsOnFrame(frameIdx) {
   return playbackEvents.filter((e) => eventMatchesPlaybackFrame(e, fi));
 }
 
-/** 货框点选时定位应操作的事件：优先当前帧且含该货框的事件 */
+/**
+ * 货框点选时定位应操作的事件。
+ *
+ * 当前事件在播放帧上时必须优先使用当前事件：用户点中的货框可能正是
+ * 对检测结果的人工纠正，不能因为同帧另一事件包含该货框就偷偷切换事件。
+ */
 function resolveEventForBoxAnnotation(token) {
+  const active = getActiveEvent() ?? getActiveFilteredEvent();
   const hit = canonicalBoxToken(token);
-  if (!hit) return getActiveEvent() ?? getActiveFilteredEvent();
+  if (!hit) return active;
 
   const frameIdx =
     typeof getResolvedPlaybackFrameIdx === "function" ? getResolvedPlaybackFrameIdx() : null;
+
+  if (
+    active &&
+    (frameIdx == null ||
+      frameIdx <= 0 ||
+      typeof eventMatchesPlaybackFrame !== "function" ||
+      eventMatchesPlaybackFrame(active, frameIdx))
+  ) {
+    return active;
+  }
 
   const eventHasToken = (ev) => {
     if (!ev) return false;
@@ -59,7 +75,6 @@ function resolveEventForBoxAnnotation(token) {
     }
   }
 
-  const active = getActiveEvent() ?? getActiveFilteredEvent();
   if (active && eventHasToken(active)) return active;
 
   if (frameIdx != null && frameIdx > 0) {
@@ -324,38 +339,44 @@ function syncConfirmedBoxFromReview(reviewPayload, events = playbackEvents) {
   if (!Array.isArray(list)) return;
   const byKey = new Map();
   const personByKey = new Map();
+  const tokensByFrame = new Map();
+  const personByFrame = new Map();
   for (const item of list) {
     if (!item || typeof item !== "object") continue;
     const key = eventRowKey(item);
-    const tokens = normalizeBoxTokenList(
+    const confirmed = normalizeBoxTokenList(
       item.confirmed_box_tokens || (item.confirmed_box_token ? [item.confirmed_box_token] : [])
     );
-    byKey.set(key, tokens);
+    byKey.set(key, confirmed);
+    const frameIdx = parseInt(item.frame_idx, 10) || 0;
+    const frameTokens = confirmed.length ? confirmed : normalizeBoxTokenList(item.box_tokens);
+    if (frameTokens.length) {
+      tokensByFrame.set(
+        frameIdx,
+        normalizeBoxTokenList([...(tokensByFrame.get(frameIdx) || []), ...frameTokens])
+      );
+    }
     if (item.person_id != null && item.person_id !== "") {
       const pid = Number(item.person_id);
-      if (Number.isFinite(pid)) personByKey.set(key, pid);
+      if (Number.isFinite(pid)) {
+        personByKey.set(key, pid);
+        if (!personByFrame.has(frameIdx)) personByFrame.set(frameIdx, pid);
+      }
     }
   }
   (events || []).forEach((ev) => {
     const key = eventRowKey(ev);
-    let tokens = byKey.has(key) ? byKey.get(key) : undefined;
-    let personId = personByKey.has(key) ? personByKey.get(key) : undefined;
-    if (tokens === undefined || personId === undefined) {
-      for (const item of list) {
-        if (!eventMatchesReviewEntry(ev, item)) continue;
-        if (tokens === undefined) {
-          tokens = normalizeBoxTokenList(
-            item.confirmed_box_tokens ||
-              (item.confirmed_box_token ? [item.confirmed_box_token] : [])
-          );
-        }
-        if (personId === undefined && item.person_id != null && item.person_id !== "") {
-          const pid = Number(item.person_id);
-          if (Number.isFinite(pid)) personId = pid;
-        }
-        if (tokens !== undefined && personId !== undefined) break;
-      }
-    }
+    const frameIdx = parseInt(ev.frame_idx, 10) || 0;
+    let tokens = byKey.has(key)
+      ? byKey.get(key)
+      : Array.isArray(ev.confirmed_box_tokens)
+        ? normalizeBoxTokenList(ev.confirmed_box_tokens)
+        : tokensByFrame.get(frameIdx);
+    const personId = personByKey.has(key)
+      ? personByKey.get(key)
+      : ev.person_id != null
+        ? Number(ev.person_id)
+        : personByFrame.get(frameIdx);
     if (tokens !== undefined) {
       if (tokens.length) {
         ev.confirmed_box_tokens = [...tokens];
@@ -383,18 +404,6 @@ function buildBoxPickStatusHint(ev, confirmed, detN) {
   return `${countNote}${pendingNote} · 按 Y 写入`;
 }
 
-function appendPerBoxEvents(events, { eventType, boxTokens, frameIdx, sourceFrameIdx, timestampSec }) {
-  (boxTokens || []).forEach((token) => {
-    events.push({
-      event_type: eventType,
-      frame_idx: frameIdx,
-      source_frame_idx: sourceFrameIdx,
-      timestamp_sec: timestampSec,
-      box_tokens: [token],
-    });
-  });
-}
-
 function buildEventsFromFrames(frames) {
   const events = [];
   (frames || []).forEach((fr) => {
@@ -404,26 +413,14 @@ function buildEventsFromFrames(frames) {
     const sfi = Number(fr.source_frame_idx) || fi;
     const alarms = canonicalizeBoxTokenList(fr.alarm_collisions || []);
     const collisions = canonicalizeBoxTokenList(fr.collisions || []);
-    if (alarms.length) {
-      appendPerBoxEvents(events, {
-        eventType: "alarm",
-        boxTokens: alarms,
-        frameIdx: fi,
-        sourceFrameIdx: sfi,
-        timestampSec: ts,
-      });
-    }
-    const alarmSet = new Set(alarms);
-    const collOnly = collisions.filter((t) => !alarmSet.has(t));
-    if (collOnly.length) {
-      appendPerBoxEvents(events, {
-        eventType: "collision",
-        boxTokens: collOnly,
-        frameIdx: fi,
-        sourceFrameIdx: sfi,
-        timestampSec: ts,
-      });
-    }
+    const frameTokens = canonicalizeBoxTokenList([...alarms, ...collisions]);
+    events.push({
+      event_type: alarms.length ? "alarm" : collisions.length ? "collision" : "frame",
+      frame_idx: fi,
+      source_frame_idx: sfi,
+      timestamp_sec: ts,
+      box_tokens: frameTokens,
+    });
   });
   events.sort((a, b) => a.timestamp_sec - b.timestamp_sec || a.frame_idx - b.frame_idx);
   return events;
@@ -464,6 +461,12 @@ function countVerifiedEvents() {
   return playbackEvents.filter((e) => isEventVerified(e)).length;
 }
 
+function eventTypeLabel(ev) {
+  if (ev?.event_type === "alarm") return "告警";
+  if (ev?.event_type === "collision") return "碰撞";
+  return "帧";
+}
+
 /** 按 activeEventKey 在完整事件列表中定位（不受筛选影响） */
 function getActiveEvent() {
   if (!activeEventKey || !playbackEvents.length) return null;
@@ -500,26 +503,33 @@ function refreshEventCountLabel() {
     }
   }
 
-  eventCountLabel.textContent = `告警 ${alarmN} · 碰撞 ${collN} · 标真 ${verifiedN}${accuracyHint}${sourceHint}${rtHint}${filterHint}`;
+  eventCountLabel.textContent = `帧 ${playbackEvents.length} · 告警 ${alarmN} · 碰撞 ${collN} · 标真 ${verifiedN}${accuracyHint}${sourceHint}${rtHint}${filterHint}`;
 }
 
 function syncVerifiedKeysFromEvents(events, reviewPayload = null) {
   verifiedTrueKeys.clear();
-  (events || []).forEach((ev) => {
-    if (ev?.verified_true) verifiedTrueKeys.add(eventRowKey(ev));
-  });
   const reviewList = reviewPayload?.verified_true;
   if (Array.isArray(reviewList)) {
+    const eventsByFrame = new Map();
+    (events || []).forEach((ev) => {
+      ev.verified_true = false;
+      const frameIdx = parseInt(ev?.frame_idx, 10) || 0;
+      if (!eventsByFrame.has(frameIdx)) eventsByFrame.set(frameIdx, []);
+      eventsByFrame.get(frameIdx).push(ev);
+    });
     for (const item of reviewList) {
       if (!item || typeof item !== "object") continue;
       verifiedTrueKeys.add(eventRowKey(item));
-      (events || []).forEach((ev) => {
-        if (eventMatchesReviewEntry(ev, item)) {
-          verifiedTrueKeys.add(eventRowKey(ev));
-          ev.verified_true = true;
-        }
-      });
+      const frameIdx = parseInt(item.frame_idx, 10) || 0;
+      for (const ev of eventsByFrame.get(frameIdx) || []) {
+        verifiedTrueKeys.add(eventRowKey(ev));
+        ev.verified_true = true;
+      }
     }
+  } else {
+    (events || []).forEach((ev) => {
+      if (ev?.verified_true) verifiedTrueKeys.add(eventRowKey(ev));
+    });
   }
   syncConfirmedBoxFromReview(reviewPayload, events);
 }
@@ -811,10 +821,10 @@ async function selectConfirmedBoxForEvent(ev, token) {
   await toggleConfirmedBoxForEvent(ev, token);
 }
 
-async function persistEventReviewToggle(ev, wantVerified) {
+async function persistEventReviewToggle(ev, wantVerified, eventPayloadOverride = null) {
   const recordId = currentRecordId;
   if (!recordId || !ev) return false;
-  const eventPayload = eventToReviewPayload(ev);
+  const eventPayload = eventPayloadOverride || eventToReviewPayload(ev);
   const eventTotal = playbackEvents.length;
   const seq = ++eventReviewSaveSeq;
   return runSerializedEventReviewSave(async () => {
@@ -1417,7 +1427,7 @@ function updateReviewDock(options = {}) {
     finishUpdateReviewDock();
     return;
   }
-  const typeLabel = ev.event_type === "alarm" ? "告警" : "碰撞";
+  const typeLabel = eventTypeLabel(ev);
   if (badgeEl) {
     badgeEl.textContent = typeLabel;
     badgeEl.className = `event-badge ${ev.event_type}`;
@@ -1563,7 +1573,7 @@ function patchEventMarkersVerifiedStates() {
     const isVerified = isEventVerified(ev);
     dot.classList.toggle("verified", isVerified);
     const verifiedNote = isVerified ? " · 已标真" : "";
-    dot.title = `${ev.event_type === "alarm" ? "告警" : "碰撞"} ${formatTime(ev.timestamp_sec)} · ${formatEventTokens(ev.box_tokens)}${verifiedNote}`;
+    dot.title = `${eventTypeLabel(ev)} ${formatTime(ev.timestamp_sec)} · ${formatEventTokens(ev.box_tokens)}${verifiedNote}`;
   });
 }
 
@@ -1581,7 +1591,7 @@ function renderEventReviewTable(list = null) {
   eventJumpList.innerHTML = rows
     .map((ev) => {
       const key = eventRowKey(ev);
-      const typeLabel = ev.event_type === "alarm" ? "告警" : "碰撞";
+      const typeLabel = eventTypeLabel(ev);
       const active = key === activeEventKey ? " active" : "";
       const verified = isEventVerified(ev);
       const verifiedCls = verified ? " verified-true" : "";
@@ -1688,11 +1698,9 @@ async function markActiveEventVerified(verified) {
   }
 }
 
-async function confirmTrueAndNext() {
-  const list = filteredPlaybackEvents();
+async function confirmTrueAndNextFrame() {
   const ev = getActiveFilteredEvent();
   if (!ev) return;
-  const idx = getActiveFilteredIndex();
   if (!currentRecordId) {
     setEventReviewSaveStatus("导入 JSON 无法保存，请从记录列表打开", "error");
     return;
@@ -1700,6 +1708,11 @@ async function confirmTrueAndNext() {
   const check = validatePersonIdBeforeVerify(ev);
   if (!check.ok) {
     setEventReviewSaveStatus(check.message, "error");
+    updateReviewDock();
+    return;
+  }
+  if (ev.event_type === "frame" && !getEventConfirmedBoxes(ev).length) {
+    setEventReviewSaveStatus("本帧无检测事件，请先点击画面货框再标真", "error");
     updateReviewDock();
     return;
   }
@@ -1718,48 +1731,36 @@ async function confirmTrueAndNext() {
     return;
   }
 
-  const mode = eventFilterSelect?.value || "all";
-  if (mode === "unreviewed") {
-    const newList = filteredPlaybackEvents();
-    if (!newList.length || idx >= newList.length) {
-      updateReviewDock();
-      renderEventReviewTable();
-      renderEventMarkers();
-      setEventReviewSaveStatus("未标真事件已全部复核", "");
-      return;
-    }
-    await seekToEvent(newList[idx]);
-    return;
-  }
-
-  const nextEv = list[idx + 1];
-  if (nextEv) await seekToEvent(nextEv);
-  else {
-    updateReviewDock();
-    if ($("#event-review-list-details")?.open) renderEventReviewTable();
-    renderEventMarkers();
-  }
+  await navigatePlaybackFrame(1);
 }
 
-async function unmarkTrueAndNext() {
+async function unmarkTrueAndNextFrame() {
   const ev = getActiveEvent();
   if (!ev) {
-    setEventReviewSaveStatus("请先在列表或进度条上选择一条事件", "");
+    setEventReviewSaveStatus("请先选择一帧", "");
     return;
   }
-  const globalIdx = getActiveGlobalIndex();
   if (isEventVerified(ev)) {
     if (!currentRecordId) {
       setEventReviewSaveStatus("导入 JSON 无法保存，请从记录列表打开", "error");
       return;
     }
+    // 取消会清除前端事件上的货框/person_id；须先保留完整帧身份供 PATCH，
+    // 否则无检测框的普通帧会被提交成空 event，后端无法定位要取消的帧。
+    const previousPayload = eventToReviewPayload(ev);
+    const previousConfirmed = getEventConfirmedBoxes(ev);
+    const previousPersonId = getEventPersonId(ev);
     setEventVerified(ev, false);
     updateReviewDock();
     if ($("#event-review-list-details")?.open) renderEventReviewTable();
     renderEventMarkers();
-    const ok = await persistEventReviewToggle(ev, false);
+    const ok = await persistEventReviewToggle(ev, false, previousPayload);
     if (!ok) {
       setEventVerified(ev, true);
+      setEventConfirmedBoxes(ev, previousConfirmed, { commitToEvent: true });
+      if (previousPersonId != null) {
+        setEventPersonId(ev, previousPersonId, { commitToEvent: true });
+      }
       updateReviewDock();
       if ($("#event-review-list-details")?.open) renderEventReviewTable();
       renderEventMarkers();
@@ -1767,10 +1768,9 @@ async function unmarkTrueAndNext() {
     }
     reviewBackKey = null;
   } else {
-    setEventReviewSaveStatus("当前选中事件未标真", "");
+    setEventReviewSaveStatus("本帧保持未标真", "");
   }
-  // 「下一条」按时间线全局顺序，避免在「已标真」等筛选下取消标真后跳到队列首条
-  navigateReviewEventGlobal(1, globalIdx);
+  await navigatePlaybackFrame(1);
 }
 
 async function skipToNextEvent() {
@@ -1801,7 +1801,7 @@ function renderEventMarkers() {
     dot.dataset.eventKey = key;
     dot.style.left = `${pct}%`;
     const verifiedNote = isEventVerified(ev) ? " · 已标真" : "";
-    dot.title = `${ev.event_type === "alarm" ? "告警" : "碰撞"} ${formatTime(ev.timestamp_sec)} · ${formatEventTokens(ev.box_tokens)}${verifiedNote}`;
+    dot.title = `${eventTypeLabel(ev)} ${formatTime(ev.timestamp_sec)} · ${formatEventTokens(ev.box_tokens)}${verifiedNote}`;
     dot.addEventListener("click", (e) => {
       e.stopPropagation();
       seekToEvent(ev);

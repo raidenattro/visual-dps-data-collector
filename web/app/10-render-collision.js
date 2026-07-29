@@ -57,44 +57,10 @@ function tokenInTokenMap(token, map) {
   return false;
 }
 
-function boxIdsFromTokenList(tokens) {
-  const ids = new Set();
-  (tokens || []).forEach((raw) => {
-    const id = parseBoxIdFromToken(raw);
-    if (id) ids.add(id);
-  });
-  return ids;
-}
-
-function eventTypeFrameKey(ev) {
-  return `${String(ev?.event_type || "").trim()}:${parseInt(ev?.frame_idx, 10) || 0}`;
-}
-
-function reviewEntryBoxIds(entry) {
-  const ids = boxIdsFromTokenList(entry?.box_tokens);
-  const confirmed =
-    typeof normalizeBoxTokenList === "function"
-      ? normalizeBoxTokenList(
-          entry?.confirmed_box_tokens ||
-            (entry?.confirmed_box_token ? [entry.confirmed_box_token] : [])
-        )
-      : [];
-  confirmed.forEach((t) => {
-    const id = parseBoxIdFromToken(t);
-    if (id) ids.add(id);
-  });
-  return ids;
-}
-
+/** 帧级复核：兼容旧版同帧逐货框条目，事件类型和货框不再拆成多条。 */
 function eventMatchesReviewEntry(ev, entry) {
   if (!ev || !entry) return false;
-  if (eventTypeFrameKey(ev) !== eventTypeFrameKey(entry)) return false;
-  const evIds = boxIdsFromTokenList(ev?.box_tokens);
-  const revIds = reviewEntryBoxIds(entry);
-  for (const id of evIds) {
-    if (revIds.has(id)) return true;
-  }
-  return false;
+  return (parseInt(ev.frame_idx, 10) || 0) === (parseInt(entry.frame_idx, 10) || 0);
 }
 
 /** 与准确率 build_ground_truth_segments 一致：连续相同范本货框合并为段 */
