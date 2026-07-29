@@ -51,8 +51,9 @@
    - 若无 confirmed 且 `box_tokens` **仅 1 个**：视为旧版逐货框标真，confirmed = 该 box
    - 若无 confirmed 且 `box_tokens` 多个：**跳过并标记 ambiguous**（不猜）
 3. 同帧 bindings 去重：`(person_id, confirmed 集合)` 相同则合并。
-4. 有 record locator 时读取 timeline 填充 `box_tokens` / `event_type`。
-5. 写入 `schema: 2`，备份原文件为 `event_review.json.bak.{timestamp}`。
+4. **无法转为 binding 的 legacy 条目直接清除**（不保留 ambiguous）；整帧无有效 binding 时该帧标真一并清除，需人工重新标注。
+5. 有 record locator 时读取 timeline 填充 `box_tokens` / `event_type`。
+6. 写入 `schema: 2`，备份原文件为 `event_review.json.bak.{timestamp}`。
 
 ## 操作步骤
 
@@ -79,18 +80,17 @@ python -m unittest tests.test_event_review_frame_v2_migration -v
 
 1. **保留** Bug A（并发写锁 + 原子 JSON）与帧级导航 UX（下一帧）。
 2. **运行本脚本** 迁移全部 `localdata/review/`（生产前在副本上试跑）。
-3. **简化运行时**（后续 PR，改动集中且可测）：
-   - `load_event_review` / `enrich_events_with_review`：只解析 v2；`schema < 2` 时提示跑脚本
-   - 删除 `enrich` 中 legacy 聚合 fallback（`box_tokens` 当 confirmed）
-   - 删除 `drop_review_frame` 清光同帧旧条；改为按帧更新单条 v2
-   - PATCH toggle：读写 `bindings`，不再依赖 `event_signature(box_tokens)`
+3. **简化运行时**（本分支已部分完成）：
+   - `load_event_review` / `enrich_events_with_review`：**仅读取 schema v2**；legacy 返回空 `verified_true`
+   - 已删除读时 legacy 聚合 fallback
+   - PATCH toggle 写入仍为 legacy 格式（后续可改为 v2 写入）
 4. **普通帧标真**：若产品需要漏报补标，保留 `event_type: frame` + bindings；否则可限制仅 `box_tokens` 非空帧可标真。
 
-## 迁移后仍需人工抽查的场景
+## 迁移后仍需人工复核的场景
 
-- 同帧 ambiguous 帧（脚本输出 `待人工帧 N`）
-- 旧 bug 产生的重复/矛盾 legacy（799→786 类数据）：迁移不会猜用户意图，只会 dedupe 完全相同的 binding
-- `person_id` 缺失的多 binding 帧
+- 脚本输出 `清除帧 N`：该帧 legacy 无法可靠转换，**已丢弃**，需在页面重新标真
+- 旧 bug 产生的重复/矛盾 legacy：仅保留可明确转为 binding 的部分
+- `person_id` 缺失的多 binding 帧：加载后可能无 person，标真时需补选
 
 ## 相关文件
 
