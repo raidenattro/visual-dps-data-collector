@@ -20,7 +20,8 @@ class FrameV2MigrationStats:
     binding_count: int = 0
     deduped_bindings: int = 0
     skipped_entries: int = 0
-    ambiguous_frames: list[int] = field(default_factory=list)
+    cleared_entries: int = 0
+    cleared_frames: list[int] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
     def needs_migration(self) -> bool:
@@ -33,7 +34,8 @@ class FrameV2MigrationStats:
             "binding_count": self.binding_count,
             "deduped_bindings": self.deduped_bindings,
             "skipped_entries": self.skipped_entries,
-            "ambiguous_frames": sorted(set(self.ambiguous_frames)),
+            "cleared_entries": self.cleared_entries,
+            "cleared_frames": sorted(set(self.cleared_frames)),
             "warnings": list(self.warnings),
         }
 
@@ -284,10 +286,9 @@ def migrate_verified_true_to_frame_v2(
             bucket["legacy_types"].add(str(item.get("event_type")).strip())
 
         if binding is None:
-            stats.skipped_entries += 1
-            stats.ambiguous_frames.append(frame_idx)
+            stats.cleared_entries += 1
             if warn:
-                stats.warnings.append(f"帧 {frame_idx}: {warn}")
+                stats.warnings.append(f"帧 {frame_idx}: 已清除 legacy 条目（{warn}）")
             continue
         bucket["bindings"].append(binding)
 
@@ -310,8 +311,9 @@ def migrate_verified_true_to_frame_v2(
             legacy_event_type=legacy_type,
         )
         if not entry:
-            stats.skipped_entries += before
-            stats.ambiguous_frames.append(frame_idx)
+            stats.cleared_entries += max(1, before)
+            stats.cleared_frames.append(frame_idx)
+            stats.warnings.append(f"帧 {frame_idx}: 无有效 binding，整帧标真已清除")
             continue
         after = len(entry.get("bindings") or [])
         stats.deduped_bindings += max(0, before - after)
@@ -344,6 +346,74 @@ def verify_frame_v2_verified_true(verified_true: list[Any]) -> list[str]:
                     f"帧 {item.get('frame_idx')} binding[{bidx}]: 无 confirmed_box_tokens"
                 )
     return issues
+
+
+def frame_v2_entry_to_playback_row(entry: dict[str, Any]) -> dict[str, Any] | None:
+    """v2 帧条目 → 播放/复核 UI 扁平行（只读；合并 bindings 的 confirmed / person_id）。"""
+    if not is_frame_v2_entry(entry):
+        return None
+    confirmed: list[str] = []
+    person_id: int | None = None
+    for binding in entry.get("bindings") or []:
+        norm = normalize_binding(binding if isinstance(binding, dict) else {})
+        if not norm:
+            continue
+        confirmed.extend(norm.get("confirmed_box_tokens") or [])
+        if person_id is None and norm.get("person_id") is not None:
+            person_id = int(norm["person_id"])
+    confirmed = canonicalize_box_token_list(confirmed)
+    if not confirmed:
+        return None
+    try:
+        frame_idx = int(entry.get("frame_idx") or 0)
+        source_frame_idx = int(entry.get("source_frame_idx") or frame_idx)
+    except (TypeError, ValueError):
+        return None
+    row: dict[str, Any] = {
+        "event_type": str(entry.get("event_type") or "collision"),
+        "frame_idx": frame_idx,
+        "source_frame_idx": source_frame_idx,
+        "box_tokens": list(entry.get("box_tokens") or []),
+        "confirmed_box_tokens": confirmed,
+    }
+    if person_id is not None:
+        row["person_id"] = person_id
+    return row
+
+
+def load_verified_items_for_write(raw: dict[str, Any]) -> list[dict[str, Any]]:
+    """写入/ PATCH 用：从磁盘 raw 解析 verified_true（含 legacy 与 v2 展平）。"""
+    from pose_store import event_signature, normalize_review_entry
+
+    if not isinstance(raw, dict):
+        return []
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    if is_frame_v2_review(raw):
+        for entry in raw.get("verified_true") or []:
+            if not isinstance(entry, dict):
+                continue
+            for row in flatten_frame_v2_to_legacy_shape(entry):
+                sig = event_signature(
+                    str(row.get("event_type") or ""),
+                    int(row.get("frame_idx") or 0),
+                    row.get("box_tokens"),
+                )
+                if sig in seen:
+                    continue
+                seen.add(sig)
+                items.append(row)
+        return items
+    for item in raw.get("verified_true") or []:
+        norm = normalize_review_entry(item if isinstance(item, dict) else {})
+        if not norm:
+            continue
+        sig = event_signature(norm["event_type"], norm["frame_idx"], norm["box_tokens"])
+        if sig in seen:
+            continue
+        seen.add(sig)
+        items.append(norm)
+    return items
 
 
 def flatten_frame_v2_to_legacy_shape(entry: dict[str, Any]) -> list[dict[str, Any]]:

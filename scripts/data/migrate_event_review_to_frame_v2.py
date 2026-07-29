@@ -153,7 +153,7 @@ def process_review_file(
     )
 
     if stats.output_frame_count == 0 and stats.input_count > 0:
-        return "failed", "迁移结果为空，请检查 ambiguous 警告", stats
+        return "failed", "迁移结果为空，请检查 cleared 警告", stats
 
     if (
         is_frame_v2_review({**raw, "verified_true": new_verified, "schema": EVENT_REVIEW_SCHEMA_V2})
@@ -172,8 +172,10 @@ def process_review_file(
         note_parts.append(f"去重 {stats.deduped_bindings}")
     if stats.skipped_entries:
         note_parts.append(f"跳过 {stats.skipped_entries}")
-    if stats.ambiguous_frames:
-        note_parts.append(f"待人工帧 {len(set(stats.ambiguous_frames))}")
+    if stats.cleared_entries:
+        note_parts.append(f"清除 {stats.cleared_entries} 条")
+    if stats.cleared_frames:
+        note_parts.append(f"清除帧 {len(set(stats.cleared_frames))}")
     note = " · ".join(note_parts)
 
     if dry_run:

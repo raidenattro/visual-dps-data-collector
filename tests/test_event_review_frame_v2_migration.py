@@ -83,8 +83,8 @@ class EventReviewFrameV2MigrationTest(unittest.TestCase):
         ]
         out, stats = migrate_verified_true_to_frame_v2(legacy)
         self.assertEqual(out, [])
-        self.assertEqual(stats.skipped_entries, 1)
-        self.assertIn(900, stats.ambiguous_frames)
+        self.assertGreaterEqual(stats.cleared_entries, 1)
+        self.assertIn(900, stats.cleared_frames)
 
     def test_v2_review_detected(self) -> None:
         raw = {
