@@ -180,20 +180,13 @@ function setEventConfirmedBoxes(ev, tokens, { commitToEvent = false } = {}) {
   delete ev.confirmed_box_token;
 }
 
-/** 标真落盘用的货框列表：优先人工点选，否则为空（标真时由 applyAuto 填充默认） */
+/** 标真落盘用的货框列表：仅人工点选 confirmed，检测 box_tokens 不参与 */
 function resolveConfirmedBoxesForSave(ev) {
   return getEventConfirmedBoxes(ev);
 }
 
-function applyAutoConfirmedBoxOnVerify(ev) {
-  if (!ev) return;
-  const key = eventRowKey(ev);
-  if (boxAnnotationTouchedKeys.has(key)) return;
-  if (getEventConfirmedBoxes(ev).length) return;
-  const defaults = normalizeBoxTokenList(ev.box_tokens);
-  if (!defaults.length) return;
-  setEventConfirmedBoxes(ev, defaults, { commitToEvent: true });
-  boxAnnotationTouchedKeys.delete(key);
+function applyAutoConfirmedBoxOnVerify(_ev) {
+  // 碰撞/告警检测 box_tokens 仅作画面参考，标真时不自动写入 confirmed。
 }
 
 /** 当前帧画面中的 person_id 列表（与骨架绘制一致） */
@@ -280,6 +273,20 @@ function validatePersonIdBeforeVerify(ev) {
   return { ok: true };
 }
 
+function validateConfirmedBoxBeforeVerify(ev) {
+  if (!ev) return { ok: false, message: "无事件" };
+  if (!getEventConfirmedBoxes(ev).length) {
+    return { ok: false, message: "请先点击画面货框选择确认货框再标真" };
+  }
+  return { ok: true };
+}
+
+function validateEventBeforeVerify(ev) {
+  const boxCheck = validateConfirmedBoxBeforeVerify(ev);
+  if (!boxCheck.ok) return boxCheck;
+  return validatePersonIdBeforeVerify(ev);
+}
+
 /** 复核画面：已确认 box 与检测参考 box（有事件即展示 box_tokens，无需标真） */
 function getEventReviewBoxLayers(ev) {
   const detection = normalizeBoxTokenList(ev?.box_tokens);
@@ -349,7 +356,7 @@ function syncConfirmedBoxFromReview(reviewPayload, events = playbackEvents) {
     );
     byKey.set(key, confirmed);
     const frameIdx = parseInt(item.frame_idx, 10) || 0;
-    const frameTokens = confirmed.length ? confirmed : normalizeBoxTokenList(item.box_tokens);
+    const frameTokens = confirmed;
     if (frameTokens.length) {
       tokensByFrame.set(
         frameIdx,
@@ -1625,7 +1632,7 @@ function renderEventReviewTable(list = null) {
         if (!item || !currentRecordId) return;
         const want = input.checked;
         if (want) {
-          const check = validatePersonIdBeforeVerify(item);
+          const check = validateEventBeforeVerify(item);
           if (!check.ok) {
             input.checked = false;
             setEventReviewSaveStatus(check.message, "error");
@@ -1674,7 +1681,7 @@ async function markActiveEventVerified(verified) {
     return;
   }
   if (verified) {
-    const check = validatePersonIdBeforeVerify(ev);
+    const check = validateEventBeforeVerify(ev);
     if (!check.ok) {
       setEventReviewSaveStatus(check.message, "error");
       updateReviewDock();
@@ -1705,14 +1712,9 @@ async function confirmTrueAndNextFrame() {
     setEventReviewSaveStatus("导入 JSON 无法保存，请从记录列表打开", "error");
     return;
   }
-  const check = validatePersonIdBeforeVerify(ev);
+  const check = validateEventBeforeVerify(ev);
   if (!check.ok) {
     setEventReviewSaveStatus(check.message, "error");
-    updateReviewDock();
-    return;
-  }
-  if (ev.event_type === "frame" && !getEventConfirmedBoxes(ev).length) {
-    setEventReviewSaveStatus("本帧无检测事件，请先点击画面货框再标真", "error");
     updateReviewDock();
     return;
   }

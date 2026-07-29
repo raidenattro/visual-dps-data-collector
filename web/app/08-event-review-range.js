@@ -23,9 +23,6 @@ function refreshRangeAnnotTemplateSnapshot() {
   if (!confirmed.length) {
     confirmed = normalizeBoxTokenList(getEventConfirmedBoxes(template.ev));
   }
-  if (!confirmed.length) {
-    confirmed = normalizeBoxTokenList(template.ev.box_tokens);
-  }
   let personId = template.personId ?? getEventPersonId(template.ev);
   const personIds = getFramePersonIds(fi);
   if (personId == null && personIds.length === 1) {
@@ -101,17 +98,9 @@ function eventInRangeFrame(ev, start, end) {
   return fi >= start && fi <= end;
 }
 
-function eventMatchesRangeBoxFilter(ev, confirmedTokens) {
-  const confirmed = normalizeBoxTokenList(confirmedTokens);
-  if (!confirmed.length) return true;
-  const evTokens = normalizeBoxTokenList(ev?.box_tokens);
-  return evTokens.some((t) => confirmed.includes(t));
-}
-
-function collectRangeAnnotEvents(start, end, confirmedTokens) {
-  return (playbackEvents || []).filter(
-    (ev) => eventInRangeFrame(ev, start, end) && eventMatchesRangeBoxFilter(ev, confirmedTokens)
-  );
+function collectRangeAnnotEvents(start, end) {
+  // 逐帧复核：区间内每一帧都标真；碰撞检测 box_tokens 不参与筛选。
+  return (playbackEvents || []).filter((ev) => eventInRangeFrame(ev, start, end));
 }
 
 /** 首帧模板：优先当前钉住事件，否则首帧上已有货框/person 选取的事件 */
@@ -142,15 +131,15 @@ function getRangeAnnotTemplate(startFrame) {
 
 function validateRangeAnnotTemplate(template, startFrame) {
   if (!template?.ev) {
-    return { ok: false, message: `首帧 ${startFrame} 无碰撞/告警事件，无法区间标真` };
+    return { ok: false, message: `首帧 ${startFrame} 无复核记录，无法区间标真` };
   }
 
   let confirmed = normalizeBoxTokenList(template.confirmed);
   if (!confirmed.length) {
-    confirmed = normalizeBoxTokenList(template.ev.box_tokens);
+    confirmed = normalizeBoxTokenList(getEventConfirmedBoxes(template.ev));
   }
   if (!confirmed.length) {
-    return { ok: false, message: "请先在首帧点选货框（或确保检测含货框）" };
+    return { ok: false, message: "请先在首帧点击画面货框选择确认货框" };
   }
 
   const personIds = getFramePersonIds(startFrame);
@@ -228,7 +217,7 @@ function updateRangeAnnotUi() {
     endEl.classList.toggle("is-set", rangeAnnotEndFrame != null);
   }
 
-  let hint = "在首帧选择 person_id 与货框，设置尾帧后一键标真区间内全部事件";
+  let hint = "在首帧选择 person_id 与货框，设置尾帧后一键标真区间内全部帧";
   let canApply = false;
   let previewN = 0;
 
@@ -236,22 +225,20 @@ function updateRangeAnnotUi() {
     refreshRangeAnnotTemplateSnapshot();
     const template = getRangeAnnotTemplateForApply(bounds.start);
     const check = validateRangeAnnotTemplate(template, bounds.start);
-    const events = check.ok
-      ? collectRangeAnnotEvents(bounds.start, bounds.end, check.confirmed)
-      : [];
+    const events = check.ok ? collectRangeAnnotEvents(bounds.start, bounds.end) : [];
     previewN = events.length;
     canApply = check.ok && previewN > 0 && !!currentRecordId;
 
     if (!check.ok) {
       hint = check.message;
     } else if (!previewN) {
-      hint = `帧 ${bounds.start}–${bounds.end} 内无匹配货框的事件`;
+      hint = `帧 ${bounds.start}–${bounds.end} 内无可标真帧`;
     } else {
       const personNote =
         check.personId != null
           ? ` · 人员 P${check.personId}${check.trackId != null ? `（track ${check.trackId}）` : ""}`
           : "";
-      hint = `帧 ${bounds.start}–${bounds.end} · 将标真 ${previewN} 条 · 货框 ${formatConfirmedBoxes(check.confirmed)}${personNote}`;
+      hint = `帧 ${bounds.start}–${bounds.end} · 将标真 ${previewN} 帧 · 货框 ${formatConfirmedBoxes(check.confirmed)}${personNote}`;
     }
   } else if (rangeAnnotStartFrame != null || rangeAnnotEndFrame != null) {
     hint = "请同时设置首帧与尾帧";
@@ -264,7 +251,7 @@ function updateRangeAnnotUi() {
   }
   if (applyBtn) {
     applyBtn.disabled = !canApply;
-    applyBtn.textContent = previewN > 0 ? `区间标真（${previewN} 条）` : "区间标真";
+    applyBtn.textContent = previewN > 0 ? `区间标真（${previewN} 帧）` : "区间标真";
   }
 }
 
@@ -291,9 +278,9 @@ async function applyRangeAnnotVerified() {
     return;
   }
 
-  const events = collectRangeAnnotEvents(bounds.start, bounds.end, check.confirmed);
+  const events = collectRangeAnnotEvents(bounds.start, bounds.end);
   if (!events.length) {
-    setEventReviewSaveStatus(`帧 ${bounds.start}–${bounds.end} 内无匹配事件`, "error");
+    setEventReviewSaveStatus(`帧 ${bounds.start}–${bounds.end} 内无可标真帧`, "error");
     updateRangeAnnotUi();
     return;
   }
@@ -319,7 +306,7 @@ async function applyRangeAnnotVerified() {
   const personNote = check.personId != null ? ` · P${check.personId}` : "";
   if (
     !window.confirm(
-      `确定区间标真？\n\n帧范围：${bounds.start} – ${bounds.end}\n事件：${events.length} 条\n货框：${formatConfirmedBoxes(check.confirmed)}${personNote}\n\n区间内各帧 person_id 将按 track 自动对应。`
+      `确定区间标真？\n\n帧范围：${bounds.start} – ${bounds.end}\n帧数：${events.length}\n货框：${formatConfirmedBoxes(check.confirmed)}${personNote}\n\n区间内每一帧将标真；各帧 person_id 按 track 自动对应。`
     )
   ) {
     return;
@@ -344,11 +331,11 @@ async function applyRangeAnnotVerified() {
 
   const ok = await persistEventReviewVerifiedList(
     buildVerifiedTruePayload(),
-    `区间标真 ${events.length} 条 · 保存中…`
+    `区间标真 ${events.length} 帧 · 保存中…`
   );
   if (ok) {
     setEventReviewSaveStatus(
-      `区间标真完成 · 帧 ${bounds.start}–${bounds.end} · 共 ${events.length} 条`
+      `区间标真完成 · 帧 ${bounds.start}–${bounds.end} · 共 ${events.length} 帧`
     );
   }
 }
