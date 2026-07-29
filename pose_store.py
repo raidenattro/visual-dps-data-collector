@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import tempfile
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -11,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-_review_write_locks: dict[str, threading.Lock] = {}
+_review_write_locks: dict[str, Any] = {}
 _review_write_locks_mu = threading.Lock()
 
 
@@ -32,12 +34,37 @@ def event_review_write_lock(locator_or_id: RecordLocator | str):
     if not lock_key:
         lock_key = "review:unknown"
     with _review_write_locks_mu:
-        lock = _review_write_locks.setdefault(lock_key, threading.Lock())
+        # save_event_review/cache_event_review_total 等底层写函数也会主动加锁；
+        # 路由层已持锁时必须允许同一线程重入。
+        lock = _review_write_locks.setdefault(lock_key, threading.RLock())
     lock.acquire()
     try:
         yield
     finally:
         lock.release()
+
+
+def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    """同目录临时文件落盘后原子替换，避免读到半截 JSON 或进程中断留下空文件。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as f:
+            temp_path = Path(f.name)
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_path, path)
+    finally:
+        if temp_path is not None and temp_path.exists():
+            temp_path.unlink()
 
 from model_assets import COCO17_KEYPOINT_NAMES
 
@@ -781,25 +808,24 @@ def count_verified_missing_box_annotation(review: dict[str, Any]) -> int:
 
 def patch_event_review_persisted_status(locator: RecordLocator, status: str) -> Path:
     """仅更新 event_review.json 的 status / completed_at，不改动 verified_true 等复核内容。"""
-    raw, _ = _first_existing_event_review_raw(locator)
-    path = event_review_path(locator)
-    if not raw and not path.is_file():
-        legacy = legacy_event_review_path(locator)
-        if legacy.is_file():
-            raw = _read_event_review_file(legacy)
-    if not raw:
-        raise FileNotFoundError(f"event_review 不存在: {path}")
-    st = str(status or "").strip().lower()
-    raw["status"] = st
-    if st == REVIEW_STATUS_COMPLETED:
-        raw["completed_at"] = datetime.now(timezone.utc).isoformat()
-    else:
-        raw.pop("completed_at", None)
-    raw["updated_at"] = datetime.now(timezone.utc).isoformat()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(raw, f, ensure_ascii=False, indent=2)
-    return path.resolve()
+    with event_review_write_lock(locator):
+        raw, _ = _first_existing_event_review_raw(locator)
+        path = event_review_path(locator)
+        if not raw and not path.is_file():
+            legacy = legacy_event_review_path(locator)
+            if legacy.is_file():
+                raw = _read_event_review_file(legacy)
+        if not raw:
+            raise FileNotFoundError(f"event_review 不存在: {path}")
+        st = str(status or "").strip().lower()
+        raw["status"] = st
+        if st == REVIEW_STATUS_COMPLETED:
+            raw["completed_at"] = datetime.now(timezone.utc).isoformat()
+        else:
+            raw.pop("completed_at", None)
+        raw["updated_at"] = datetime.now(timezone.utc).isoformat()
+        _write_json_atomic(path, raw)
+        return path.resolve()
 
 
 def normalize_review_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
@@ -976,52 +1002,52 @@ def ensure_no_collision_review_completed(
     event_count: int | None = None,
 ) -> dict[str, Any]:
     """无碰撞/告警事件时持久化 event_review（status=no_collision）。"""
-    if event_count is None:
-        try:
-            event_count = len(load_events(locator))
-        except (RuntimeError, OSError, ValueError):
-            return load_event_review(locator)
-    if event_count > 0:
-        return cache_event_review_total(locator, event_count)
+    with event_review_write_lock(locator):
+        if event_count is None:
+            try:
+                event_count = len(load_events(locator))
+            except (RuntimeError, OSError, ValueError):
+                return load_event_review(locator)
+        if event_count > 0:
+            return cache_event_review_total(locator, event_count)
 
-    review = load_event_review(locator)
-    if is_persisted_review_terminal(review):
-        return review
-    if (
-        persisted_event_review_status(review) == REVIEW_STATUS_IN_PROGRESS
-        and review.get("verified_true")
-    ):
-        return review
+        review = load_event_review(locator)
+        if is_persisted_review_terminal(review):
+            return review
+        # 即使旧文件缺少 status，只要已有人工标真就绝不能按“无碰撞”清空。
+        if review.get("verified_true"):
+            return review
 
-    save_event_review(locator, [], status=REVIEW_STATUS_NO_COLLISION, event_total=0)
-    return load_event_review(locator)
+        save_event_review(locator, [], status=REVIEW_STATUS_NO_COLLISION, event_total=0)
+        return load_event_review(locator)
 
 
 def cache_event_review_total(locator: RecordLocator, event_total: int) -> dict[str, Any]:
     """仅缓存事件总数（不改变复核状态），避免列表反复扫描 timeline。"""
-    review = load_event_review(locator)
-    total = max(0, int(event_total))
-    if review.get("event_total") == total:
-        return review
+    with event_review_write_lock(locator):
+        review = load_event_review(locator)
+        total = max(0, int(event_total))
+        if review.get("event_total") == total:
+            return review
 
-    payload: dict[str, Any] = {
-        "schema": EVENT_REVIEW_SCHEMA,
-        "record_id": locator.record_id,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-        "verified_true": list(review.get("verified_true") or []),
-        "event_total": total,
-    }
-    st = str(review.get("status") or "").strip().lower()
-    if st:
-        payload["status"] = st
-    if review.get("completed_at"):
-        payload["completed_at"] = review.get("completed_at")
+        payload: dict[str, Any] = {
+            "schema": EVENT_REVIEW_SCHEMA,
+            "record_id": locator.record_id,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "verified_true": list(review.get("verified_true") or []),
+            "event_total": total,
+        }
+        for key in ("review_key", "source_video", "segment_start", "segment_end"):
+            if review.get(key):
+                payload[key] = review.get(key)
+        st = str(review.get("status") or "").strip().lower()
+        if st:
+            payload["status"] = st
+        if review.get("completed_at"):
+            payload["completed_at"] = review.get("completed_at")
 
-    path = event_review_path(locator)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-    return load_event_review(locator)
+        _write_json_atomic(event_review_path(locator), payload)
+        return load_event_review(locator)
 
 
 def event_review_status_label(status: str) -> str:
@@ -1052,78 +1078,77 @@ def save_event_review(
     event_total: int | None = None,
 ) -> Path:
     """保存人工复核结果到 review_dir（与 pose tier 解耦）。"""
-    from review_store import extract_segment_window, load_meta_for_locator, review_key_for_record
+    with event_review_write_lock(locator):
+        from review_store import extract_segment_window, load_meta_for_locator, review_key_for_record
 
-    meta = load_meta_for_locator(locator)
-    review_key = review_key_for_record(meta=meta, record_id=locator.record_id)
-    seg_start, seg_end = extract_segment_window(meta=meta, record_id=locator.record_id)
-    existing = load_event_review(locator)
-    if verified_true is None:
-        normalized = list(existing.get("verified_true") or [])
-    else:
-        normalized = []
-        seen: set[str] = set()
-        for item in verified_true:
-            norm = normalize_review_entry(item if isinstance(item, dict) else {})
-            if not norm:
-                continue
-            sig = event_signature(norm["event_type"], norm["frame_idx"], norm["box_tokens"])
-            if sig in seen:
-                continue
-            seen.add(sig)
-            normalized.append(norm)
-        normalized.sort(
-            key=lambda e: (
-                int(e.get("frame_idx") or 0),
-                str(e.get("event_type") or ""),
-                ",".join(e.get("box_tokens") or []),
+        meta = load_meta_for_locator(locator)
+        review_key = review_key_for_record(meta=meta, record_id=locator.record_id)
+        seg_start, seg_end = extract_segment_window(meta=meta, record_id=locator.record_id)
+        existing = load_event_review(locator)
+        if verified_true is None:
+            normalized = list(existing.get("verified_true") or [])
+        else:
+            normalized = []
+            seen: set[str] = set()
+            for item in verified_true:
+                norm = normalize_review_entry(item if isinstance(item, dict) else {})
+                if not norm:
+                    continue
+                sig = event_signature(norm["event_type"], norm["frame_idx"], norm["box_tokens"])
+                if sig in seen:
+                    continue
+                seen.add(sig)
+                normalized.append(norm)
+            normalized.sort(
+                key=lambda e: (
+                    int(e.get("frame_idx") or 0),
+                    str(e.get("event_type") or ""),
+                    ",".join(e.get("box_tokens") or []),
+                )
             )
-        )
 
-    payload: dict[str, Any] = {
-        "schema": EVENT_REVIEW_SCHEMA,
-        "record_id": locator.record_id,
-        "review_key": review_key,
-        "source_video": str(meta.get("source_video") or existing.get("source_video") or ""),
-        "segment_start": seg_start,
-        "segment_end": seg_end,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-        "verified_true": normalized,
-    }
+        payload: dict[str, Any] = {
+            "schema": EVENT_REVIEW_SCHEMA,
+            "record_id": locator.record_id,
+            "review_key": review_key,
+            "source_video": str(meta.get("source_video") or existing.get("source_video") or ""),
+            "segment_start": seg_start,
+            "segment_end": seg_end,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "verified_true": normalized,
+        }
 
-    prev_status = resolve_event_review_status(existing)
-    if event_total is not None:
-        payload["event_total"] = max(0, int(event_total))
-    elif existing.get("event_total") is not None:
-        payload["event_total"] = existing.get("event_total")
+        prev_status = resolve_event_review_status(existing)
+        if event_total is not None:
+            payload["event_total"] = max(0, int(event_total))
+        elif existing.get("event_total") is not None:
+            payload["event_total"] = existing.get("event_total")
 
-    if status is not None:
-        st = str(status).strip().lower()
-        payload["status"] = st
-        if st == REVIEW_STATUS_COMPLETED:
-            payload["completed_at"] = datetime.now(timezone.utc).isoformat()
-        elif st == REVIEW_STATUS_NO_COLLISION:
-            payload.pop("completed_at", None)
-        elif st == REVIEW_STATUS_IN_PROGRESS:
-            payload.pop("completed_at", None)
-        elif existing.get("completed_at") and st != REVIEW_STATUS_COMPLETED:
-            payload.pop("completed_at", None)
-    elif prev_status in REVIEW_STATUS_TERMINAL:
-        payload["status"] = prev_status
-        if prev_status == REVIEW_STATUS_COMPLETED and existing.get("completed_at"):
-            payload["completed_at"] = existing.get("completed_at")
-    elif normalized or verified_true is not None:
-        payload["status"] = REVIEW_STATUS_IN_PROGRESS
-    elif existing.get("status"):
-        payload["status"] = existing.get("status")
-        if existing.get("completed_at"):
-            payload["completed_at"] = existing.get("completed_at")
+        if status is not None:
+            st = str(status).strip().lower()
+            payload["status"] = st
+            if st == REVIEW_STATUS_COMPLETED:
+                payload["completed_at"] = datetime.now(timezone.utc).isoformat()
+            elif st == REVIEW_STATUS_NO_COLLISION:
+                payload.pop("completed_at", None)
+            elif st == REVIEW_STATUS_IN_PROGRESS:
+                payload.pop("completed_at", None)
+            elif existing.get("completed_at") and st != REVIEW_STATUS_COMPLETED:
+                payload.pop("completed_at", None)
+        elif prev_status in REVIEW_STATUS_TERMINAL:
+            payload["status"] = prev_status
+            if prev_status == REVIEW_STATUS_COMPLETED and existing.get("completed_at"):
+                payload["completed_at"] = existing.get("completed_at")
+        elif normalized or verified_true is not None:
+            payload["status"] = REVIEW_STATUS_IN_PROGRESS
+        elif existing.get("status"):
+            payload["status"] = existing.get("status")
+            if existing.get("completed_at"):
+                payload["completed_at"] = existing.get("completed_at")
 
-    path = event_review_path(locator)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-    return path.resolve()
+        path = event_review_path(locator)
+        _write_json_atomic(path, payload)
+        return path.resolve()
 
 
 def load_verified_review_by_signature(locator: RecordLocator) -> dict[str, dict[str, Any]]:

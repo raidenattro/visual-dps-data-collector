@@ -1705,7 +1705,18 @@ async function confirmTrueAndNext() {
   }
   reviewBackKey = eventRowKey(ev);
   setEventVerified(ev, true);
-  await persistEventReviewToggle(ev, true);
+  updateReviewDock();
+  if ($("#event-review-list-details")?.open) renderEventReviewTable();
+  renderEventMarkers();
+  const ok = await persistEventReviewToggle(ev, true);
+  if (!ok) {
+    setEventVerified(ev, false);
+    reviewBackKey = null;
+    updateReviewDock();
+    if ($("#event-review-list-details")?.open) renderEventReviewTable();
+    renderEventMarkers();
+    return;
+  }
 
   const mode = eventFilterSelect?.value || "all";
   if (mode === "unreviewed") {
