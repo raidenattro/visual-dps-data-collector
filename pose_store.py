@@ -848,7 +848,15 @@ def load_event_review_raw(locator: RecordLocator) -> dict[str, Any]:
 
 
 def load_event_review(locator: RecordLocator) -> dict[str, Any]:
-    """加载人工复核结果（标为真的碰撞/告警）。"""
+    """加载人工复核结果（标为真的碰撞/告警）。
+
+    运行时仅读取 schema v2（逐帧 + bindings）；legacy 文件需先跑迁移脚本。
+    """
+    from event_review_frame_v2 import (
+        EVENT_REVIEW_SCHEMA_V2,
+        frame_v2_entry_to_playback_row,
+        is_frame_v2_review,
+    )
     from review_store import extract_segment_window, load_meta_for_locator, review_key_for_record
 
     meta = load_meta_for_locator(locator)
@@ -870,26 +878,13 @@ def load_event_review(locator: RecordLocator) -> dict[str, Any]:
     if not raw:
         return empty
 
-    verified: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for item in raw.get("verified_true") or []:
-        norm = normalize_review_entry(item if isinstance(item, dict) else {})
-        if not norm:
-            continue
-        sig = event_signature(norm["event_type"], norm["frame_idx"], norm["box_tokens"])
-        if sig in seen:
-            continue
-        seen.add(sig)
-        verified.append(norm)
-
     event_total_raw = raw.get("event_total")
     try:
         event_total = int(event_total_raw) if event_total_raw is not None else None
     except (TypeError, ValueError):
         event_total = None
 
-    return {
-        "schema": int(raw.get("schema") or EVENT_REVIEW_SCHEMA),
+    base = {
         "record_id": str(raw.get("record_id") or locator.record_id),
         "review_key": str(raw.get("review_key") or review_key),
         "source_video": str(raw.get("source_video") or meta.get("source_video") or ""),
@@ -899,6 +894,33 @@ def load_event_review(locator: RecordLocator) -> dict[str, Any]:
         "status": str(raw.get("status") or "").strip().lower(),
         "completed_at": str(raw.get("completed_at") or ""),
         "event_total": event_total,
+    }
+
+    if not is_frame_v2_review(raw):
+        return {
+            **empty,
+            **base,
+            "schema": int(raw.get("schema") or EVENT_REVIEW_SCHEMA),
+            "verified_true": [],
+        }
+
+    verified: list[dict[str, Any]] = []
+    seen_frames: set[int] = set()
+    for item in raw.get("verified_true") or []:
+        if not isinstance(item, dict):
+            continue
+        row = frame_v2_entry_to_playback_row(item)
+        if not row:
+            continue
+        fi = int(row.get("frame_idx") or 0)
+        if fi in seen_frames:
+            continue
+        seen_frames.add(fi)
+        verified.append(row)
+
+    return {
+        **base,
+        "schema": EVENT_REVIEW_SCHEMA_V2,
         "verified_true": verified,
     }
 
@@ -985,8 +1007,9 @@ def ensure_no_collision_review_completed(
         review = load_event_review(locator)
         if is_persisted_review_terminal(review):
             return review
-        # 即使旧文件缺少 status，只要已有人工标真就绝不能按“无碰撞”清空。
-        if review.get("verified_true"):
+        raw, _ = _first_existing_event_review_raw(locator)
+        # 磁盘上无论 legacy 还是 v2，只要 verified_true 非空就不按无碰撞清空。
+        if raw.get("verified_true"):
             return review
 
         save_event_review(locator, [], status=REVIEW_STATUS_NO_COLLISION, event_total=0)
@@ -1142,59 +1165,21 @@ def enrich_events_with_review(
     events: list[dict[str, Any]],
     locator: RecordLocator,
 ) -> list[dict[str, Any]]:
-    from collections import defaultdict
-
-    verified_by_sig = load_verified_review_by_signature(locator)
+    """按 frame_idx 合并 v2 复核结果（只读 bindings，不做 legacy 聚合）。"""
     review = load_event_review(locator)
-    verified_items = [
-        item for item in (review.get("verified_true") or []) if isinstance(item, dict)
-    ]
-    by_frame: dict[int, list[dict[str, Any]]] = defaultdict(list)
-
-    for item in verified_items:
+    by_frame: dict[int, dict[str, Any]] = {}
+    for item in review.get("verified_true") or []:
+        if not isinstance(item, dict):
+            continue
         fi = int(item.get("frame_idx") or 0)
-        by_frame[fi].append(item)
+        if fi > 0:
+            by_frame[fi] = item
 
     out: list[dict[str, Any]] = []
     for ev in events:
         row = dict(ev)
-        sig = event_signature(
-            str(ev.get("event_type") or ""),
-            int(ev.get("frame_idx") or 0),
-            ev.get("box_tokens"),
-        )
-        review_item = verified_by_sig.get(sig)
-        if review_item is None:
-            # 兼容旧版「每帧每货框一条」的复核文件：同帧旧条目在 UI 中
-            # 聚合成一个帧级结果；再次标真/取消时由 PATCH 迁移为单条帧记录。
-            fi = int(ev.get("frame_idx") or 0)
-            legacy_items = by_frame.get(fi, [])
-            if legacy_items:
-                from event_engine.box_identity import canonicalize_box_token_list
-
-                confirmed: list[str] = []
-                person_id: int | None = None
-                for cand in legacy_items:
-                    cand_confirmed = extract_confirmed_box_tokens(cand)
-                    confirmed.extend(cand_confirmed or list(cand.get("box_tokens") or []))
-                    if person_id is None and cand.get("person_id") is not None:
-                        try:
-                            parsed_person_id = int(cand.get("person_id"))
-                        except (TypeError, ValueError):
-                            parsed_person_id = -1
-                        if parsed_person_id >= 0:
-                            person_id = parsed_person_id
-                review_item = {
-                    "event_type": str(ev.get("event_type") or "collision"),
-                    "frame_idx": fi,
-                    "source_frame_idx": int(ev.get("source_frame_idx") or fi),
-                    "box_tokens": list(ev.get("box_tokens") or []),
-                }
-                confirmed = canonicalize_box_token_list(confirmed)
-                if confirmed:
-                    review_item["confirmed_box_tokens"] = confirmed
-                if person_id is not None:
-                    review_item["person_id"] = person_id
+        fi = int(ev.get("frame_idx") or 0)
+        review_item = by_frame.get(fi)
         row["verified_true"] = review_item is not None
         confirmed_list = extract_confirmed_box_tokens(review_item or {})
         if confirmed_list:

@@ -61,6 +61,7 @@ from pose_store import (
     record_has_skeleton_data,
     resolve_event_review_status,
     save_event_review,
+    _first_existing_event_review_raw,
 )
 from video_frame import first_frame_base64, frame_base64_at_index
 
@@ -1131,7 +1132,10 @@ def _patch_record_event_review_locked(
     body: dict[str, Any],
 ) -> JSONResponse:
     review = load_event_review(locator)
-    verified: list[dict[str, Any]] = list(review.get("verified_true") or [])
+    raw, _ = _first_existing_event_review_raw(locator)
+    from event_review_frame_v2 import load_verified_items_for_write
+
+    verified: list[dict[str, Any]] = load_verified_items_for_write(raw if raw else {})
     by_sig = {
         event_signature(str(v.get("event_type") or ""), int(v.get("frame_idx") or 0), v.get("box_tokens")): v
         for v in verified
