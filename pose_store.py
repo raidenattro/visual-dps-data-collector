@@ -722,19 +722,23 @@ def _first_existing_event_review_raw(locator: RecordLocator) -> tuple[dict[str, 
 
 
 def events_to_verified_entries(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """将 load_events 结果转为 event_review.verified_true 条目（去重）。"""
+    """Build explicit confirmations for the user-requested "mark all" action."""
     verified: list[dict[str, Any]] = []
-    seen: set[str] = set()
+    seen_frames: set[int] = set()
     for ev in events:
         if not isinstance(ev, dict):
             continue
         norm = normalize_review_entry(ev)
         if not norm:
             continue
-        sig = event_signature(norm["event_type"], norm["frame_idx"], norm["box_tokens"])
-        if sig in seen:
+        frame_idx = int(norm["frame_idx"])
+        if frame_idx in seen_frames:
             continue
-        seen.add(sig)
+        seen_frames.add(frame_idx)
+        confirmed = list(norm.get("box_tokens") or [])
+        if not confirmed:
+            continue
+        norm["confirmed_box_tokens"] = confirmed
         verified.append(norm)
     return verified
 
@@ -748,6 +752,18 @@ def extract_confirmed_box_tokens(entry: dict[str, Any]) -> list[str]:
         tokens = canonicalize_box_token_list(
             [str(t).strip() for t in raw_list if str(t).strip()]
         )
+        if tokens:
+            return tokens
+    bindings = entry.get("bindings")
+    if isinstance(bindings, list):
+        merged: list[str] = []
+        for binding in bindings:
+            if not isinstance(binding, dict):
+                continue
+            values = binding.get("confirmed_box_tokens")
+            if isinstance(values, list):
+                merged.extend(str(t).strip() for t in values if str(t).strip())
+        tokens = canonicalize_box_token_list(merged)
         if tokens:
             return tokens
     single = str(entry.get("confirmed_box_token") or "").strip()
@@ -854,8 +870,11 @@ def load_event_review(locator: RecordLocator) -> dict[str, Any]:
     """
     from event_review_frame_v2 import (
         EVENT_REVIEW_SCHEMA_V2,
+        SOURCE_EXPLICIT_CONFIRMED,
+        detect_review_format,
         frame_v2_entry_to_playback_row,
         is_frame_v2_review,
+        migrate_verified_true_to_frame_v2,
     )
     from review_store import extract_segment_window, load_meta_for_locator, review_key_for_record
 
@@ -896,17 +915,25 @@ def load_event_review(locator: RecordLocator) -> dict[str, Any]:
         "event_total": event_total,
     }
 
-    if not is_frame_v2_review(raw):
-        return {
-            **empty,
-            **base,
-            "schema": int(raw.get("schema") or EVENT_REVIEW_SCHEMA),
-            "verified_true": [],
-        }
+    review_is_v2 = is_frame_v2_review(raw)
+    review_format = detect_review_format(raw)
+    if review_is_v2:
+        frame_entries = [
+            item
+            for item in raw.get("verified_true") or []
+            if isinstance(item, dict)
+        ]
+        unresolved_count = 0
+    else:
+        frame_entries, migration_stats = migrate_verified_true_to_frame_v2(
+            list(raw.get("verified_true") or []),
+            source_format=SOURCE_EXPLICIT_CONFIRMED,
+        )
+        unresolved_count = migration_stats.unresolved_entries
 
     verified: list[dict[str, Any]] = []
     seen_frames: set[int] = set()
-    for item in raw.get("verified_true") or []:
+    for item in frame_entries:
         if not isinstance(item, dict):
             continue
         row = frame_v2_entry_to_playback_row(item)
@@ -920,8 +947,15 @@ def load_event_review(locator: RecordLocator) -> dict[str, Any]:
 
     return {
         **base,
-        "schema": EVENT_REVIEW_SCHEMA_V2,
+        "schema": (
+            EVENT_REVIEW_SCHEMA_V2
+            if review_is_v2
+            else int(raw.get("schema") or EVENT_REVIEW_SCHEMA)
+        ),
         "verified_true": verified,
+        "review_format": review_format,
+        "migration_required": unresolved_count > 0,
+        "unresolved_legacy_count": unresolved_count,
     }
 
 
@@ -1096,7 +1130,8 @@ def save_event_review(
     with event_review_write_lock(locator):
         from event_review_frame_v2 import (
             EVENT_REVIEW_SCHEMA_V2,
-            is_frame_v2_entry,
+            SOURCE_EXPLICIT_CONFIRMED,
+            load_verified_items_for_write,
             migrate_verified_true_to_frame_v2,
         )
         from review_store import extract_segment_window, load_meta_for_locator, review_key_for_record
@@ -1109,34 +1144,21 @@ def save_event_review(
         timeline_by_frame = _timeline_by_frame_for_locator(locator)
 
         if verified_true is None:
-            source_items = list((raw or {}).get("verified_true") or [])
+            source_items = load_verified_items_for_write(raw or {})
         else:
-            source_items = []
-            seen: set[str] = set()
-            for item in verified_true:
-                if is_frame_v2_entry(item if isinstance(item, dict) else {}):
-                    source_items.append(item)
-                    continue
-                norm = normalize_review_entry(item if isinstance(item, dict) else {})
-                if not norm:
-                    continue
-                sig = event_signature(norm["event_type"], norm["frame_idx"], norm["box_tokens"])
-                if sig in seen:
-                    continue
-                seen.add(sig)
-                source_items.append(norm)
-            source_items.sort(
-                key=lambda e: (
-                    int(e.get("frame_idx") or 0),
-                    str(e.get("event_type") or ""),
-                    ",".join(e.get("box_tokens") or []),
-                )
-            )
+            source_items = [
+                item for item in verified_true if isinstance(item, dict)
+            ]
 
-        v2_entries, _ = migrate_verified_true_to_frame_v2(
+        v2_entries, migration_stats = migrate_verified_true_to_frame_v2(
             source_items,
             timeline_by_frame=timeline_by_frame,
+            source_format=SOURCE_EXPLICIT_CONFIRMED,
         )
+        if migration_stats.unresolved_entries:
+            raise LegacyReviewMigrationRequired(
+                f"有 {migration_stats.unresolved_entries} 条复核记录无法无歧义写入 schema v2"
+            )
 
         payload: dict[str, Any] = {
             "schema": EVENT_REVIEW_SCHEMA_V2,
@@ -1148,6 +1170,8 @@ def save_event_review(
             "updated_at": datetime.now(timezone.utc).isoformat(),
             "verified_true": v2_entries,
         }
+        if isinstance(raw.get("unresolved_legacy"), list):
+            payload["unresolved_legacy"] = list(raw["unresolved_legacy"])
 
         prev_status = resolve_event_review_status(existing)
         if event_total is not None:
@@ -1221,6 +1245,12 @@ def enrich_events_with_review(
         confirmed_list = extract_confirmed_box_tokens(review_item or {})
         if confirmed_list:
             row["confirmed_box_tokens"] = confirmed_list
+        if review_item and isinstance(review_item.get("bindings"), list):
+            row["bindings"] = [
+                dict(binding)
+                for binding in review_item.get("bindings") or []
+                if isinstance(binding, dict)
+            ]
         if review_item and review_item.get("person_id") is not None:
             try:
                 row["person_id"] = int(review_item.get("person_id"))

@@ -1,28 +1,22 @@
 #!/usr/bin/env python3
-"""将 event_review.json 的 verified_true 迁移为 schema v2（逐帧 + bindings）。
+"""Audit and migrate event_review.json to the lossless frame-v2 schema.
 
-用法:
-  python scripts/data/migrate_event_review_to_frame_v2.py --dry-run
-  python scripts/data/migrate_event_review_to_frame_v2.py
-  python scripts/data/migrate_event_review_to_frame_v2.py --verify-only
-  python scripts/data/migrate_event_review_to_frame_v2.py 1-1-1-_2
-
-说明:
-  - schema v2：每帧一条 verified_true，bindings 承载 (person_id, confirmed_box_tokens)
-  - 默认 --dry-run；去掉后写入并在同目录备份 .bak.{timestamp}
-  - 有 record locator 时尽量读取 timeline 填充 box_tokens / event_type
-  - legacy 迁移规则：仅使用 confirmed_box_tokens；无 confirmed 且 box_tokens 唯一时
-    视为旧版逐货框标真（单 box 事件），避免读时聚合误并
+The default is read-only.  Legacy schema 1 is ambiguous, so callers must
+choose a source profile.  Candidate output never overwrites source data.
+In-place replacement is a separate, explicit operation and always creates a
+backup first.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -31,240 +25,251 @@ if str(ROOT) not in sys.path:
 from config_loader import resolve_app_paths, resolve_config_path
 from event_review_frame_v2 import (
     EVENT_REVIEW_SCHEMA_V2,
-    FrameV2MigrationStats,
+    LEGACY_SOURCE_FORMATS,
+    SOURCE_EXPLICIT_CONFIRMED,
+    detect_review_format,
     is_frame_v2_review,
     migrate_verified_true_to_frame_v2,
     verify_frame_v2_verified_true,
 )
 from pose_store import iter_active_records, load_timeline
-from review_store import EVENT_REVIEW_FILE, event_review_read_paths, event_review_write_path
+from review_store import EVENT_REVIEW_FILE, event_review_read_paths
 
 
-def _load_json(path: Path) -> dict:
-    if not path.is_file():
-        return {}
+def _load_json(path: Path) -> dict[str, Any]:
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
+        value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
+    return value if isinstance(value, dict) else {}
 
 
-def _camera_slug_for_record(record_id: str, paths) -> str:
-    if "/" in record_id:
-        return record_id.split("/", 1)[0]
-    return ""
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_name(f".{path.name}.tmp")
+    temp.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    temp.replace(path)
 
 
-def _filter_records(paths, slug_filter: str) -> list:
-    items = iter_active_records(paths.json_dir)
-    if not slug_filter:
-        return items
-    out = []
-    for loc in items:
-        rid = loc.record_id
-        bucket = rid.split("/", 1)[0] if "/" in rid else ""
-        if bucket == slug_filter or _camera_slug_for_record(rid, paths) == slug_filter:
-            out.append(loc)
-    return out
+def _discover(paths, camera_slug: str) -> list[tuple[Path, Any | None]]:
+    locators_by_path: dict[str, Any] = {}
+    for locator in iter_active_records(paths.json_dir):
+        bucket = locator.record_id.split("/", 1)[0] if "/" in locator.record_id else ""
+        if camera_slug and bucket != camera_slug:
+            continue
+        for path in event_review_read_paths(locator, paths):
+            locators_by_path[str(path.resolve())] = locator
 
-
-def _discover_review_targets(paths, slug_filter: str) -> list[tuple[Path, object | None]]:
-    seen: set[str] = set()
-    out: list[tuple[Path, object | None]] = []
-
-    for loc in _filter_records(paths, slug_filter):
-        for path in event_review_read_paths(loc, paths):
+    targets: dict[str, tuple[Path, Any | None]] = {}
+    if paths.review_dir.is_dir():
+        for path in paths.review_dir.rglob(EVENT_REVIEW_FILE):
             try:
-                key = str(path.resolve())
-            except OSError:
-                key = str(path)
-            if key in seen:
+                rel = path.relative_to(paths.review_dir)
+            except ValueError:
                 continue
-            seen.add(key)
-            out.append((path, loc))
-
-    review_root = paths.review_dir
-    if review_root.is_dir():
-        for path in sorted(review_root.rglob(EVENT_REVIEW_FILE)):
-            try:
-                key = str(path.resolve())
-            except OSError:
-                key = str(path)
-            if key in seen:
+            if camera_slug and (not rel.parts or rel.parts[0] != camera_slug):
                 continue
-            seen.add(key)
-            out.append((path, None))
+            key = str(path.resolve())
+            targets[key] = (path, locators_by_path.get(key))
+    for key, locator in locators_by_path.items():
+        path = Path(key)
+        if path.is_file():
+            targets.setdefault(key, (path, locator))
+    return [targets[key] for key in sorted(targets)]
 
-    out.sort(key=lambda item: str(item[0]))
-    return out
 
-
-def _timeline_by_frame(locator) -> dict[int, dict]:
+def _timeline(locator: Any | None) -> dict[int, dict[str, Any]]:
+    if locator is None:
+        return {}
     try:
         rows = load_timeline(locator, include_events=True)
     except (OSError, RuntimeError, ValueError):
         return {}
-    out: dict[int, dict] = {}
+    out: dict[int, dict[str, Any]] = {}
     for row in rows:
         if not isinstance(row, dict):
             continue
         try:
-            fi = int(row.get("frame_idx") or 0)
+            frame_idx = int(row.get("frame_idx"))
         except (TypeError, ValueError):
             continue
-        if fi > 0:
-            out[fi] = row
+        out[frame_idx] = row
     return out
 
 
-def process_review_file(
-    path: Path,
-    locator,
+def _candidate_payload(
+    raw: dict[str, Any],
     *,
-    dry_run: bool,
-    verify_only: bool,
-) -> tuple[str, str, FrameV2MigrationStats | None]:
-    raw = _load_json(path)
+    source_format: str,
+    timeline_by_frame: dict[int, dict[str, Any]],
+) -> tuple[dict[str, Any], dict[str, Any]]:
     verified = raw.get("verified_true")
-    if not isinstance(verified, list) or not verified:
-        return "skipped_empty", "无 verified_true", None
-
-    if verify_only:
-        if is_frame_v2_review(raw):
-            issues = verify_frame_v2_verified_true(verified)
-            if issues:
-                preview = "; ".join(issues[:3])
-                if len(issues) > 3:
-                    preview += f" …共 {len(issues)} 项"
-                return "verify_fail", preview, None
-            return "verify_ok", f"schema v2 · {len(verified)} 帧", None
-        return "verify_fail", f"仍为 schema {raw.get('schema', 1)} legacy 格式", None
-
-    if is_frame_v2_review(raw):
-        issues = verify_frame_v2_verified_true(verified)
-        if not issues:
-            return "unchanged", f"已是 schema v2 · {len(verified)} 帧", None
-
-    timeline_by_frame = _timeline_by_frame(locator) if locator is not None else {}
-    new_verified, stats = migrate_verified_true_to_frame_v2(
-        verified,
+    verified_list = verified if isinstance(verified, list) else []
+    converted, stats = migrate_verified_true_to_frame_v2(
+        verified_list,
         timeline_by_frame=timeline_by_frame,
+        source_format=source_format,
     )
+    payload = dict(raw)
+    payload["schema"] = EVENT_REVIEW_SCHEMA_V2
+    payload["verified_true"] = converted
+    payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+    payload["migration"] = {
+        "source_schema": raw.get("schema", 1),
+        "source_format": source_format,
+        "source_detected_format": detect_review_format(raw),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "stats": stats.to_dict(),
+    }
+    if stats.unresolved_items:
+        payload["unresolved_legacy"] = stats.unresolved_items
+    elif "unresolved_legacy" not in raw:
+        payload.pop("unresolved_legacy", None)
+    return payload, stats.to_dict()
 
-    if stats.output_frame_count == 0 and stats.input_count > 0:
-        return "failed", "迁移结果为空，请检查 cleared 警告", stats
 
-    if (
-        is_frame_v2_review({**raw, "verified_true": new_verified, "schema": EVENT_REVIEW_SCHEMA_V2})
-        and len(new_verified) == len(verified)
-        and stats.skipped_entries == 0
-        and stats.deduped_bindings == 0
-        and int(raw.get("schema") or 0) >= EVENT_REVIEW_SCHEMA_V2
-    ):
-        return "unchanged", f"{stats.input_count} 条已是 v2 帧级", stats
-
-    note_parts = [
-        f"{stats.input_count} legacy 条 → {stats.output_frame_count} 帧",
-        f"bindings {stats.binding_count}",
-    ]
-    if stats.deduped_bindings:
-        note_parts.append(f"去重 {stats.deduped_bindings}")
-    if stats.skipped_entries:
-        note_parts.append(f"跳过 {stats.skipped_entries}")
-    if stats.cleared_entries:
-        note_parts.append(f"清除 {stats.cleared_entries} 条")
-    if stats.cleared_frames:
-        note_parts.append(f"清除帧 {len(set(stats.cleared_frames))}")
-    note = " · ".join(note_parts)
-
-    if dry_run:
-        return "would_migrate", note, stats
-
-    updated = dict(raw)
-    updated["schema"] = EVENT_REVIEW_SCHEMA_V2
-    updated["verified_true"] = new_verified
-    updated["updated_at"] = datetime.now(timezone.utc).isoformat()
-
-    backup = path.with_name(f"{path.name}.bak.{datetime.now().strftime('%Y%m%d_%H%M%S')}")
-    backup.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    write_path = path
-    if locator is not None:
-        write_path = event_review_write_path(locator, paths=resolve_app_paths())
-    write_path.parent.mkdir(parents=True, exist_ok=True)
-    write_path.write_text(json.dumps(updated, ensure_ascii=False, indent=2), encoding="utf-8")
-    return "migrated", f"{note} · 备份 {backup.name}", stats
+def _relative_candidate_path(path: Path, review_root: Path) -> Path:
+    try:
+        return path.resolve().relative_to(review_root.resolve())
+    except ValueError:
+        return Path(path.parent.name) / path.name
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="event_review verified_true 迁移为 schema v2（逐帧 + bindings）"
+        description="审计并迁移 event_review 到逐帧 schema v2（默认只读）"
+    )
+    parser.add_argument("camera_slug", nargs="?", default="")
+    parser.add_argument(
+        "--source-format",
+        choices=sorted(LEGACY_SOURCE_FORMATS),
+        default=SOURCE_EXPLICIT_CONFIRMED,
+        help=(
+            "旧格式语义；默认只信 confirmed_box_tokens。"
+            "legacy-per-box / legacy-frame-event 必须由人工确认后选择"
+        ),
     )
     parser.add_argument(
-        "camera_slug",
-        nargs="?",
-        default="",
-        help="可选：仅处理该机位目录（如 1-1-1-_2）",
+        "--candidate-dir",
+        type=Path,
+        help="把迁移候选写入独立目录，不修改源文件",
     )
     parser.add_argument(
-        "--dry-run",
+        "--replace",
         action="store_true",
-        default=True,
-        help="只统计，不写入（默认开启）",
+        help="原地替换；先生成 .bak 时间戳备份",
     )
     parser.add_argument(
-        "--write",
+        "--allow-unresolved",
         action="store_true",
-        help="实际写入 review 文件（关闭 dry-run）",
+        help="允许候选/替换包含 unresolved_legacy；默认替换时禁止",
     )
-    parser.add_argument(
-        "--verify-only",
-        action="store_true",
-        help="仅校验 verified_true 是否已为 schema v2",
-    )
+    parser.add_argument("--verify-only", action="store_true")
+    parser.add_argument("--report", type=Path, help="写出 JSON 审计报告")
     args = parser.parse_args()
-    dry_run = not args.write
-    if args.verify_only:
-        dry_run = True
+
+    if args.replace and args.candidate_dir:
+        parser.error("--replace 与 --candidate-dir 不能同时使用")
 
     resolve_config_path(None)
     paths = resolve_app_paths()
-    targets = _discover_review_targets(paths, args.camera_slug.strip())
-
+    targets = _discover(paths, args.camera_slug.strip())
     if not targets:
         print("未找到 event_review.json")
         return 1
 
+    report_items: list[dict[str, Any]] = []
     counts: Counter[str] = Counter()
-    print(f"{'校验' if args.verify_only else ('预览（dry-run）' if dry_run else '写入')}：共 {len(targets)} 个 review 文件\n")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     for path, locator in targets:
-        status, note, stats = process_review_file(
-            path,
-            locator,
-            dry_run=dry_run,
-            verify_only=args.verify_only,
-        )
-        counts[status] += 1
-        rel = path
-        try:
-            rel = path.relative_to(ROOT)
-        except ValueError:
-            pass
-        print(f"[{status}] {rel}\n    {note}")
-        if stats and stats.warnings:
-            for warn in stats.warnings[:5]:
-                print(f"    ! {warn}")
-            if len(stats.warnings) > 5:
-                print(f"    ! …共 {len(stats.warnings)} 条警告")
+        raw = _load_json(path)
+        detected = detect_review_format(raw)
+        item: dict[str, Any] = {
+            "path": str(path),
+            "detected_format": detected,
+            "source_format": args.source_format,
+        }
+        if args.verify_only:
+            issues = (
+                verify_frame_v2_verified_true(raw.get("verified_true") or [])
+                if is_frame_v2_review(raw)
+                else [f"仍是 {detected}"]
+            )
+            status = "verify_ok" if not issues else "verify_fail"
+            item.update({"status": status, "issues": issues})
+            counts[status] += 1
+            report_items.append(item)
+            print(f"[{status}] {path} {issues[:2]}")
+            continue
 
-    print("\n汇总:", dict(counts))
-    if dry_run and not args.verify_only and counts.get("would_migrate"):
-        print("\n确认无误后加 --write 执行写入。")
-    if args.verify_only:
-        return 0 if counts.get("verify_fail", 0) == 0 else 2
-    if counts.get("failed", 0):
+        candidate, stats = _candidate_payload(
+            raw,
+            source_format=args.source_format,
+            timeline_by_frame=_timeline(locator),
+        )
+        unresolved = int(stats.get("unresolved_entries") or 0)
+        item["stats"] = stats
+        item["unresolved_legacy_preserved"] = unresolved
+
+        if args.replace and unresolved and not args.allow_unresolved:
+            status = "blocked_unresolved"
+            item["status"] = status
+            counts[status] += 1
+            report_items.append(item)
+            print(f"[{status}] {path} unresolved={unresolved}，源文件未改")
+            continue
+
+        if args.candidate_dir:
+            destination = (
+                args.candidate_dir
+                / _relative_candidate_path(path, paths.review_dir)
+            )
+            _write_json(destination, candidate)
+            status = "candidate_written"
+            item["candidate_path"] = str(destination)
+        elif args.replace:
+            backup = path.with_name(f"{path.name}.bak.{timestamp}")
+            shutil.copy2(path, backup)
+            _write_json(path, candidate)
+            status = "replaced"
+            item["backup_path"] = str(backup)
+        else:
+            status = "audit_only"
+
+        item["status"] = status
+        counts[status] += 1
+        report_items.append(item)
+        print(
+            f"[{status}] {path} "
+            f"rows={stats['input_count']} frames={stats['output_frame_count']} "
+            f"bindings={stats['binding_count']} unresolved={unresolved}"
+        )
+
+    report = {
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "mode": (
+            "verify"
+            if args.verify_only
+            else "replace"
+            if args.replace
+            else "candidate"
+            if args.candidate_dir
+            else "audit"
+        ),
+        "source_format": args.source_format,
+        "counts": dict(counts),
+        "items": report_items,
+    }
+    if args.report:
+        _write_json(args.report, report)
+        print(f"报告: {args.report}")
+    print("汇总:", dict(counts))
+
+    if counts.get("verify_fail") or counts.get("blocked_unresolved"):
         return 2
     return 0
 

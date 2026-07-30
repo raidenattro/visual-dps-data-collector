@@ -438,7 +438,7 @@ def evaluate_upload_batch(
             "eligible": "仅复核状态为 completed（已复核）的分片参与评估",
             "excluded": "no_collision 及其它未复核状态不纳入测试、不计入统计",
             "tag_filter": "指定记录标签时，仅评估同时带有全部标签的 pose 记录",
-            "ground_truth": "verified_true：优先 confirmed_box_tokens，否则 box_tokens",
+            "ground_truth": "verified_true：仅使用 bindings.confirmed_box_tokens（legacy 仅显式 confirmed_box_tokens）",
             "segment": "连续 verified_true 条目范本货框相同则合并为一段",
             "prediction": "is_picking=true 视为碰撞告警；货框取 rule_alarm_collisions，无则 rule_collisions",
             "box_match": "货框按 box_id 兼容（如 85:4017 与 Box_4017 等价）",

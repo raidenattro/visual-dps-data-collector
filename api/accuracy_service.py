@@ -69,14 +69,9 @@ def _allowed_record_ids_for_tags(tags: list[str]) -> set[str] | None:
 
 
 def _ground_truth_tokens(entry: dict[str, Any]) -> list[str]:
-    """人工范本货框：优先 confirmed_box_tokens，否则 box_tokens（均为 Box_{box_id}）。"""
+    """Human truth boxes. Detection ``box_tokens`` are never a truth fallback."""
     confirmed = extract_confirmed_box_tokens(entry)
-    if confirmed:
-        return confirmed
-    raw = entry.get("box_tokens")
-    if not isinstance(raw, list):
-        return []
-    return canonicalize_box_token_list([str(t).strip() for t in raw if str(t).strip()])
+    return confirmed
 
 
 def _gt_token_key(tokens: list[str]) -> tuple[str, ...]:
@@ -100,20 +95,30 @@ class GroundTruthSegment:
 
 
 def build_ground_truth_segments(verified_true: list[dict[str, Any]]) -> list[GroundTruthSegment]:
-    """将 verified_true 按连续相同范本货框合并为时间段。"""
-    entries = [e for e in verified_true if isinstance(e, dict)]
-    entries.sort(key=lambda e: int(e.get("frame_idx") or e.get("source_frame_idx") or 0))
+    """Merge consecutive frames with the same explicit human-truth boxes."""
+    tokens_by_frame: dict[int, list[str]] = {}
+    for entry in verified_true:
+        if not isinstance(entry, dict):
+            continue
+        frame = int(entry.get("frame_idx") or entry.get("source_frame_idx") or 0)
+        tokens = _ground_truth_tokens(entry)
+        if not tokens:
+            continue
+        tokens_by_frame[frame] = canonicalize_box_token_list(
+            [*(tokens_by_frame.get(frame) or []), *tokens]
+        )
 
     segments: list[GroundTruthSegment] = []
     current: GroundTruthSegment | None = None
 
-    for entry in entries:
-        tokens = _ground_truth_tokens(entry)
-        if not tokens:
-            continue
+    for frame in sorted(tokens_by_frame):
+        tokens = tokens_by_frame[frame]
         key = _gt_token_key(tokens)
-        frame = int(entry.get("frame_idx") or entry.get("source_frame_idx") or 0)
-        if current and current.gt_tokens == key:
+        if (
+            current
+            and current.gt_tokens == key
+            and frame <= current.frame_end + 1
+        ):
             current.frame_end = max(current.frame_end, frame)
             current.entry_count += 1
         else:
@@ -530,7 +535,7 @@ def evaluate_camera_batch(
             "eligible": "仅复核状态为 completed（已复核）的分片参与评估",
             "excluded": "no_collision 及其它未复核状态不纳入测试、不计入统计",
             "tag_filter": "指定记录标签时，仅评估回放中同时带有全部标签的 pose 记录",
-            "ground_truth": "verified_true：优先 confirmed_box_tokens，否则 box_tokens",
+            "ground_truth": "verified_true：仅使用 bindings.confirmed_box_tokens（legacy 仅显式 confirmed_box_tokens）",
             "segment": "连续 verified_true 条目范本货框相同则合并为一段",
             "success": "段内 [frame_start, frame_end] 出现匹配货框的告警（alarm_collisions）",
             "miss": "段内无匹配告警记 1 次漏报",

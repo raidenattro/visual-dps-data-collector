@@ -2,7 +2,7 @@
 """批量提取手腕特征并统计：速度 / 碰撞段位移等对人工标真的区分度。
 
 正/负样本以 event_review.verified_true 合并的 ground truth 段为准（范本货框
-优先 confirmed_box_tokens，否则 box_tokens，与准确率评估一致）。默认筛选标签
+仅取 bindings[].confirmed_box_tokens；legacy 仅取显式 confirmed）。默认筛选标签
 （单人 + 无遮挡）及指定机位 slug。
 
 用法（项目根目录）:
@@ -624,7 +624,7 @@ def _render_markdown(
         f"> 标真：{verified_line}  ",
         f"> 机位 slug：{', '.join(cameras)}  ",
         "> 正样本：手腕碰撞段与人工标真 ground truth 段在帧范围 + 范本货框上重叠  ",
-        "> 范本货框：`confirmed_box_tokens` 优先，否则 `box_tokens`（与准确率评估一致）  ",
+        "> 范本货框：仅取 `bindings[].confirmed_box_tokens`；legacy 仅取显式 confirmed  ",
         "> 误报碰撞段：手腕碰撞段与误报告警（未被标真段覆盖的 `alarm_collisions`）在帧范围 + 货位 token 上重叠  ",
         "> 说明：筛选与回放「已保存记录」一致；标真段由 `verified_true` 按连续相同范本货框合并。",
         "",
@@ -855,7 +855,7 @@ def _render_markdown(
             "",
             "- 手腕特征由 `scripts/data/extract_wrist_features.py` 写入；标注按机位 reflection **多货架合并**。",
             "- 人工标真段：`event_review.verified_true` 按 `frame_idx` 排序，连续相同范本货框合并为 `[frame_start, frame_end]`。",
-            "- 范本货框：优先 `confirmed_box_tokens`，否则 `box_tokens`（与 `api/accuracy_service.py` 一致）。",
+            "- 范本货框：仅取 `bindings[].confirmed_box_tokens`；legacy 仅取显式 confirmed（与 `api/accuracy_service.py` 一致）。",
             "- 误报告警：`alarm_collisions` 中未被任何标真段（时间 + 范本货框）覆盖的帧（与准确率误报定义一致）。",
             "- 碰撞段：手腕进入某货框到离开的连续区间（与是否触发告警无关）。",
             "- 「标真重叠段」：碰撞段与标真段重叠且 `box_token` 与范本货框匹配。",

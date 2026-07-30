@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "verified_true": [
+    {
+      "event_type": "collision",
+      "frame_idx": 100,
+      "source_frame_idx": 100,
+      "box_tokens": ["Box_2014", "Box_2015"],
+      "person_id": 0
+    }
+  ]
+}

@@ -299,7 +299,7 @@ class EventReviewConcurrencyTest(unittest.TestCase):
         self.assertEqual(enriched[0]["confirmed_box_tokens"], ["Box_2015"])
         self.assertEqual(enriched[0]["person_id"], 0)
 
-    def test_load_event_review_legacy_file_returns_empty_verified(self) -> None:
+    def test_load_event_review_safely_projects_explicit_legacy_truth(self) -> None:
         pose_store._write_json_atomic(
             pose_store.event_review_path(self.locator),
             {
@@ -316,27 +316,72 @@ class EventReviewConcurrencyTest(unittest.TestCase):
             },
         )
         loaded = pose_store.load_event_review(self.locator)
-        self.assertEqual(loaded["verified_true"], [])
+        self.assertEqual(len(loaded["verified_true"]), 1)
+        self.assertEqual(
+            loaded["verified_true"][0]["confirmed_box_tokens"],
+            ["Box_2015"],
+        )
+        self.assertFalse(loaded["migration_required"])
 
-    def test_frame_toggle_removes_all_legacy_entries_only_on_target_frame(self) -> None:
+    def test_ambiguous_legacy_patch_returns_409_without_changing_file(self) -> None:
+        path = pose_store.event_review_path(self.locator)
+        payload = {
+            "schema": 1,
+            "record_id": self.locator.record_id,
+            "verified_true": [
+                {
+                    "event_type": "collision",
+                    "frame_idx": 1272,
+                    "box_tokens": ["Box_2014"],
+                }
+            ],
+        }
+        pose_store._write_json_atomic(path, payload)
+        before = path.read_bytes()
+
+        with self.assertRaises(Exception) as raised:
+            http_routes._patch_record_event_review_locked(
+                self.locator.record_id,
+                self.locator,
+                {
+                    "action": "toggle",
+                    "event": {
+                        "event_type": "collision",
+                        "frame_idx": 1272,
+                        "box_tokens": ["Box_2014"],
+                    },
+                    "verified_true": False,
+                    "event_total": 1,
+                },
+            )
+        self.assertEqual(getattr(raised.exception, "status_code", None), 409)
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_frame_toggle_preserves_other_bindings_then_cancel_removes_only_frame(self) -> None:
         old_entries = [
             {
                 "event_type": "collision",
                 "frame_idx": 1272,
                 "source_frame_idx": 1272,
-                "box_tokens": ["Box_2014"],
+                "box_tokens": ["Box_2014", "Box_2015"],
+                "confirmed_box_tokens": ["Box_2014"],
+                "person_id": 0,
             },
             {
                 "event_type": "collision",
                 "frame_idx": 1272,
                 "source_frame_idx": 1272,
-                "box_tokens": ["Box_2015"],
+                "box_tokens": ["Box_2014", "Box_2015"],
+                "confirmed_box_tokens": ["Box_2015"],
+                "person_id": 1,
             },
             {
                 "event_type": "collision",
                 "frame_idx": 1273,
                 "source_frame_idx": 1273,
                 "box_tokens": ["Box_2015"],
+                "confirmed_box_tokens": ["Box_2015"],
+                "person_id": 0,
             },
         ]
         pose_store.save_event_review(
@@ -354,7 +399,7 @@ class EventReviewConcurrencyTest(unittest.TestCase):
             "person_id": 0,
         }
 
-        with patch.object(http_routes, "refresh_record_summary"):
+        with patch("record_index_store.refresh_record_summary"):
             http_routes._patch_record_event_review_locked(
                 self.locator.record_id,
                 self.locator,
@@ -375,9 +420,17 @@ class EventReviewConcurrencyTest(unittest.TestCase):
             migrated_target[0]["bindings"][0]["confirmed_box_tokens"],
             ["Box_2015"],
         )
+        self.assertEqual(len(migrated_target[0]["bindings"]), 2)
+        self.assertIn(
+            {
+                "confirmed_box_tokens": ["Box_2015"],
+                "person_id": 1,
+            },
+            migrated_target[0]["bindings"],
+        )
         self.assertEqual(len([entry for entry in migrated if entry["frame_idx"] == 1273]), 1)
 
-        with patch.object(http_routes, "refresh_record_summary"):
+        with patch("record_index_store.refresh_record_summary"):
             http_routes._patch_record_event_review_locked(
                 self.locator.record_id,
                 self.locator,
@@ -419,7 +472,7 @@ class EventReviewConcurrencyTest(unittest.TestCase):
             status=pose_store.REVIEW_STATUS_IN_PROGRESS,
             event_total=1,
         )
-        with patch.object(http_routes, "refresh_record_summary"):
+        with patch("record_index_store.refresh_record_summary"):
             http_routes._patch_record_event_review_locked(
                 self.locator.record_id,
                 self.locator,
@@ -436,6 +489,116 @@ class EventReviewConcurrencyTest(unittest.TestCase):
             )["verified_true"],
             [],
         )
+
+    def test_range_write_includes_every_frame_and_preserves_other_binding(self) -> None:
+        pose_store.save_event_review(
+            self.locator,
+            [
+                {
+                    "frame_idx": 11,
+                    "source_frame_idx": 11,
+                    "detected_event_types": [],
+                    "detected_box_tokens": [],
+                    "bindings": [
+                        {
+                            "confirmed_box_tokens": ["Box_2014"],
+                            "person_id": 0,
+                        },
+                        {
+                            "confirmed_box_tokens": ["Box_2099"],
+                            "person_id": 1,
+                        }
+                    ],
+                }
+            ],
+            status=pose_store.REVIEW_STATUS_IN_PROGRESS,
+            event_total=30,
+        )
+        events = [
+            {
+                "event_type": "collision" if frame != 11 else "frame",
+                "frame_idx": frame,
+                "source_frame_idx": frame,
+                "box_tokens": ["Box_2015"] if frame != 11 else [],
+                "confirmed_box_tokens": ["Box_2015"],
+                "person_id": 0,
+                "person_track_id": "track-p0",
+            }
+            for frame in range(10, 13)
+        ]
+
+        with patch("record_index_store.refresh_record_summary"):
+            response = http_routes._patch_record_event_review_locked(
+                self.locator.record_id,
+                self.locator,
+                {
+                    "action": "set_range_verified",
+                    "range_start": 10,
+                    "range_end": 12,
+                    "events": events,
+                    "event_total": 30,
+                },
+            )
+
+        body = json.loads(response.body)
+        self.assertEqual(body["range_applied_count"], 3)
+        saved = json.loads(
+            pose_store.event_review_path(self.locator).read_text(encoding="utf-8")
+        )["verified_true"]
+        by_frame = {entry["frame_idx"]: entry for entry in saved}
+        self.assertEqual(sorted(by_frame), [10, 11, 12])
+        for frame in range(10, 13):
+            self.assertIn(
+                {
+                    "confirmed_box_tokens": ["Box_2015"],
+                    "person_id": 0,
+                    "person_track_id": "track-p0",
+                },
+                by_frame[frame]["bindings"],
+            )
+        self.assertIn(
+            {
+                "confirmed_box_tokens": ["Box_2099"],
+                "person_id": 1,
+            },
+            by_frame[11]["bindings"],
+        )
+        self.assertEqual(len(by_frame[11]["bindings"]), 2)
+
+    def test_range_write_rejects_missing_frame_without_changing_file(self) -> None:
+        pose_store.save_event_review(
+            self.locator,
+            [],
+            status=pose_store.REVIEW_STATUS_IN_PROGRESS,
+            event_total=30,
+        )
+        path = pose_store.event_review_path(self.locator)
+        before = path.read_bytes()
+        events = [
+            {
+                "event_type": "frame",
+                "frame_idx": frame,
+                "source_frame_idx": frame,
+                "box_tokens": [],
+                "confirmed_box_tokens": ["Box_2015"],
+                "person_id": 0,
+            }
+            for frame in (20, 22)
+        ]
+
+        with self.assertRaisesRegex(Exception, "缺少帧"):
+            http_routes._patch_record_event_review_locked(
+                self.locator.record_id,
+                self.locator,
+                {
+                    "action": "set_range_verified",
+                    "range_start": 20,
+                    "range_end": 22,
+                    "events": events,
+                    "event_total": 30,
+                },
+            )
+        self.assertEqual(path.read_bytes(), before)
 
 
 if __name__ == "__main__":

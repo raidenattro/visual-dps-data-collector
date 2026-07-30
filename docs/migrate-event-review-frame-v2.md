@@ -1,17 +1,8 @@
-# event_review schema v2 迁移指南
+# event_review 逐帧 schema v2 迁移指南
 
-将 `verified_true` 从 legacy（逐货框 / 混合签名）一次性迁移为 **schema v2：逐帧 + bindings**，避免运行时读时聚合带来的误并问题。
+## 目标
 
-## 为什么用方案二 + 脚本
-
-| 问题 | 读时聚合（当前分支） | schema v2 + 迁移脚本 |
-|------|----------------------|-------------------------|
-| legacy 多条同帧 | `box_tokens` 误当 confirmed | 迁移时显式规则，可审计 |
-| 两人两 box | 无法表达 | `bindings` 数组，每人一条 |
-| 运行时复杂度 | `enrich_events_with_review` 聚合 | 只读 v2，无 fallback |
-| 对新分支改动 | 已改写入/聚合逻辑 | **脚本离线迁移 + 简化读路径** |
-
-## schema v2 条目格式
+`event_review.json` 的磁盘格式统一为“一帧一条”。模型检测和人工标真严格分离：
 
 ```json
 {
@@ -20,15 +11,12 @@
     {
       "frame_idx": 1272,
       "source_frame_idx": 1272,
-      "event_type": "collision",
-      "box_tokens": ["Box_2014", "Box_2015"],
+      "detected_event_types": ["collision"],
+      "detected_box_tokens": ["Box_2014"],
       "bindings": [
         {
           "person_id": 0,
-          "confirmed_box_tokens": ["Box_2014"]
-        },
-        {
-          "person_id": 1,
+          "person_track_id": "optional-track-id",
           "confirmed_box_tokens": ["Box_2015"]
         }
       ]
@@ -37,65 +25,67 @@
 }
 ```
 
-| 字段 | 含义 |
-|------|------|
-| `box_tokens` | 该帧 timeline 检测参考（告警/碰撞并集） |
-| `bindings[]` | 人工标真：每条 = 可选 `person_id` + 必填 `confirmed_box_tokens` |
-| `event_type` | `alarm` / `collision` / `frame`（无检测但人工标真） |
+- `detected_*`：模型检测参考，可以在重算后变化，不是人工真值。
+- `bindings[]`：人工真值。每条绑定一个人员/轨迹和一个或多个确认货框。
+- 同一帧只允许一条帧记录；同一帧可以有多个 binding。
+- 保存索引为 `frame_idx`；binding 更新索引为 `person_track_id` 或 `person_id`。
 
-## legacy → v2 迁移规则
+## 为什么不能自动猜旧格式
 
-1. 按 `frame_idx` 分组 legacy 条目。
-2. 每条 legacy 转为 binding：
-   - **优先** `confirmed_box_tokens`
-   - 若无 confirmed 且 `box_tokens` **仅 1 个**：视为旧版逐货框标真，confirmed = 该 box
-   - 若无 confirmed 且 `box_tokens` 多个：**跳过并标记 ambiguous**（不猜）
-3. 同帧 bindings 去重：`(person_id, confirmed 集合)` 相同则合并。
-4. **无法转为 binding 的 legacy 条目直接清除**（不保留 ambiguous）；整帧无有效 binding 时该帧标真一并清除，需人工重新标注。
-5. 有 record locator 时读取 timeline 填充 `box_tokens` / `event_type`。
-6. 写入 `schema: 2`，备份原文件为 `event_review.json.bak.{timestamp}`。
+历史上多种不兼容格式都写成了 `"schema": 1`：
 
-## 操作步骤
+1. 旧逐帧/事件格式：`box_tokens` 可能是整帧多个真值框。
+2. 逐货框格式：同帧多行，每行 `box_tokens` 只有一个框。
+3. 新扁平格式：`confirmed_box_tokens` 才是人工真值，`box_tokens` 是检测参考。
+4. 混合文件：同一个 JSON 同时包含上述几种行。
 
-在项目根目录：
+因此默认迁移只信显式的 `confirmed_box_tokens`。缺少 confirmed 的行会进入
+`unresolved_legacy`，不会把 `box_tokens` 猜成人工真值，也不会被静默删除。
 
-```bash
-# 1. 预览（默认 dry-run）
-python scripts/data/migrate_event_review_to_frame_v2.py --dry-run
+## 迁移模式
 
-# 2. 仅处理某机位
-python scripts/data/migrate_event_review_to_frame_v2.py 1-1-1-_2 --dry-run
+```powershell
+# 1. 只读审计（默认）
+python scripts/data/migrate_event_review_to_frame_v2.py 1-1-1-_2 `
+  --source-format explicit-confirmed `
+  --report audit.json
 
-# 3. 校验是否已为 v2
-python scripts/data/migrate_event_review_to_frame_v2.py --verify-only
+# 2. 生成独立候选，不修改源文件
+python scripts/data/migrate_event_review_to_frame_v2.py 1-1-1-_2 `
+  --source-format explicit-confirmed `
+  --candidate-dir localdata/review-v2-candidate `
+  --report candidate-report.json
 
-# 4. 确认后写入
-python scripts/data/migrate_event_review_to_frame_v2.py --write
+# 3. 人工确认旧文件确实是“逐货框”后才可选择
+python scripts/data/migrate_event_review_to_frame_v2.py 1-1-1-_2 `
+  --source-format legacy-per-box `
+  --candidate-dir localdata/review-v2-candidate
 
-# 5. 单元测试
-python -m unittest tests.test_event_review_frame_v2_migration -v
+# 4. 人工确认旧文件确实是“逐帧/事件”后才可选择
+python scripts/data/migrate_event_review_to_frame_v2.py 1-1-1-_2 `
+  --source-format legacy-frame-event `
+  --candidate-dir localdata/review-v2-candidate
 ```
 
-## 与新分支的配合（推荐落地顺序）
+原地替换必须显式加 `--replace`。脚本会先生成
+`event_review.json.bak.<timestamp>`。存在 unresolved 时默认阻止替换；即使显式
+使用 `--allow-unresolved`，原行也会完整保存在 `unresolved_legacy`。
 
-1. **保留** Bug A（并发写锁 + 原子 JSON）与帧级导航 UX（下一帧）。
-2. **运行本脚本** 迁移全部 `localdata/review/`（生产前在副本上试跑）。
-3. **简化运行时**（本分支已部分完成）：
-   - `load_event_review` / `enrich_events_with_review`：**仅读取 schema v2**；legacy 返回空 `verified_true`
-   - 已删除读时 legacy 聚合 fallback
-   - PATCH toggle 写入仍为 legacy 格式（后续可改为 v2 写入）
-4. **普通帧标真**：若产品需要漏报补标，保留 `event_type: frame` + bindings；否则可限制仅 `box_tokens` 非空帧可标真。
+## 运行时保护
 
-## 迁移后仍需人工复核的场景
+- schema v2 直接读写。
+- schema 1 中带显式 confirmed 的行可以只读展示。
+- schema 1 中存在歧义行时，页面写入返回 HTTP 409，防止一次点击覆盖旧文件。
+- 新写入始终落为 schema v2，并保留既有 `unresolved_legacy`。
+- 取消标真只删除当前帧；修改一个人员只 upsert 该 binding，不覆盖同帧其他人员。
 
-- 脚本输出 `清除帧 N`：该帧 legacy 无法可靠转换，**已丢弃**，需在页面重新标真
-- 旧 bug 产生的重复/矛盾 legacy：仅保留可明确转为 binding 的部分
-- `person_id` 缺失的多 binding 帧：加载后可能无 person，标真时需补选
+## 验收清单
 
-## 相关文件
-
-| 文件 | 说明 |
-|------|------|
-| `event_review_frame_v2.py` | 迁移核心逻辑（可与运行时共用） |
-| `scripts/data/migrate_event_review_to_frame_v2.py` | CLI |
-| `tests/test_event_review_frame_v2_migration.py` | 回归测试 |
+1. 审计报告中检查 `input_count`、`output_frame_count`、`binding_count`。
+2. `unresolved_entries` 必须由人工选择旧格式或逐条复核，不能用猜测消零。
+3. 候选文件执行 `verify_frame_v2_verified_true`，不得有重复帧或空 binding。
+4. 页面验证：标真 → 下一帧 → 返回，确认框与人员保持不变。
+5. 同帧 P0/P1 测试：修改 P0 后 P1 不变。
+6. 取消当前帧后，相邻帧和其他 binding 不变。
+7. Excel、准确率和推理评估只使用 confirmed/bindings，不使用检测框作为真值。
+8. 本地验收通过后，才安排停写窗口、服务器备份、候选替换和代码部署。

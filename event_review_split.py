@@ -1,4 +1,9 @@
-"""event_review verified_true 按单货框拆分（迁移脚本与运行时共用）。"""
+"""旧版 schema-1 单货框拆分工具。
+
+此模块只保留给历史迁移脚本使用，不属于运行时 schema-v2 写入路径。混合
+schema-1 文件不要直接调用本模块；应使用
+``scripts/data/migrate_event_review_to_frame_v2.py`` 并明确指定源格式。
+"""
 
 from __future__ import annotations
 
@@ -46,7 +51,7 @@ class SplitVerifiedTrueStats:
 
 
 def boxes_to_split_from_entry(norm: dict[str, Any]) -> list[str]:
-    """从规范化条目得到待拆分的货框列表（优先 confirmed_box_tokens）。"""
+    """返回旧版拆分目标；该函数会读取检测 box_tokens，不能推断人工真值。"""
     confirmed = extract_confirmed_box_tokens(norm)
     if len(confirmed) > 1:
         return confirmed

@@ -24,7 +24,6 @@ from annotation_store import (
     annotation_dir_for_source,
 )
 from collect_core import validate_video_path
-from event_engine.box_identity import canonicalize_box_token_list
 from config_loader import (
     allocate_camera_storage_slug,
     build_settings,
@@ -40,13 +39,9 @@ from export_pose_xlsx import export_pose_to_xlsx_bytes
 from model_assets import VIDEO_EXTENSIONS
 from pose_store import (
     STORAGE_V2_PARQUET,
-    normalize_review_entry,
     delete_record,
     enrich_events_with_review,
-    events_to_verified_entries,
-    extract_confirmed_box_tokens,
     event_review_write_lock,
-    event_signature,
     iter_active_records,
     load_event_review,
     load_events,
@@ -55,13 +50,10 @@ from pose_store import (
     load_pose_header,
     load_timeline_index,
     load_timeline,
-    REVIEW_STATUS_NO_COLLISION,
     ensure_no_collision_review_completed,
     event_review_status_label,
     record_has_skeleton_data,
     resolve_event_review_status,
-    save_event_review,
-    _first_existing_event_review_raw,
 )
 from video_frame import first_frame_base64, frame_base64_at_index
 
@@ -121,7 +113,6 @@ from record_index_store import (
     delete_record_index,
     import_event_reviews_to_index,
     list_record_summaries,
-    refresh_record_summary,
     maybe_sync_record_summaries,
 )
 from record_tag_store import (
@@ -1115,7 +1106,7 @@ def get_record_event_review(record_id: str) -> JSONResponse:
 
 @router.patch("/api/records/{record_id:path}/event-review")
 def patch_record_event_review(record_id: str, body: dict[str, Any] = Body(...)) -> JSONResponse:
-    """更新人工复核：verified_true / toggle / set_all_verified / status=completed。"""
+    """更新人工复核：逐帧、完整区间、批量或完成状态。"""
     locator = locate_record_by_id(record_id)
     if not locator:
         raise HTTPException(404, "记录不存在")
@@ -1131,349 +1122,9 @@ def _patch_record_event_review_locked(
     locator: Any,
     body: dict[str, Any],
 ) -> JSONResponse:
-    review = load_event_review(locator)
-    raw, _ = _first_existing_event_review_raw(locator)
-    from event_review_frame_v2 import load_verified_items_for_write
+    from api.event_review_service import patch_event_review_locked
 
-    verified: list[dict[str, Any]] = load_verified_items_for_write(raw if raw else {})
-    by_sig = {
-        event_signature(str(v.get("event_type") or ""), int(v.get("frame_idx") or 0), v.get("box_tokens")): v
-        for v in verified
-        if isinstance(v, dict)
-    }
-
-    def drop_review_frame(frame_idx: int) -> list[dict[str, Any]]:
-        """删除同帧旧条目并返回它们；帧级复核一次操作只影响当前帧。"""
-        removed: list[dict[str, Any]] = []
-        for old_sig, old_entry in list(by_sig.items()):
-            try:
-                old_frame = int(old_entry.get("frame_idx") or 0)
-            except (TypeError, ValueError):
-                old_frame = 0
-            if old_frame != frame_idx:
-                continue
-            removed.append(old_entry)
-            by_sig.pop(old_sig, None)
-        return removed
-
-    requested_status = str(body.get("status") or "").strip().lower()
-    if requested_status == "completed":
-        if "verified_true" in body and isinstance(body.get("verified_true"), list):
-            verified = []
-            seen: set[str] = set()
-            for item in body.get("verified_true") or []:
-                norm = normalize_review_entry(item if isinstance(item, dict) else {})
-                if not norm:
-                    continue
-                sig = event_signature(norm["event_type"], norm["frame_idx"], norm["box_tokens"])
-                if sig in seen:
-                    continue
-                seen.add(sig)
-                verified.append(norm)
-        try:
-            event_total = int(body.get("event_total")) if body.get("event_total") is not None else len(load_events(locator))
-        except (TypeError, ValueError):
-            event_total = len(load_events(locator))
-        try:
-            path = save_event_review(
-                locator,
-                verified,
-                status="completed",
-                event_total=event_total,
-            )
-        except OSError as exc:
-            raise HTTPException(500, f"保存复核失败: {exc}") from exc
-        saved = load_event_review(locator)
-        events = enrich_events_with_review(load_events(locator), locator)
-        review_status = resolve_event_review_status(saved, event_count=len(events))
-        refresh_record_summary(record_id)
-        return JSONResponse(
-            {
-                "status": "ok",
-                "record_id": record_id,
-                "path": str(path),
-                "verified_true_count": len(saved.get("verified_true") or []),
-                "event_review_status": review_status,
-                "event_review_label": event_review_status_label(review_status),
-                "event_review": saved,
-                "events": events,
-            }
-        )
-
-    action = str(body.get("action") or "").strip().lower()
-    light_response = False
-    all_events: list[dict[str, Any]] | None = None
-
-    if action == "set_all_verified":
-        light_response = True
-        if "mark_all" not in body:
-            raise HTTPException(400, "set_all_verified 须包含 mark_all 布尔值")
-        if bool(body.get("mark_all")):
-            try:
-                all_events = load_events(locator)
-            except RuntimeError as exc:
-                raise HTTPException(500, str(exc)) from exc
-            verified = events_to_verified_entries(all_events)
-        else:
-            verified = []
-    elif action == "toggle":
-        light_response = True
-        entry = body.get("event")
-        if not isinstance(entry, dict):
-            raise HTTPException(400, "toggle 须包含 event 对象")
-        norm = normalize_review_entry(entry)
-        if norm is None and body.get("verified_true") is False:
-            # 取消普通帧只需要帧号；该帧可能没有检测框，也可能在前端
-            # 乐观清空标真状态后不再携带 confirmed_box_tokens。
-            try:
-                frame_idx = int(entry.get("frame_idx") or 0)
-                source_frame_idx = int(entry.get("source_frame_idx") or frame_idx)
-            except (TypeError, ValueError):
-                frame_idx = 0
-                source_frame_idx = 0
-            if str(entry.get("event_type") or "").strip() == "frame" and frame_idx > 0:
-                norm = {
-                    "event_type": "frame",
-                    "frame_idx": frame_idx,
-                    "source_frame_idx": source_frame_idx,
-                    "box_tokens": [],
-                }
-        if not norm:
-            raise HTTPException(400, "event 字段无效")
-        sig = event_signature(norm["event_type"], norm["frame_idx"], norm["box_tokens"])
-        want = body.get("verified_true")
-        if want is None:
-            want = sig not in by_sig
-        if bool(want):
-            # 标真前先收集同帧旧条目中的 confirmed / person_id，再清掉旧条目。
-            legacy_frame_entries = [
-                old
-                for old in by_sig.values()
-                if isinstance(old, dict) and int(old.get("frame_idx") or 0) == norm["frame_idx"]
-            ]
-            drop_review_frame(norm["frame_idx"])
-            entry_norm = dict(norm)
-            raw_entry = entry if isinstance(entry, dict) else {}
-            if "confirmed_box_tokens" in raw_entry or "confirmed_box_token" in raw_entry:
-                confirmed_list = extract_confirmed_box_tokens(raw_entry)
-                if confirmed_list:
-                    entry_norm["confirmed_box_tokens"] = confirmed_list
-                else:
-                    entry_norm.pop("confirmed_box_tokens", None)
-                    entry_norm.pop("confirmed_box_token", None)
-            else:
-                confirmed_list = extract_confirmed_box_tokens(entry)
-                if confirmed_list:
-                    entry_norm["confirmed_box_tokens"] = confirmed_list
-                else:
-                    existing = next(
-                        (old for old in legacy_frame_entries if isinstance(old, dict)),
-                        None,
-                    )
-                    if isinstance(existing, dict):
-                        old_list = extract_confirmed_box_tokens(existing)
-                        if old_list:
-                            entry_norm["confirmed_box_tokens"] = old_list
-            if not extract_confirmed_box_tokens(entry_norm):
-                raise HTTPException(400, "标真须选择确认货框")
-            if "person_id" in raw_entry:
-                try:
-                    person_id = int(raw_entry.get("person_id"))
-                except (TypeError, ValueError):
-                    person_id = -1
-                if person_id >= 0:
-                    entry_norm["person_id"] = person_id
-                else:
-                    entry_norm.pop("person_id", None)
-            else:
-                existing_person = next(
-                    (
-                        old.get("person_id")
-                        for old in legacy_frame_entries
-                        if isinstance(old, dict) and old.get("person_id") is not None
-                    ),
-                    None,
-                )
-                if existing_person is not None:
-                    entry_norm["person_id"] = existing_person
-            by_sig[sig] = entry_norm
-        else:
-            # 取消标真只清当前帧；兼容并移除该帧旧版逐货框条目。
-            drop_review_frame(norm["frame_idx"])
-        verified = list(by_sig.values())
-    elif action == "set_confirmed_box":
-        light_response = True
-        entry = body.get("event")
-        if not isinstance(entry, dict):
-            raise HTTPException(400, "set_confirmed_box 须包含 event 对象")
-        norm = normalize_review_entry(entry)
-        if not norm:
-            raise HTTPException(400, "event 字段无效")
-        if "confirmed_box_tokens" in body:
-            raw = body.get("confirmed_box_tokens")
-            if not isinstance(raw, list):
-                raise HTTPException(400, "confirmed_box_tokens 须为数组")
-            confirmed_list = canonicalize_box_token_list(
-                [str(t).strip() for t in raw if str(t).strip()]
-            )
-        else:
-            token = str(body.get("confirmed_box_token") or "").strip()
-            confirmed_list = canonicalize_box_token_list([token] if token else [])
-        sig = event_signature(norm["event_type"], norm["frame_idx"], norm["box_tokens"])
-        exact_entry = by_sig.get(sig)
-        frame_entries = drop_review_frame(norm["frame_idx"])
-        if exact_entry is None:
-            if not frame_entries:
-                raise HTTPException(400, "该帧尚未标真，请先标真或标真时一并提交货框编号")
-            stored = dict(norm)
-            legacy_person = next(
-                (
-                    old.get("person_id")
-                    for old in frame_entries
-                    if isinstance(old, dict) and old.get("person_id") is not None
-                ),
-                None,
-            )
-            if legacy_person is not None:
-                stored["person_id"] = legacy_person
-        else:
-            stored = dict(exact_entry)
-        if confirmed_list:
-            stored["confirmed_box_tokens"] = confirmed_list
-        else:
-            stored.pop("confirmed_box_tokens", None)
-        stored.pop("confirmed_box_token", None)
-        by_sig[sig] = stored
-        verified = list(by_sig.values())
-    elif "verified_true" in body:
-        raw_list = body.get("verified_true")
-        if not isinstance(raw_list, list):
-            raise HTTPException(400, "verified_true 须为数组")
-        verified = []
-        seen: set[str] = set()
-        for item in raw_list:
-            norm = normalize_review_entry(item if isinstance(item, dict) else {})
-            if not norm:
-                continue
-            sig = event_signature(norm["event_type"], norm["frame_idx"], norm["box_tokens"])
-            if sig in seen:
-                continue
-            seen.add(sig)
-            verified.append(norm)
-    else:
-        raise HTTPException(
-            400,
-            "请提供 verified_true、action=toggle、action=set_confirmed_box、action=set_all_verified 或 status=completed",
-        )
-
-    event_total_hint: int | None = None
-    if body.get("event_total") is not None:
-        try:
-            event_total_hint = max(0, int(body.get("event_total")))
-        except (TypeError, ValueError):
-            event_total_hint = None
-
-    if all_events is None:
-        if light_response and action == "set_all_verified" and not bool(body.get("mark_all")):
-            all_events = []
-        else:
-            try:
-                all_events = load_events(locator)
-            except RuntimeError as exc:
-                raise HTTPException(500, str(exc)) from exc
-
-    effective_event_count = len(all_events) if all_events else (event_total_hint or 0)
-
-    if effective_event_count == 0 and not verified:
-        event_total_empty = 0
-        if body.get("event_total") is not None:
-            try:
-                event_total_empty = max(0, int(body.get("event_total")))
-            except (TypeError, ValueError):
-                event_total_empty = 0
-        # 时间轴无事件时仍保留已有标真，避免并发 PATCH 把 verified_true 清空
-        if verified:
-            try:
-                path = save_event_review(
-                    locator,
-                    verified,
-                    status="in_progress",
-                    event_total=event_total_empty or len(verified),
-                )
-            except OSError as exc:
-                raise HTTPException(500, f"保存复核失败: {exc}") from exc
-            saved = load_event_review(locator)
-            review_status = resolve_event_review_status(saved, event_count=0)
-            return JSONResponse(
-                {
-                    "status": "ok",
-                    "record_id": record_id,
-                    "path": str(path),
-                    "verified_true_count": len(saved.get("verified_true") or []),
-                    "event_review_status": review_status,
-                    "event_review_label": event_review_status_label(review_status),
-                    "event_review": saved,
-                    "events": [],
-                }
-            )
-        try:
-            path = save_event_review(
-                locator,
-                [],
-                status=REVIEW_STATUS_NO_COLLISION,
-                event_total=0,
-            )
-        except OSError as exc:
-            raise HTTPException(500, f"保存复核失败: {exc}") from exc
-        saved = load_event_review(locator)
-        review_status = resolve_event_review_status(saved, event_count=0)
-        refresh_record_summary(record_id)
-        return JSONResponse(
-            {
-                "status": "ok",
-                "record_id": record_id,
-                "path": str(path),
-                "verified_true_count": 0,
-                "event_review_status": review_status,
-                "event_review_label": event_review_status_label(review_status),
-                "event_review": saved,
-                "events": [],
-            }
-        )
-
-    next_status: str | None = "in_progress"
-    # 仅更新已标真条目的货框确认时，不降级「已复核」；增删标真仍回到复核中
-    if action == "set_confirmed_box":
-        next_status = None
-    event_total = event_total_hint if event_total_hint is not None else len(all_events)
-
-    try:
-        path = save_event_review(
-            locator,
-            verified,
-            status=next_status,
-            event_total=event_total,
-        )
-    except OSError as exc:
-        raise HTTPException(500, f"保存复核失败: {exc}") from exc
-
-    saved = load_event_review(locator)
-    review_status = resolve_event_review_status(saved, event_count=event_total)
-    refresh_record_summary(record_id)
-    payload: dict[str, Any] = {
-        "status": "ok",
-        "record_id": record_id,
-        "path": str(path),
-        "verified_true_count": len(saved.get("verified_true") or []),
-        "event_review_status": review_status,
-        "event_review_label": event_review_status_label(review_status),
-        "event_review": saved,
-    }
-    if light_response:
-        payload["light"] = True
-    else:
-        payload["events"] = enrich_events_with_review(all_events, locator)
-    return JSONResponse(payload)
+    return patch_event_review_locked(record_id, locator, body)
 
 
 @router.get("/api/records/{record_id:path}/timeline")

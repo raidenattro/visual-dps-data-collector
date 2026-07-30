@@ -441,7 +441,7 @@ def _render_markdown(
             "## 5. 方法说明",
             "",
             "- 脚本：`scripts/data/compare_alarm_threshold_accuracy.py`",
-            "- 标真来源：`event_review.verified_true`（优先 confirmed_box_tokens）",
+            "- 标真来源：`event_review.verified_true`（仅 bindings[].confirmed_box_tokens；legacy 仅显式 confirmed）",
             "- 告警重算：`CollisionProcessor` + reflection 合并标注",
             "- 「当前落盘」列为读取 `timeline.parquet` 已有 `alarm_collisions`（采集时参数可能为 3/5/6）",
             "",

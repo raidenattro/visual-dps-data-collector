@@ -113,9 +113,26 @@ def _frames_need_collision_recompute(frames: list[dict[str, Any]]) -> bool:
 _EVENT_TYPE_ZH = {"alarm": "告警", "collision": "碰撞"}
 
 
-def _verified_lookup_from_review(review: dict[str, Any] | None) -> set[tuple[str, int, str]]:
-    """人工复核：{(事件类型中文, 帧序号, 货框标识), ...}。"""
-    out: set[tuple[str, int, str]] = set()
+def _review_bindings(item: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = item.get("bindings")
+    if isinstance(raw, list):
+        return [binding for binding in raw if isinstance(binding, dict)]
+    confirmed = item.get("confirmed_box_tokens")
+    if not isinstance(confirmed, list):
+        return []
+    binding: dict[str, Any] = {"confirmed_box_tokens": confirmed}
+    if item.get("person_id") is not None:
+        binding["person_id"] = item.get("person_id")
+    if item.get("person_track_id") is not None:
+        binding["person_track_id"] = item.get("person_track_id")
+    return [binding]
+
+
+def _verified_lookup_from_review(
+    review: dict[str, Any] | None,
+) -> set[tuple[str, int, str, int | None]]:
+    """Explicit truth lookup by event type, frame, confirmed box and person."""
+    out: set[tuple[str, int, str, int | None]] = set()
     if not isinstance(review, dict):
         return out
     for item in review.get("verified_true") or []:
@@ -128,19 +145,29 @@ def _verified_lookup_from_review(review: dict[str, Any] | None) -> set[tuple[str
             fi = int(item.get("frame_idx") or 0)
         except (TypeError, ValueError):
             continue
-        for token in item.get("box_tokens") or []:
-            t = str(token).strip()
-            if t:
-                out.add((et, fi, t))
+        for binding in _review_bindings(item):
+            try:
+                person_id = (
+                    int(binding.get("person_id"))
+                    if binding.get("person_id") is not None
+                    else None
+                )
+            except (TypeError, ValueError):
+                person_id = None
+            for token in binding.get("confirmed_box_tokens") or []:
+                value = str(token).strip()
+                if value:
+                    out.add((et, fi, value, person_id))
     return out
 
 
 def _human_verified_label(
-    verified_lookup: set[tuple[str, int, str]],
+    verified_lookup: set[tuple[str, int, str, int | None]],
     *,
     event_type_zh: str,
     frame_idx: Any,
     token: str,
+    person_id: Any = None,
 ) -> str:
     """人工标真：是 / 未复核（仅标记真实碰撞，未标默认为未复核）。"""
     if not verified_lookup:
@@ -152,7 +179,18 @@ def _human_verified_label(
     t = str(token or "").strip()
     if not t:
         return "未复核"
-    return "是" if (event_type_zh, fi, t) in verified_lookup else "未复核"
+    try:
+        pid = int(person_id) if person_id is not None else None
+    except (TypeError, ValueError):
+        pid = None
+    matched = any(
+        event_type == event_type_zh
+        and frame == fi
+        and box == t
+        and (pid is None or bound_person is None or bound_person == pid)
+        for event_type, frame, box, bound_person in verified_lookup
+    )
+    return "是" if matched else "未复核"
 
 
 def _excel_cell(value: Any) -> Any:
@@ -452,6 +490,7 @@ def export_pose_to_xlsx_bytes(
                             event_type_zh=event_type,
                             frame_idx=frame.get("frame_idx"),
                             token=token,
+                            person_id=person.get("person_id"),
                         ),
                         _excel_cell(hit.get("x")),
                         _excel_cell(hit.get("y")),
@@ -497,24 +536,49 @@ def export_pose_to_xlsx_bytes(
 
     if isinstance(review, dict) and review.get("verified_true"):
         ws_review = wb.create_sheet("人工复核")
-        ws_review.append(["事件类型", "帧序号", "源视频帧序号", "货框标识", "复核结果", "更新时间"])
+        ws_review.append(
+            [
+                "事件类型",
+                "帧序号",
+                "源视频帧序号",
+                "检测货框",
+                "确认货框",
+                "人员ID",
+                "跟踪ID",
+                "复核结果",
+                "更新时间",
+            ]
+        )
         updated_at = str(review.get("updated_at") or "")
         for item in review.get("verified_true") or []:
             if not isinstance(item, dict):
                 continue
             et = _EVENT_TYPE_ZH.get(str(item.get("event_type") or "").strip(), str(item.get("event_type") or ""))
-            tokens = [str(t).strip() for t in (item.get("box_tokens") or []) if str(t).strip()]
-            for token in tokens or [""]:
-                ws_review.append(
-                    [
-                        et,
-                        _excel_cell(item.get("frame_idx")),
-                        _excel_cell(item.get("source_frame_idx")),
-                        token,
-                        "是",
-                        updated_at,
-                    ]
-                )
+            detected = ", ".join(
+                str(t).strip()
+                for t in (item.get("box_tokens") or [])
+                if str(t).strip()
+            )
+            for binding in _review_bindings(item):
+                tokens = [
+                    str(t).strip()
+                    for t in (binding.get("confirmed_box_tokens") or [])
+                    if str(t).strip()
+                ]
+                for token in tokens:
+                    ws_review.append(
+                        [
+                            et,
+                            _excel_cell(item.get("frame_idx")),
+                            _excel_cell(item.get("source_frame_idx")),
+                            detected,
+                            token,
+                            _excel_cell(binding.get("person_id")),
+                            _excel_cell(binding.get("person_track_id")),
+                            "是",
+                            updated_at,
+                        ]
+                    )
 
     ws_info = wb.create_sheet("说明")
     ws_info.append(["字段", "说明"])

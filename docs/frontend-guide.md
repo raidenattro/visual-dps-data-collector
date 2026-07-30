@@ -242,8 +242,9 @@ flowchart LR
 
 **范本货框**（每条 `verified_true`）：
 
-- 优先 `confirmed_box_tokens`（人工确认的取货货框）。
-- 若为空，则使用 `box_tokens`。
+- schema v2 仅使用 `bindings[].confirmed_box_tokens`。
+- legacy 仅使用显式 `confirmed_box_tokens`。
+- `box_tokens` / `detected_box_tokens` 只是模型检测参考，不作为人工真值兜底。
 
 **评估规则**：
 
@@ -350,6 +351,8 @@ flowchart LR
 - 右侧 **事件复核** 队列按筛选（全部 / 未标真 / 待确认货框 / 已标真 / 告警 / 碰撞）浏览事件。
 - **标为真**：将事件写入 `verified_true`，并可确认 `confirmed_box_tokens`（画面上点选货框，紫色高亮）。
 - 切换事件时，未按 **Y** 保存的暂选货框会丢弃。
+- **区间标真**：首帧和尾帧均包含，区间内每一帧写入同一组人工确认货框；
+  不按检测事件或 `box_tokens` 过滤。后端在落盘前校验区间连续性并整批保存。
 - **标记复核完成**：将 review `status` 设为 `completed`。
 
 #### 画面货框颜色

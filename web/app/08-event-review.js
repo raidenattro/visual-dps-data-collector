@@ -140,9 +140,59 @@ function getEventConfirmedBoxes(ev) {
   return getEventPersistedConfirmedBoxes(ev);
 }
 
+function normalizeReviewBindings(bindings) {
+  if (!Array.isArray(bindings)) return [];
+  const out = [];
+  const seen = new Set();
+  bindings.forEach((raw) => {
+    if (!raw || typeof raw !== "object") return;
+    const confirmed = normalizeBoxTokenList(raw.confirmed_box_tokens || []);
+    if (!confirmed.length) return;
+    const personId =
+      raw.person_id == null || raw.person_id === "" || !Number.isFinite(Number(raw.person_id))
+        ? null
+        : Number(raw.person_id);
+    const trackId = String(raw.person_track_id ?? raw.track_id ?? "").trim();
+    const key = `${personId ?? ""}|${trackId}|${confirmed.join(",")}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    const binding = { confirmed_box_tokens: confirmed };
+    if (personId != null) binding.person_id = personId;
+    if (trackId) binding.person_track_id = trackId;
+    out.push(binding);
+  });
+  return out;
+}
+
+function selectedPersonIdForBinding(ev) {
+  if (!ev) return null;
+  const key = eventRowKey(ev);
+  if (pendingPersonIdByKey.has(key)) {
+    const pending = pendingPersonIdByKey.get(key);
+    return pending == null ? null : Number(pending);
+  }
+  if (ev.person_id != null && ev.person_id !== "" && Number.isFinite(Number(ev.person_id))) {
+    return Number(ev.person_id);
+  }
+  return null;
+}
+
 /** 已写入 event_review.json 的货框 */
 function getEventPersistedConfirmedBoxes(ev) {
   if (!ev) return [];
+  const bindings = normalizeReviewBindings(ev.bindings);
+  if (bindings.length) {
+    const selectedPersonId = selectedPersonIdForBinding(ev);
+    if (selectedPersonId != null) {
+      const selected = bindings.find((binding) => binding.person_id === selectedPersonId);
+      if (selected) return [...selected.confirmed_box_tokens];
+      return [];
+    }
+    if (bindings.length === 1) return [...bindings[0].confirmed_box_tokens];
+    return normalizeBoxTokenList(
+      bindings.flatMap((binding) => binding.confirmed_box_tokens || [])
+    );
+  }
   if (Array.isArray(ev.confirmed_box_tokens)) {
     return normalizeBoxTokenList(ev.confirmed_box_tokens);
   }
@@ -210,9 +260,16 @@ function getFramePersonIds(frameIdx) {
 }
 
 function getEventPersistedPersonId(ev) {
-  if (!ev || ev.person_id == null || ev.person_id === "") return null;
-  const n = Number(ev.person_id);
-  return Number.isFinite(n) ? n : null;
+  if (!ev) return null;
+  if (ev.person_id != null && ev.person_id !== "") {
+    const n = Number(ev.person_id);
+    if (Number.isFinite(n)) return n;
+  }
+  const bindings = normalizeReviewBindings(ev.bindings);
+  if (bindings.length === 1 && bindings[0].person_id != null) {
+    return bindings[0].person_id;
+  }
+  return null;
 }
 
 function getEventPersonId(ev) {
@@ -331,6 +388,18 @@ function eventToReviewPayload(ev) {
   ) {
     if (personId != null) payload.person_id = personId;
   }
+  let bindings = normalizeReviewBindings(ev.bindings);
+  if (confirmed.length) {
+    const incoming = { confirmed_box_tokens: [...confirmed] };
+    if (personId != null) incoming.person_id = personId;
+    if (personId != null) {
+      bindings = bindings.filter((binding) => binding.person_id !== personId);
+    } else if (bindings.length <= 1) {
+      bindings = [];
+    }
+    bindings.push(incoming);
+  }
+  if (bindings.length) payload.bindings = normalizeReviewBindings(bindings);
   return payload;
 }
 
@@ -341,6 +410,7 @@ function syncConfirmedBoxFromReview(reviewPayload, events = playbackEvents) {
   const personByKey = new Map();
   const tokensByFrame = new Map();
   const personByFrame = new Map();
+  const bindingsByFrame = new Map();
   for (const item of list) {
     if (!item || typeof item !== "object") continue;
     const key = eventRowKey(item);
@@ -349,6 +419,8 @@ function syncConfirmedBoxFromReview(reviewPayload, events = playbackEvents) {
     );
     byKey.set(key, confirmed);
     const frameIdx = parseInt(item.frame_idx, 10) || 0;
+    const bindings = normalizeReviewBindings(item.bindings);
+    if (bindings.length) bindingsByFrame.set(frameIdx, bindings);
     const frameTokens = confirmed.length ? confirmed : normalizeBoxTokenList(item.box_tokens);
     if (frameTokens.length) {
       tokensByFrame.set(
@@ -356,7 +428,10 @@ function syncConfirmedBoxFromReview(reviewPayload, events = playbackEvents) {
         normalizeBoxTokenList([...(tokensByFrame.get(frameIdx) || []), ...frameTokens])
       );
     }
-    if (item.person_id != null && item.person_id !== "") {
+    if (bindings.length === 1 && bindings[0].person_id != null) {
+      personByKey.set(key, bindings[0].person_id);
+      personByFrame.set(frameIdx, bindings[0].person_id);
+    } else if (item.person_id != null && item.person_id !== "") {
       const pid = Number(item.person_id);
       if (Number.isFinite(pid)) {
         personByKey.set(key, pid);
@@ -377,6 +452,13 @@ function syncConfirmedBoxFromReview(reviewPayload, events = playbackEvents) {
       : ev.person_id != null
         ? Number(ev.person_id)
         : personByFrame.get(frameIdx);
+    const bindings = bindingsByFrame.get(frameIdx);
+    if (bindings) {
+      ev.bindings = bindings.map((binding) => ({
+        ...binding,
+        confirmed_box_tokens: [...binding.confirmed_box_tokens],
+      }));
+    }
     if (tokens !== undefined) {
       if (tokens.length) {
         ev.confirmed_box_tokens = [...tokens];
@@ -554,6 +636,7 @@ function setEventVerified(ev, verified) {
     delete ev.confirmed_box_tokens;
     delete ev.confirmed_box_token;
     delete ev.person_id;
+    delete ev.bindings;
     pendingConfirmedBoxesByKey.delete(key);
     pendingPersonIdByKey.delete(key);
     boxAnnotationTouchedKeys.delete(key);

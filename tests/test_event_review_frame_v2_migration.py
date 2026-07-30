@@ -1,4 +1,4 @@
-"""event_review schema v2 迁移逻辑测试。"""
+"""Lossless event-review schema v2 conversion tests."""
 
 from __future__ import annotations
 
@@ -6,100 +6,231 @@ import unittest
 
 from event_review_frame_v2 import (
     EVENT_REVIEW_SCHEMA_V2,
-    is_frame_v2_review,
+    LegacyReviewMigrationRequired,
+    SOURCE_EXPLICIT_CONFIRMED,
+    SOURCE_LEGACY_FRAME_EVENT,
+    SOURCE_LEGACY_PER_BOX,
+    detect_review_format,
+    frame_v2_entry_to_playback_row,
     legacy_entry_to_binding,
+    load_verified_items_for_write,
     migrate_verified_true_to_frame_v2,
+    upsert_binding,
     verify_frame_v2_verified_true,
 )
+from scripts.data.migrate_event_review_to_frame_v2 import _candidate_payload
 
 
 class EventReviewFrameV2MigrationTest(unittest.TestCase):
-    def test_legacy_single_box_without_confirmed_becomes_binding(self) -> None:
-        binding, warn = legacy_entry_to_binding(
-            {
-                "event_type": "collision",
-                "frame_idx": 1272,
-                "box_tokens": ["Box_2015"],
-            }
-        )
-        self.assertIsNone(warn)
-        self.assertEqual(binding["confirmed_box_tokens"], ["Box_2015"])
-
-    def test_legacy_with_confirmed_does_not_use_other_box_tokens(self) -> None:
-        binding, warn = legacy_entry_to_binding(
-            {
-                "event_type": "collision",
-                "frame_idx": 165,
-                "box_tokens": ["Box_2013"],
-                "confirmed_box_tokens": ["Box_2014"],
-                "person_id": 0,
-            }
-        )
-        self.assertIsNone(warn)
-        self.assertEqual(binding["confirmed_box_tokens"], ["Box_2014"])
-        self.assertEqual(binding["person_id"], 0)
-
-    def test_same_frame_two_legacy_entries_become_two_bindings(self) -> None:
-        legacy = [
+    def test_explicit_confirmed_is_only_safe_default_truth(self) -> None:
+        binding, warning = legacy_entry_to_binding(
             {
                 "event_type": "collision",
                 "frame_idx": 1272,
                 "box_tokens": ["Box_2014"],
+                "confirmed_box_tokens": ["Box_2015"],
+                "person_id": 0,
+            },
+            source_format=SOURCE_EXPLICIT_CONFIRMED,
+        )
+        self.assertIsNone(warning)
+        self.assertEqual(binding["confirmed_box_tokens"], ["Box_2015"])
+        self.assertEqual(binding["person_id"], 0)
+
+    def test_default_never_guesses_single_detected_box_is_truth(self) -> None:
+        row = {
+            "event_type": "collision",
+            "frame_idx": 1272,
+            "box_tokens": ["Box_2014"],
+            "person_id": 0,
+        }
+        binding, warning = legacy_entry_to_binding(
+            row,
+            source_format=SOURCE_EXPLICIT_CONFIRMED,
+        )
+        self.assertIsNone(binding)
+        self.assertIn("不能猜测", warning)
+
+        converted, stats = migrate_verified_true_to_frame_v2([row])
+        self.assertEqual(converted, [])
+        self.assertEqual(stats.unresolved_entries, 1)
+        self.assertEqual(stats.unresolved_items, [row])
+        self.assertEqual(stats.cleared_entries, 0)
+
+    def test_per_box_profile_requires_one_box_and_converts(self) -> None:
+        rows = [
+            {
+                "event_type": "collision",
+                "frame_idx": 10,
+                "box_tokens": ["Box_1"],
+                "person_id": 0,
+            },
+            {
+                "event_type": "collision",
+                "frame_idx": 10,
+                "box_tokens": ["Box_2"],
+                "person_id": 1,
+            },
+        ]
+        converted, stats = migrate_verified_true_to_frame_v2(
+            rows,
+            source_format=SOURCE_LEGACY_PER_BOX,
+        )
+        self.assertEqual(stats.unresolved_entries, 0)
+        self.assertEqual(len(converted), 1)
+        self.assertEqual(len(converted[0]["bindings"]), 2)
+
+    def test_frame_event_profile_preserves_multi_box_as_one_binding(self) -> None:
+        converted, stats = migrate_verified_true_to_frame_v2(
+            [
+                {
+                    "event_type": "collision",
+                    "frame_idx": 20,
+                    "box_tokens": ["Box_1", "Box_2"],
+                    "person_id": 0,
+                }
+            ],
+            source_format=SOURCE_LEGACY_FRAME_EVENT,
+        )
+        self.assertEqual(stats.unresolved_entries, 0)
+        self.assertEqual(
+            converted[0]["bindings"][0]["confirmed_box_tokens"],
+            ["Box_1", "Box_2"],
+        )
+
+    def test_same_frame_explicit_rows_keep_both_people(self) -> None:
+        rows = [
+            {
+                "event_type": "collision",
+                "frame_idx": 1272,
+                "box_tokens": ["Box_2014", "Box_2015"],
+                "confirmed_box_tokens": ["Box_2014"],
                 "person_id": 0,
             },
             {
                 "event_type": "collision",
                 "frame_idx": 1272,
-                "box_tokens": ["Box_2015"],
+                "box_tokens": ["Box_2014", "Box_2015"],
                 "confirmed_box_tokens": ["Box_2015"],
                 "person_id": 1,
             },
         ]
-        timeline = {
-            1272: {
-                "frame_idx": 1272,
-                "collisions": ["Box_2014", "Box_2015"],
-                "alarm_collisions": [],
-            }
-        }
-        out, stats = migrate_verified_true_to_frame_v2(legacy, timeline_by_frame=timeline)
-        self.assertEqual(len(out), 1)
-        self.assertEqual(out[0]["frame_idx"], 1272)
-        bindings = out[0]["bindings"]
-        self.assertEqual(len(bindings), 2)
-        confirmed_sets = {tuple(b["confirmed_box_tokens"]) for b in bindings}
-        self.assertIn(("Box_2014",), confirmed_sets)
-        self.assertIn(("Box_2015",), confirmed_sets)
-        self.assertEqual(stats.output_frame_count, 1)
+        converted, stats = migrate_verified_true_to_frame_v2(rows)
         self.assertEqual(stats.binding_count, 2)
-
-    def test_no_confirmed_multi_box_legacy_is_skipped_not_merged(self) -> None:
-        legacy = [
+        self.assertEqual(len(converted), 1)
+        self.assertEqual(
             {
-                "event_type": "collision",
-                "frame_idx": 900,
-                "box_tokens": ["Box_2014", "Box_2015"],
-            }
-        ]
-        out, stats = migrate_verified_true_to_frame_v2(legacy)
-        self.assertEqual(out, [])
-        self.assertGreaterEqual(stats.cleared_entries, 1)
-        self.assertIn(900, stats.cleared_frames)
+                (binding["person_id"], tuple(binding["confirmed_box_tokens"]))
+                for binding in converted[0]["bindings"]
+            },
+            {(0, ("Box_2014",)), (1, ("Box_2015",))},
+        )
 
-    def test_v2_review_detected(self) -> None:
-        raw = {
-            "schema": EVENT_REVIEW_SCHEMA_V2,
-            "verified_true": [
-                {
-                    "frame_idx": 10,
-                    "event_type": "collision",
-                    "box_tokens": ["Box_1"],
-                    "bindings": [{"confirmed_box_tokens": ["Box_1"], "person_id": 0}],
-                }
+    def test_v2_roundtrip_does_not_dedupe_bindings_by_detection_signature(self) -> None:
+        frame = {
+            "frame_idx": 1272,
+            "source_frame_idx": 1272,
+            "detected_event_types": ["collision"],
+            "detected_box_tokens": ["Box_2014", "Box_2015"],
+            "bindings": [
+                {"person_id": 0, "confirmed_box_tokens": ["Box_2014"]},
+                {"person_id": 1, "confirmed_box_tokens": ["Box_2015"]},
             ],
         }
-        self.assertTrue(is_frame_v2_review(raw))
-        self.assertEqual(verify_frame_v2_verified_true(raw["verified_true"]), [])
+        raw = {"schema": EVENT_REVIEW_SCHEMA_V2, "verified_true": [frame]}
+        loaded = load_verified_items_for_write(raw)
+        self.assertEqual(len(loaded), 1)
+        self.assertEqual(len(loaded[0]["bindings"]), 2)
+        playback = frame_v2_entry_to_playback_row(loaded[0])
+        self.assertEqual(playback["confirmed_box_tokens"], ["Box_2014", "Box_2015"])
+        self.assertNotIn("person_id", playback)
+
+    def test_upsert_one_person_preserves_other_person(self) -> None:
+        bindings = [
+            {"person_id": 0, "confirmed_box_tokens": ["Box_2014"]},
+            {"person_id": 1, "confirmed_box_tokens": ["Box_2015"]},
+        ]
+        updated = upsert_binding(
+            bindings,
+            {"person_id": 0, "confirmed_box_tokens": ["Box_2016"]},
+        )
+        self.assertEqual(len(updated), 2)
+        self.assertIn(
+            {"person_id": 1, "confirmed_box_tokens": ["Box_2015"]},
+            updated,
+        )
+        self.assertIn(
+            {"person_id": 0, "confirmed_box_tokens": ["Box_2016"]},
+            updated,
+        )
+
+    def test_upsert_can_upgrade_person_binding_with_track_without_duplication(self) -> None:
+        bindings = [
+            {"person_id": 0, "confirmed_box_tokens": ["Box_2014"]},
+            {"person_id": 1, "confirmed_box_tokens": ["Box_2015"]},
+        ]
+        updated = upsert_binding(
+            bindings,
+            {
+                "person_id": 0,
+                "person_track_id": "track-p0",
+                "confirmed_box_tokens": ["Box_2016"],
+            },
+        )
+        self.assertEqual(len(updated), 2)
+        self.assertIn(
+            {
+                "person_id": 0,
+                "person_track_id": "track-p0",
+                "confirmed_box_tokens": ["Box_2016"],
+            },
+            updated,
+        )
+        self.assertIn(
+            {"person_id": 1, "confirmed_box_tokens": ["Box_2015"]},
+            updated,
+        )
+
+    def test_mixed_legacy_is_detected_and_write_is_blocked(self) -> None:
+        raw = {
+            "schema": 1,
+            "verified_true": [
+                {
+                    "event_type": "collision",
+                    "frame_idx": 1,
+                    "box_tokens": ["Box_1"],
+                    "confirmed_box_tokens": ["Box_1"],
+                },
+                {
+                    "event_type": "collision",
+                    "frame_idx": 2,
+                    "box_tokens": ["Box_2"],
+                },
+            ],
+        }
+        self.assertEqual(detect_review_format(raw), "mixed-legacy")
+        with self.assertRaises(LegacyReviewMigrationRequired):
+            load_verified_items_for_write(raw)
+
+        candidate, stats = _candidate_payload(
+            raw,
+            source_format=SOURCE_EXPLICIT_CONFIRMED,
+            timeline_by_frame={},
+        )
+        self.assertEqual(stats["unresolved_entries"], 1)
+        self.assertEqual(candidate["verified_true"][0]["frame_idx"], 1)
+        self.assertEqual(candidate["unresolved_legacy"], [raw["verified_true"][1]])
+
+    def test_verify_rejects_duplicate_frame_records(self) -> None:
+        frame = {
+            "frame_idx": 1,
+            "source_frame_idx": 1,
+            "detected_event_types": [],
+            "detected_box_tokens": [],
+            "bindings": [{"confirmed_box_tokens": ["Box_1"]}],
+        }
+        issues = verify_frame_v2_verified_true([frame, frame])
+        self.assertTrue(any("出现多条" in issue for issue in issues))
 
 
 if __name__ == "__main__":

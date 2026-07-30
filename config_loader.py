@@ -191,7 +191,8 @@ class AppPaths:
 
 
 def resolve_app_paths(cfg: dict[str, Any] | None = None, *, base: Path | None = None) -> AppPaths:
-    cfg = cfg or load_config_file()
+    if cfg is None:
+        cfg = load_config_file(resolve_config_path(None))
     root = base or project_root()
     paths = _section(cfg, "paths")
     base_localdata = root / str(paths.get("base_localdata_dir") or "localdata")
