@@ -135,6 +135,16 @@ function isPlaybackActive() {
   return !!(videoEl.src && !videoEl.paused && !videoEl.ended);
 }
 
+function syncPlaybackToggleButton() {
+  const btn = $("#play-btn");
+  if (!btn) return;
+  const playing = isPlaybackActive();
+  btn.textContent = playing ? "Ⅱ" : "▶";
+  btn.setAttribute("aria-pressed", playing ? "true" : "false");
+  btn.setAttribute("aria-label", playing ? "暂停" : "播放");
+  btn.title = playing ? "暂停（空格）" : "播放（空格）";
+}
+
 async function startPlaybackTransport() {
   if (videoEl.src) {
     videoEl.style.display = "block";
@@ -168,12 +178,97 @@ function togglePlaybackTransport() {
   void startPlaybackTransport();
 }
 
-$("#play-btn").addEventListener("click", () => {
-  void startPlaybackTransport();
-});
+let heldFrameNavigation = null;
 
-$("#pause-btn").addEventListener("click", () => {
-  stopPlayback();
+function stopHeldFrameNavigation({ finish = true } = {}) {
+  const state = heldFrameNavigation;
+  if (!state) return;
+  heldFrameNavigation = null;
+  clearTimeout(state.delayTimer);
+  clearInterval(state.repeatTimer);
+  if (!finish || !state.accelerated) return;
+  const fps = Math.max(1, Number(poseData?.fps) || 25);
+  const elapsedSec = Math.max(0, (performance.now() - state.startedAt) / 1000);
+  const distance = Math.max(1, Math.round(elapsedSec * fps * 3));
+  void navigatePlaybackToFrame(state.startFrame + state.direction * distance);
+}
+
+/** 短按走 1 帧；按住 400ms 后按素材 fps 的 3× 速度连续快进/快退。 */
+function startHeldFrameNavigation(direction, key) {
+  stopHeldFrameNavigation({ finish: false });
+  const firstFi = Number(frameByTime?.[0]?.frameIdx) || 1;
+  const startFrame = getResolvedPlaybackFrameIdx() || firstFi;
+  const state = {
+    direction: direction < 0 ? -1 : 1,
+    key,
+    startFrame,
+    startedAt: performance.now(),
+    accelerated: false,
+    lastTarget: null,
+    delayTimer: null,
+    repeatTimer: null,
+  };
+  heldFrameNavigation = state;
+  void navigatePlaybackFrame(state.direction);
+  state.delayTimer = setTimeout(() => {
+    if (heldFrameNavigation !== state) return;
+    state.accelerated = true;
+    const updateTarget = () => {
+      if (heldFrameNavigation !== state) return;
+      const fps = Math.max(1, Number(poseData?.fps) || 25);
+      const elapsedSec = Math.max(0, (performance.now() - state.startedAt) / 1000);
+      const distance = Math.max(1, Math.round(elapsedSec * fps * 3));
+      const target = state.startFrame + state.direction * distance;
+      if (target === state.lastTarget) return;
+      state.lastTarget = target;
+      void navigatePlaybackToFrame(target);
+    };
+    updateTarget();
+    state.repeatTimer = setInterval(updateTarget, 100);
+  }, 400);
+}
+
+function jumpToFrameFromInput() {
+  const input = $("#playback-frame-input");
+  if (!input) return;
+  const target = Math.round(Number(input.value) || 0);
+  if (target > 0) void navigatePlaybackToFrame(target);
+}
+
+function initPlaybackFrameNavigationControls() {
+  $("#playback-first-frame-btn")?.addEventListener("click", () => {
+    const fi = Number(frameByTime?.[0]?.frameIdx) || 1;
+    void navigatePlaybackToFrame(fi);
+  });
+  $("#playback-back-10-btn")?.addEventListener("click", () =>
+    void navigatePlaybackFrame(-10)
+  );
+  $("#playback-back-1-btn")?.addEventListener("click", () =>
+    void navigatePlaybackFrame(-1)
+  );
+  $("#playback-forward-1-btn")?.addEventListener("click", () =>
+    void navigatePlaybackFrame(1)
+  );
+  $("#playback-forward-10-btn")?.addEventListener("click", () =>
+    void navigatePlaybackFrame(10)
+  );
+  $("#playback-last-frame-btn")?.addEventListener("click", () => {
+    const fi = Number(frameByTime?.[frameByTime.length - 1]?.frameIdx) || 1;
+    void navigatePlaybackToFrame(fi);
+  });
+  const input = $("#playback-frame-input");
+  input?.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    jumpToFrameFromInput();
+    input.blur();
+  });
+  input?.addEventListener("change", jumpToFrameFromInput);
+  updateEventReviewFrameNavUi();
+}
+
+$("#play-btn").addEventListener("click", () => {
+  togglePlaybackTransport();
 });
 
 $("#end-playback-btn").addEventListener("click", () => {
@@ -182,6 +277,7 @@ $("#end-playback-btn").addEventListener("click", () => {
 
 videoEl.addEventListener("ended", () => {
   stopPlayback();
+  syncPlaybackToggleButton();
   if (videoEl.src && videoEl.src.startsWith("blob:")) {
     cleanupPlaybackVideo();
     videoEl.removeAttribute("src");
@@ -189,6 +285,24 @@ videoEl.addEventListener("ended", () => {
     setPlaybackInfo("播放结束。可重新选择视频。");
   } else {
     setPlaybackInfo("播放结束。可再次点击播放。");
+    const lastEntry = frameByTime?.[frameByTime.length - 1] || null;
+    if (lastEntry?.frameIdx) {
+      if (typeof setPlaybackAuthorityFrameIdx === "function") {
+        setPlaybackAuthorityFrameIdx(lastEntry.frameIdx);
+      }
+      if (typeof updatePlaybackSeekBarUi === "function") {
+        updatePlaybackSeekBarUi(lastEntry.t, lastEntry.frameIdx);
+      } else if (seekBar) {
+        seekBar.value = "1000";
+      }
+      if (typeof renderExplicitPlaybackFrame === "function") {
+        void renderExplicitPlaybackFrame(lastEntry.frameIdx).then(() => {
+          if (typeof updateEventReviewFrameNavUi === "function") {
+            updateEventReviewFrameNavUi();
+          }
+        });
+      }
+    }
   }
 });
 
@@ -207,9 +321,11 @@ videoEl.addEventListener("play", () => {
   readPlaybackSpeedFromSelect();
   if (typeof ensurePlaybackRenderLoop === "function") ensurePlaybackRenderLoop();
   if (typeof onPlaybackVideoPlayStateChange === "function") onPlaybackVideoPlayStateChange();
+  syncPlaybackToggleButton();
 });
 
 videoEl.addEventListener("pause", () => {
+  syncPlaybackToggleButton();
   const explicitFi =
     typeof getExplicitSeekFrameIdx === "function" ? getExplicitSeekFrameIdx() : null;
   const authorityFi =
@@ -276,7 +392,9 @@ eventFilterSelect?.addEventListener("change", () => {
   refreshEventCountLabel();
   const first = list[0];
   if (first) {
-    void seekToEvent(first);
+    if (typeof selectReviewEventWithoutPlaybackNavigation === "function") {
+      selectReviewEventWithoutPlaybackNavigation(first, { scroll: false });
+    }
   } else {
     activeEventKey = null;
     playbackEventLinkExact = false;
@@ -290,8 +408,6 @@ function initEventReviewControls() {
   scheduleEventReviewListScrollHeight();
 
   $("#event-prev-btn")?.addEventListener("click", () => navigateReviewEvent(-1));
-  $("#event-prev-frame-btn")?.addEventListener("click", () => void navigatePlaybackFrame(-1));
-  $("#event-next-frame-btn")?.addEventListener("click", () => void navigatePlaybackFrame(1));
   $("#event-skip-next-btn")?.addEventListener("click", () => void skipToNextEvent());
   $("#event-mark-true-next-btn")?.addEventListener("click", () => void confirmTrueAndNextFrame());
   $("#event-unmark-btn")?.addEventListener("click", () => void unmarkTrueAndNextFrame());
@@ -310,24 +426,43 @@ function initEventReviewControls() {
   canvas?.addEventListener("click", (e) => {
     if (!eventsPanel || eventsPanel.classList.contains("hidden")) return;
     let ev = getActiveEvent() ?? getActiveFilteredEvent();
-    const personHit = hitTestPersonAtClient(e.clientX, e.clientY);
-    if (personHit != null) {
+    const personHit =
+      typeof hitTestPersonDetailAtClient === "function"
+        ? hitTestPersonDetailAtClient(e.clientX, e.clientY)
+        : (() => {
+            const personId = hitTestPersonAtClient(e.clientX, e.clientY);
+            return personId == null
+              ? null
+              : { personId, kind: "bbox", score: 0 };
+          })();
+    const annotationHit = annotationBoxes.length
+      ? hitTestAnnotationBoxAtClient(e.clientX, e.clientY)
+      : null;
+    const canvasHit =
+      typeof resolveEventReviewCanvasHit === "function"
+        ? resolveEventReviewCanvasHit(personHit, annotationHit)
+        : annotationHit
+          ? { kind: "annotation", value: annotationHit }
+          : personHit
+            ? { kind: "person", value: personHit.personId }
+            : null;
+    if (canvasHit?.kind === "person") {
       if (!ev) {
         setEventReviewSaveStatus("请先在右侧选择一条碰撞/告警事件", "");
         return;
       }
-      void setPersonIdForEvent(ev, personHit);
+      void setPersonIdForEvent(ev, Number(canvasHit.value));
       return;
     }
     if (!annotationBoxes.length) {
       setEventReviewSaveStatus("请先加载标注 JSON", "error");
       return;
     }
-    const hit = hitTestAnnotationBoxAtClient(e.clientX, e.clientY);
-    if (!hit) {
+    if (canvasHit?.kind !== "annotation") {
       setEventReviewSaveStatus("未点中货框或骨架，请点击货架货框或骨架标签", "");
       return;
     }
+    const hit = canvasHit.value;
     ev =
       typeof resolveEventForBoxAnnotation === "function"
         ? resolveEventForBoxAnnotation(hit)
@@ -360,20 +495,67 @@ function initEventReviewControls() {
     if (tag === "input" || tag === "textarea" || tag === "select" || e.target?.isContentEditable) {
       return;
     }
+    if (
+      (e.key === "1" || e.key === "2") &&
+      typeof isRangePersonConfirmationRequired === "function" &&
+      typeof getResolvedPlaybackFrameIdx === "function" &&
+      isRangePersonConfirmationRequired(getResolvedPlaybackFrameIdx())
+    ) {
+      const frameIdx = getResolvedPlaybackFrameIdx();
+      const stableId = Number(e.key) - 1;
+      const personId =
+        typeof getRawPersonIdForStablePerson === "function"
+          ? getRawPersonIdForStablePerson(frameIdx, stableId)
+          : stableId;
+      const ids =
+        typeof getFramePersonIds === "function" ? getFramePersonIds(frameIdx) : [];
+      if (personId != null && ids.includes(Number(personId))) {
+        const ev =
+          typeof getPinnedPlaybackEvent === "function"
+            ? getPinnedPlaybackEvent()
+            : null;
+        if (ev && Number(ev.frame_idx) === Number(frameIdx)) {
+          e.preventDefault();
+          void setPersonIdForEvent(ev, personId);
+          return;
+        }
+      }
+    }
     if (e.key === " " || e.code === "Space") {
       e.preventDefault();
       togglePlaybackTransport();
       return;
     }
     if (!playbackEvents.length && !frameByTime.length) return;
-    if (e.key === "ArrowLeft") {
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
       e.preventDefault();
-      void navigatePlaybackFrame(-1);
+      if (e.repeat) return;
+      const direction = e.key === "ArrowLeft" ? -1 : 1;
+      if (e.ctrlKey || e.metaKey) {
+        stopHeldFrameNavigation({ finish: false });
+        void navigatePlaybackFrame(direction * 10);
+      } else {
+        startHeldFrameNavigation(direction, e.key);
+      }
       return;
     }
-    if (e.key === "ArrowRight") {
+    if (e.key === "Home") {
       e.preventDefault();
-      void navigatePlaybackFrame(1);
+      const fi = Number(frameByTime?.[0]?.frameIdx) || 1;
+      void navigatePlaybackToFrame(fi);
+      return;
+    }
+    if (e.key === "End") {
+      e.preventDefault();
+      const fi = Number(frameByTime?.[frameByTime.length - 1]?.frameIdx) || 1;
+      void navigatePlaybackToFrame(fi);
+      return;
+    }
+    if (e.key === "g" || e.key === "G") {
+      e.preventDefault();
+      const input = $("#playback-frame-input");
+      input?.focus();
+      input?.select();
       return;
     }
     if (!playbackEvents.length) return;
@@ -394,6 +576,14 @@ function initEventReviewControls() {
       navigateReviewEvent(-1);
     }
   });
+
+  document.addEventListener("keyup", (e) => {
+    if (!heldFrameNavigation || e.key !== heldFrameNavigation.key) return;
+    stopHeldFrameNavigation({ finish: true });
+  });
+  window.addEventListener("blur", () =>
+    stopHeldFrameNavigation({ finish: true })
+  );
 }
 
 videoEl.addEventListener("seeked", () => {
@@ -455,11 +645,28 @@ seekBar.addEventListener("input", async () => {
   tickPoseFrameIdx = -1;
   lastEventSyncFrameIdx = -1;
   resetPlaybackCollisionTracker();
+  const frameEntry =
+    typeof playbackFrameEntryForSeekValue === "function"
+      ? playbackFrameEntryForSeekValue(seekBar.value)
+      : frameByTime.length
+        ? frameByTime[
+            Math.min(
+              Math.round(
+                (Number(seekBar.value) / 1000) *
+                  Math.max(0, frameByTime.length - 1)
+              ),
+              frameByTime.length - 1
+            )
+          ]
+        : null;
+  if (frameEntry) {
+    if (!videoEl.paused) videoEl.pause();
+    await seekToTimestamp(frameEntry.t, frameEntry.frameIdx, {
+      skipEventSync: false,
+    });
+    return;
+  }
   if (!videoEl.duration || !Number.isFinite(videoEl.duration)) {
-    const idx = Math.floor((seekBar.value / 1000) * frameByTime.length);
-    const item = frameByTime[Math.min(idx, frameByTime.length - 1)];
-    if (item) await renderFrameEntry(item);
-    syncActiveEventFromPlaybackPosition({ timeSec: item?.t, frameIdx: item?.frameIdx });
     return;
   }
   videoEl.currentTime = (seekBar.value / 1000) * videoEl.duration;
@@ -471,9 +678,11 @@ bindStageLayoutWatch();
 initPlaybackSpeedControl();
 initPlaybackDetBboxToggle();
 initPlaybackSkeletonToggle();
+initPlaybackFrameNavigationControls();
 initEventReviewControls();
 initPlaybackRecordFilter();
 void loadInferenceConfigDefaults();
+syncPlaybackToggleButton();
 void loadReflectionCameras();
 updatePlaybackLoadButton();
 

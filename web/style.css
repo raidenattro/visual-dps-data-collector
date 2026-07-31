@@ -121,8 +121,7 @@ select {
 }
 
 button[type="submit"],
-#play-btn,
-#pause-btn {
+#play-btn {
   background: #2563eb;
   color: #fff;
   border: none;
@@ -1955,6 +1954,7 @@ main:has(#panel-playback.active) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex-wrap: wrap;
   gap: 0.35rem;
   min-height: 2.35rem;
   padding: 0.45rem 0.65rem;
@@ -2309,6 +2309,106 @@ main:has(#panel-playback.active) {
 .event-badge.collision {
   background: rgba(255, 209, 102, 0.2);
   color: #ffd166;
+}
+
+#play-btn[aria-pressed="true"] {
+  background: #d97706;
+}
+
+.playback-frame-toolbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.28rem;
+  border: 1px solid #475569;
+  border-radius: 9px;
+  background: #1e293b;
+}
+
+.playback-frame-nav-btn {
+  min-width: 2.25rem;
+  height: 2.35rem;
+  padding: 0 0.5rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #e2e8f0;
+  cursor: pointer;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.playback-frame-nav-btn:hover:not(:disabled),
+.playback-frame-nav-btn:focus-visible {
+  background: #334155;
+  outline: none;
+}
+
+.playback-frame-nav-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.playback-frame-play-btn {
+  min-width: 2.7rem;
+  background: #2563eb;
+  color: #fff;
+  font-size: 1.05rem;
+}
+
+.playback-frame-toolbar-separator {
+  width: 1px;
+  height: 1.8rem;
+  margin: 0 0.45rem;
+  background: #475569;
+}
+
+.playback-frame-input-label {
+  margin: 0;
+}
+
+#playback-frame-input {
+  width: 5.2rem;
+  height: 2.35rem;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #64748b;
+  border-radius: 6px;
+  background: #0f172a;
+  color: #f8fafc;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 1100px) {
+  .playback-frame-toolbar {
+    width: 100%;
+    box-sizing: border-box;
+    justify-content: center;
+  }
+
+  .playback-frame-nav-btn {
+    flex: 1 1 2rem;
+    min-width: 1.9rem;
+    padding: 0 0.25rem;
+  }
+}
+
+.event-review-person-option small {
+  color: #94a3b8;
+  font-size: 0.72rem;
+  font-weight: 500;
+  flex-basis: 100%;
+  text-align: center;
+}
+
+.event-review-person-stable {
+  white-space: nowrap;
+}
+
+.playback-record-list-loading .record-item {
+  cursor: progress;
+  opacity: 0.72;
 }
 
 .event-badge.frame {

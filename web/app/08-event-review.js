@@ -793,7 +793,9 @@ async function setConfirmedBoxesForEvent(ev, tokens) {
   updateReviewDock();
   if (typeof updateStageBoxPickMode === "function") updateStageBoxPickMode();
   redrawCurrentFrame();
-  if (typeof refreshRangeAnnotTemplateSnapshot === "function") refreshRangeAnnotTemplateSnapshot();
+  if (typeof updateRangeAnnotTemplateBoxesFromEvent === "function") {
+    updateRangeAnnotTemplateBoxesFromEvent(ev, list);
+  }
   const detN = normalizeBoxTokenList(ev.box_tokens).length;
   setEventReviewSaveStatus(
     `货框 ${formatConfirmedBoxes(list) || "（无）"}${buildBoxPickStatusHint(ev, list, detN)}`,
@@ -811,16 +813,30 @@ async function setPersonIdForEvent(ev, personId) {
     return;
   }
   setEventPersonId(ev, normalized);
+  const rangePersonConfirmed =
+    normalized != null &&
+    typeof confirmRangePersonSelection === "function" &&
+    confirmRangePersonSelection(ev, normalized);
   updateReviewDock();
   redrawCurrentFrame();
-  if (typeof refreshRangeAnnotTemplateSnapshot === "function") refreshRangeAnnotTemplateSnapshot();
+  if (typeof updateRangeAnnotTemplatePersonFromEvent === "function") {
+    updateRangeAnnotTemplatePersonFromEvent(ev, normalized);
+  }
   const pendingNote = hasPendingPersonIdAnnotation(ev) ? " · 暂选未落盘，按 Y 写入" : "";
   setEventReviewSaveStatus(
-    normalized != null
+    rangePersonConfirmed
+      ? `已确认变化点帧 ${parseInt(ev.frame_idx, 10) || 0} 为 P${normalized} · 正在定位下一处…`
+      : normalized != null
       ? `已选 person_id ${normalized}${pendingNote}`
       : `已清空 person_id${pendingNote}`,
     ""
   );
+  if (
+    rangePersonConfirmed &&
+    typeof continueRangeIdentityReviewAfterSelection === "function"
+  ) {
+    continueRangeIdentityReviewAfterSelection();
+  }
 }
 
 async function resetActiveEventPersonAnnotation() {
@@ -830,6 +846,9 @@ async function resetActiveEventPersonAnnotation() {
     return;
   }
   setEventPersonId(ev, null);
+  if (typeof updateRangeAnnotTemplatePersonFromEvent === "function") {
+    updateRangeAnnotTemplatePersonFromEvent(ev, null);
+  }
   updateReviewDock();
   redrawCurrentFrame();
   setEventReviewSaveStatus("已重置 person_id 暂选，按 Y 标为真后写入 event_review", "");
@@ -853,7 +872,9 @@ async function toggleConfirmedBoxForEvent(ev, token) {
     updateReviewDock();
     if (typeof updateStageBoxPickMode === "function") updateStageBoxPickMode();
     redrawCurrentFrame();
-    if (typeof refreshRangeAnnotTemplateSnapshot === "function") refreshRangeAnnotTemplateSnapshot();
+    if (typeof updateRangeAnnotTemplateBoxesFromEvent === "function") {
+      updateRangeAnnotTemplateBoxesFromEvent(ev, next);
+    }
     await persistEventReviewConfirmedBoxes(ev, next);
     return;
   }
@@ -867,6 +888,9 @@ async function resetActiveEventBoxAnnotation() {
     return;
   }
   setEventConfirmedBoxes(ev, []);
+  if (typeof updateRangeAnnotTemplateBoxesFromEvent === "function") {
+    updateRangeAnnotTemplateBoxesFromEvent(ev, []);
+  }
   updateReviewDock();
   if (typeof updateStageBoxPickMode === "function") updateStageBoxPickMode();
   redrawCurrentFrame();
@@ -1576,7 +1600,10 @@ function renderEventReviewPersonUi(ev) {
   }
 
   const frameIds = getFramePersonIds(ev.frame_idx);
-  const selected = getEventPersonId(ev);
+  const rangeConfirmationRequired =
+    typeof isRangePersonConfirmationRequired === "function" &&
+    isRangePersonConfirmationRequired(ev.frame_idx);
+  const selected = rangeConfirmationRequired ? null : getEventPersonId(ev);
   const persisted = getEventPersistedPersonId(ev);
 
   if (!frameIds.length) {
@@ -1588,12 +1615,31 @@ function renderEventReviewPersonUi(ev) {
 
   wrap.classList.remove("hidden");
   const key = eventRowKey(ev);
-  optionsEl.innerHTML = frameIds
-    .map((pid) => {
+  const unsortedStableOptions = frameIds.map((pid) => {
+    const info =
+      typeof getStablePersonDisplayInfoByRawId === "function"
+        ? getStablePersonDisplayInfoByRawId(ev.frame_idx, pid)
+        : null;
+    return {
+      pid,
+      stableId: info?.stableId ?? pid,
+      stableLabel: info?.stableLabel ?? String(Number(pid) + 1),
+    };
+  });
+  const stableOptions =
+    typeof sortStablePersonDisplayOptions === "function"
+      ? sortStablePersonDisplayOptions(unsortedStableOptions)
+      : [...unsortedStableOptions].sort(
+          (a, b) => Number(a.stableId) - Number(b.stableId)
+        );
+  optionsEl.innerHTML = stableOptions
+    .map((stable) => {
+      const pid = stable.pid;
       const checked = selected === pid ? " checked" : "";
       return `<label class="event-review-person-option">
-        <input type="radio" name="event-person-${CSS.escape(key)}" value="${pid}"${checked} />
-        <span>P${pid}</span>
+        <input type="radio" name="event-person-${CSS.escape(key)}" value="${pid}" data-stable-id="${stable.stableId}"${checked} />
+        <span class="event-review-person-stable">人物 ${stable.stableLabel}</span>
+        <small>本帧 P${pid}</small>
       </label>`;
     })
     .join("");
@@ -1608,13 +1654,32 @@ function renderEventReviewPersonUi(ev) {
   const pendingNote = hasPendingPersonIdAnnotation(ev) ? " · 暂选未落盘" : "";
   const savedNote =
     persisted != null && !hasPendingPersonIdAnnotation(ev) ? ` · 已保存 P${persisted}` : "";
-  if (frameIds.length >= 2) {
+  if (rangeConfirmationRequired) {
+    const suggested =
+      typeof getRangePersonConfirmationSuggestion === "function"
+        ? getRangePersonConfirmationSuggestion(ev.frame_idx)
+        : null;
+    const suggestedInfo =
+      suggested != null &&
+      typeof getStablePersonDisplayInfoByRawId === "function"
+        ? getStablePersonDisplayInfoByRawId(ev.frame_idx, suggested)
+        : null;
+    hintEl.textContent =
+      suggested != null
+        ? `身份低置信度点 · 建议人物 ${suggestedInfo?.stableLabel ?? Number(suggested) + 1}（本帧 P${suggested}）；按 1/2 选择人物`
+        : "身份低置信度点 · 请手动选择稳定人物（按 1/2 快选人物）";
+    hintEl.classList.add("is-required");
+  } else if (frameIds.length >= 2) {
+    const selectedInfo = stableOptions.find(
+      (item) => Number(item.pid) === Number(selected)
+    );
     hintEl.textContent = selected != null
-      ? `本帧 ${frameIds.length} 人 · 已选 P${selected}${savedNote}${pendingNote}`
-      : `本帧 ${frameIds.length} 人 · 标真前请选择（或点击骨架标签）${pendingNote}`;
+      ? `本帧 ${frameIds.length} 人 · 已选人物 ${selectedInfo?.stableLabel ?? "?"}（raw P${selected}）${savedNote}${pendingNote}`
+      : `人物编号按空间轨迹保持稳定；括号内 P0/P1 仅是本帧原始编号${pendingNote}`;
     hintEl.classList.toggle("is-required", selected == null);
   } else {
-    hintEl.textContent = `本帧 1 人 · P${frameIds[0]}${selected === frameIds[0] ? "（已选）" : "（标真时自动选中）"}${savedNote}${pendingNote}`;
+    const only = stableOptions[0];
+    hintEl.textContent = `本帧 1 人 · 人物 ${only?.stableLabel ?? "A"}（raw P${frameIds[0]}）${selected === frameIds[0] ? " · 已选" : " · 标真时自动选中"}${savedNote}${pendingNote}`;
     hintEl.classList.remove("is-required");
   }
 }
@@ -1734,7 +1799,9 @@ function renderEventReviewTable(list = null) {
     row.addEventListener("click", () => {
       const key = row.dataset.eventKey;
       const item = playbackEvents.find((rowEv) => eventRowKey(rowEv) === key);
-      if (item) void seekToEvent(item);
+      if (item && typeof selectReviewEventWithoutPlaybackNavigation === "function") {
+        selectReviewEventWithoutPlaybackNavigation(item);
+      }
     });
   });
 
@@ -1863,7 +1930,9 @@ async function skipToNextEvent() {
 async function beginEventReview() {
   if (!playbackEvents.length) return;
   const first = filteredPlaybackEvents()[0];
-  if (first) await seekToEvent(first);
+  if (first && typeof selectReviewEventWithoutPlaybackNavigation === "function") {
+    selectReviewEventWithoutPlaybackNavigation(first, { scroll: false });
+  }
   else updateReviewDock();
 }
 
@@ -1887,7 +1956,9 @@ function renderEventMarkers() {
     dot.title = `${eventTypeLabel(ev)} ${formatTime(ev.timestamp_sec)} · ${formatEventTokens(ev.box_tokens)}${verifiedNote}`;
     dot.addEventListener("click", (e) => {
       e.stopPropagation();
-      seekToEvent(ev);
+      if (typeof selectReviewEventWithoutPlaybackNavigation === "function") {
+        selectReviewEventWithoutPlaybackNavigation(ev);
+      }
     });
     eventMarkersEl.appendChild(dot);
   });

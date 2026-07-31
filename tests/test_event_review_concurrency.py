@@ -565,6 +565,59 @@ class EventReviewConcurrencyTest(unittest.TestCase):
         )
         self.assertEqual(len(by_frame[11]["bindings"]), 2)
 
+    def test_range_write_preserves_per_frame_person_id_switches(self) -> None:
+        """同一物理人员的 raw person_id 跨帧变化时，不得整段复制首帧 P0。"""
+        pose_store.save_event_review(
+            self.locator,
+            [],
+            status=pose_store.REVIEW_STATUS_IN_PROGRESS,
+            event_total=30,
+        )
+        per_frame_people = {20: 0, 21: 1, 22: 1}
+        events = [
+            {
+                "event_type": "frame",
+                "frame_idx": frame,
+                "source_frame_idx": frame,
+                "box_tokens": [],
+                "confirmed_box_tokens": ["Box_2015"],
+                "person_id": person_id,
+                "person_track_id": "physical-person-a",
+            }
+            for frame, person_id in per_frame_people.items()
+        ]
+
+        with patch("record_index_store.refresh_record_summary"):
+            response = http_routes._patch_record_event_review_locked(
+                self.locator.record_id,
+                self.locator,
+                {
+                    "action": "set_range_verified",
+                    "range_start": 20,
+                    "range_end": 22,
+                    "events": events,
+                    "event_total": 30,
+                },
+            )
+
+        body = json.loads(response.body)
+        self.assertEqual(body["range_applied_count"], 3)
+        saved = json.loads(
+            pose_store.event_review_path(self.locator).read_text(encoding="utf-8")
+        )["verified_true"]
+        by_frame = {entry["frame_idx"]: entry for entry in saved}
+        self.assertEqual(sorted(by_frame), [20, 21, 22])
+        for frame, expected_person_id in per_frame_people.items():
+            self.assertEqual(len(by_frame[frame]["bindings"]), 1)
+            self.assertEqual(
+                by_frame[frame]["bindings"][0]["person_id"],
+                expected_person_id,
+            )
+            self.assertEqual(
+                by_frame[frame]["bindings"][0]["person_track_id"],
+                "physical-person-a",
+            )
+
     def test_range_write_rejects_missing_frame_without_changing_file(self) -> None:
         pose_store.save_event_review(
             self.locator,

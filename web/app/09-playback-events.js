@@ -9,6 +9,9 @@ let explicitSeekFrameIdx = null;
 /** seekToTimestamp 正在等待 seeked 并完成渲染时，避免 seeked 监听器重复绘制 */
 let explicitFrameSeekInFlight = false;
 
+/** 每次精确逐帧跳转的序号；较早的异步 seek 完成后不得覆盖较新的目标帧。 */
+let explicitFrameSeekSequence = 0;
+
 function isExplicitFrameSeekInFlight() {
   return explicitFrameSeekInFlight;
 }
@@ -63,6 +66,32 @@ function getExplicitSeekFrameIdx() {
 
 function clearExplicitSeekFrameIdx() {
   clearPlaybackAuthorityFrameIdx();
+}
+
+/**
+ * 只切换右侧正在显示的事件，不调整视频时间、不暂停播放。
+ * 事件列表跟随视频、筛选变化和事件行点击都必须走这里；真正的事件跳转
+ * 只允许由上一条/下一条导航调用 seekToEvent。
+ */
+function selectReviewEventWithoutPlaybackNavigation(ev, opts = {}) {
+  if (!ev) return false;
+  activeEventKey = eventRowKey(ev);
+  playbackEventLinkExact = false;
+  if (!opts.keepReviewBack) reviewBackKey = null;
+  if (typeof updateReviewDock === "function") {
+    updateReviewDock({ skipRedraw: opts.skipRedraw !== false });
+  }
+  if (typeof patchEventReviewTableActiveState === "function") {
+    patchEventReviewTableActiveState();
+  }
+  if (typeof updateEventMarkerActiveState === "function") {
+    updateEventMarkerActiveState();
+  }
+  if (opts.scroll !== false && typeof scrollActiveEventRowIntoView === "function") {
+    scrollActiveEventRowIntoView();
+  }
+  if (typeof updateStageBoxPickMode === "function") updateStageBoxPickMode();
+  return true;
 }
 
 /** 将回放画面与事件（若有）对齐到指定帧 */
@@ -140,7 +169,9 @@ async function realignPlaybackToPinnedEvent() {
     }
     const displayT =
       typeof videoTimeForFrameIdx === "function" ? videoTimeForFrameIdx(fi) : hit.t;
-    if (typeof updatePlaybackSeekBarUi === "function") updatePlaybackSeekBarUi(displayT);
+    if (typeof updatePlaybackSeekBarUi === "function") {
+      updatePlaybackSeekBarUi(displayT, fi);
+    }
     else if (seekBar) seekBar.value = String((displayT / videoEl.duration) * 1000);
     if (timeLabel && typeof updatePlaybackSeekBarUi !== "function") {
       timeLabel.textContent = formatTime(displayT);
@@ -413,52 +444,93 @@ function getResolvedPlaybackFrameIdx() {
   return null;
 }
 
-/** 更新事件复核栏「帧 N / 总数」与逐帧按钮状态 */
+/** 更新统一帧导航条的当前帧、输入范围与首尾按钮状态。 */
 function updateEventReviewFrameNavUi() {
-  const posEl = $("#event-review-frame-pos");
-  const prevBtn = $("#event-prev-frame-btn");
-  const nextBtn = $("#event-next-frame-btn");
-  if (!posEl && !prevBtn && !nextBtn) return;
+  const input = $("#playback-frame-input");
+  const firstBtn = $("#playback-first-frame-btn");
+  const back10Btn = $("#playback-back-10-btn");
+  const back1Btn = $("#playback-back-1-btn");
+  const forward1Btn = $("#playback-forward-1-btn");
+  const forward10Btn = $("#playback-forward-10-btn");
+  const lastBtn = $("#playback-last-frame-btn");
 
   const total = getPlaybackFrameCount();
   const cur = getResolvedPlaybackFrameIdx();
   const hasFrames = total > 0 && frameByTime.length > 0;
+  const firstFi = hasFrames ? Number(frameByTime[0]?.frameIdx) || 1 : 1;
+  const lastFi = hasFrames
+    ? Number(frameByTime[frameByTime.length - 1]?.frameIdx) || total
+    : total;
 
-  if (posEl) {
-    posEl.textContent =
-      cur != null && cur > 0 && total > 0 ? `帧 ${cur} / ${total}` : hasFrames ? `帧 — / ${total}` : "帧 —";
+  if (input) {
+    input.min = String(firstFi);
+    input.max = String(lastFi || total || 1);
+    if (document.activeElement !== input) {
+      input.value = cur != null && cur > 0 ? String(cur) : "";
+    }
+    input.disabled = !hasFrames;
   }
-  if (prevBtn) prevBtn.disabled = !hasFrames || cur == null || cur <= 1;
-  if (nextBtn) nextBtn.disabled = !hasFrames || cur == null || cur >= total;
+  const atStart = !hasFrames || cur == null || cur <= firstFi;
+  const atEnd = !hasFrames || cur == null || cur >= lastFi;
+  if (firstBtn) firstBtn.disabled = atStart;
+  if (back10Btn) back10Btn.disabled = atStart;
+  if (back1Btn) back1Btn.disabled = atStart;
+  if (forward1Btn) forward1Btn.disabled = atEnd;
+  if (forward10Btn) forward10Btn.disabled = atEnd;
+  if (lastBtn) lastBtn.disabled = atEnd;
 }
 
-/** 按帧步进（±1），与事件跳转独立；步进后关联最近事件 */
-async function navigatePlaybackFrame(delta) {
+/** 跳到指定帧；按钮、输入框和快捷键共用，事件仅被动关联。 */
+async function navigatePlaybackToFrame(frameIdx) {
   const total = getPlaybackFrameCount();
   if (!total || !frameByTime.length) return;
-
-  const step = Number(delta) || 0;
-  if (!step) return;
-
-  let cur = getResolvedPlaybackFrameIdx();
-  if (cur == null || cur < 1) cur = 1;
-
-  const nextFi = Math.max(1, Math.min(total, cur + step));
-  if (nextFi === cur) return;
-
-  const hit = frameEntryByIdx(nextFi);
+  const firstFi = Number(frameByTime[0]?.frameIdx) || 1;
+  const lastFi =
+    Number(frameByTime[frameByTime.length - 1]?.frameIdx) || total;
+  const targetFi = Math.max(
+    firstFi,
+    Math.min(lastFi, Math.round(Number(frameIdx) || firstFi))
+  );
+  const hit = frameEntryByIdx(targetFi);
   if (!hit) return;
 
-  setPlaybackAuthorityFrameIdx(nextFi);
+  setPlaybackAuthorityFrameIdx(targetFi);
   if (!videoEl.paused) videoEl.pause();
   playbackEventLinkExact = false;
   reviewBackKey = null;
-  await seekToTimestamp(hit.t, hit.frameIdx, { skipEventSync: false });
+  // Reflect the user's latest command immediately. The exact video/skeleton
+  // render can take a few hundred milliseconds on long files.
+  const frameInput = $("#playback-frame-input");
+  if (frameInput) frameInput.value = String(targetFi);
+
+  const seekPromise = seekToTimestamp(hit.t, hit.frameIdx, {
+    skipEventSync: false,
+  });
+  const seekSequence = explicitFrameSeekSequence;
+  await seekPromise;
+  // A newer frame/event seek supersedes this request. Do not let the older
+  // completion repaint controls or the review dock after the newer command.
+  if (seekSequence !== explicitFrameSeekSequence) return;
   if (typeof updateReviewDock === "function") {
     updateReviewDock({ skipRedraw: true });
   }
   updateEventMarkerActiveState();
   updateEventReviewFrameNavUi();
+  // Explicit navigation owns the requested frame. Keep the jump input in
+  // lockstep even when another render/update callback finishes out of order.
+  if (frameInput) frameInput.value = String(targetFi);
+}
+
+/** 按当前帧相对步进；与上一条/下一条事件导航完全独立。 */
+async function navigatePlaybackFrame(delta) {
+  if (!frameByTime.length) return;
+  const step = Math.round(Number(delta) || 0);
+  if (!step) return;
+  let cur = getResolvedPlaybackFrameIdx();
+  if (cur == null || cur < 1) {
+    cur = Number(frameByTime[0]?.frameIdx) || 1;
+  }
+  await navigatePlaybackToFrame(cur + step);
 }
 
 function findEventsAtFrame(frameIdx) {
@@ -523,11 +595,22 @@ function refreshPlaybackReviewUiDuringPlay(frameIdx, timeSec) {
 function syncActiveEventFromPlaybackPosition(opts = {}) {
   if (!playbackEvents.length) return;
   const duringPlayback = opts.duringPlayback === true;
+  const videoIsPlaying = !!(
+    videoEl?.src &&
+    !videoEl.paused &&
+    !videoEl.ended
+  );
+  // 即使调用方漏传 duringPlayback，只要视频实际在播放，就必须进入单向跟随模式。
+  const followPlayback = duringPlayback || videoIsPlaying;
   const timeSec = opts.timeSec ?? getCurrentPlaybackTimeSec();
   const frameIdx = opts.frameIdx ?? getCurrentPlaybackFrameIdx();
 
+  if (followPlayback) {
+    playbackEventLinkExact = false;
+  }
+
   // 钉住事件时：禁止 sync 解除钉住或切换事件；画面漂移则拉回事件帧（播放跟随模式除外）
-  if (!opts.force && !duringPlayback && playbackEventLinkExact && activeEventKey) {
+  if (!opts.force && !followPlayback && playbackEventLinkExact && activeEventKey) {
     const pinned =
       typeof getPinnedPlaybackEvent === "function"
         ? getPinnedPlaybackEvent()
@@ -562,11 +645,11 @@ function syncActiveEventFromPlaybackPosition(opts = {}) {
   const exact = isExactEventAtPosition(ev, timeSec, frameIdx);
   // 同一事件因视频漂移不同步时：保持钉住并拉回，不改为「最近」
   if (!opts.force && key === activeEventKey) {
-    if (!duringPlayback && playbackEventLinkExact && !exact) {
+    if (!followPlayback && playbackEventLinkExact && !exact) {
       void realignPlaybackToPinnedEvent();
       return;
     }
-    if (duringPlayback) {
+    if (followPlayback) {
       refreshPlaybackReviewUiDuringPlay(frameIdx, timeSec);
       return;
     }
@@ -574,12 +657,12 @@ function syncActiveEventFromPlaybackPosition(opts = {}) {
   }
   activeEventKey = key;
   // 播放跟随时不可设为钉住，否则会阻断后续帧/事件同步
-  if (!duringPlayback) playbackEventLinkExact = exact;
+  playbackEventLinkExact = followPlayback ? false : exact;
   if (!opts.keepReviewBack && reviewBackKey && key !== reviewBackKey) {
     reviewBackKey = null;
   }
   updateReviewDock({ skipRedraw: opts.skipRedraw });
-  if (duringPlayback) {
+  if (followPlayback) {
     if (typeof patchEventReviewTableActiveState === "function") patchEventReviewTableActiveState();
     if (typeof scrollActiveEventRowIntoView === "function") scrollActiveEventRowIntoView();
   } else if ($("#event-review-list-details")?.open) renderEventReviewTable();
@@ -596,6 +679,7 @@ function updateEventMarkerActiveState() {
 }
 
 async function seekToTimestamp(timeSec, frameIdx = null, opts = {}) {
+  const seekSequence = ++explicitFrameSeekSequence;
   lastRenderedFrameIdx = -1;
   tickPoseFrameIdx = -1;
   lastEventSyncFrameIdx = -1;
@@ -626,18 +710,24 @@ async function seekToTimestamp(timeSec, frameIdx = null, opts = {}) {
         ? videoTimeForFrameIdx(hitByIdx.frameIdx)
         : hitByIdx.t
       : videoEl.currentTime;
-    seekBar.value = String((displayT / videoEl.duration) * 1000);
-    timeLabel.textContent = formatTime(displayT);
+    if (typeof updatePlaybackSeekBarUi === "function") {
+      updatePlaybackSeekBarUi(displayT, hitByIdx?.frameIdx ?? targetFi);
+    } else {
+      seekBar.value = String((displayT / videoEl.duration) * 1000);
+      timeLabel.textContent = formatTime(displayT);
+    }
     if (hitByIdx) {
       explicitFrameSeekInFlight = true;
       try {
         if (videoEl.seeking || Math.abs(prevTime - videoEl.currentTime) > 1e-4) {
           await waitVideoSeeked(videoEl);
         }
+        if (seekSequence !== explicitFrameSeekSequence) return;
         let presentedMediaTime = null;
         if (typeof waitPresentedVideoFrame === "function") {
           presentedMediaTime = await waitPresentedVideoFrame(videoEl);
         }
+        if (seekSequence !== explicitFrameSeekSequence) return;
         if (typeof renderSkeletonSyncedToVideo === "function") {
           await renderSkeletonSyncedToVideo({
             playback: true,
@@ -650,11 +740,14 @@ async function seekToTimestamp(timeSec, frameIdx = null, opts = {}) {
           await renderExplicitPlaybackFrame(hitByIdx.frameIdx);
         }
       } finally {
-        explicitFrameSeekInFlight = false;
+        if (seekSequence === explicitFrameSeekSequence) {
+          explicitFrameSeekInFlight = false;
+        }
       }
     } else {
       await renderAtTime(videoEl.currentTime);
     }
+    if (seekSequence !== explicitFrameSeekSequence) return;
     if (!opts.skipEventSync) {
       syncActiveEventFromPlaybackPosition({
         timeSec: displayT,
@@ -671,7 +764,9 @@ async function seekToTimestamp(timeSec, frameIdx = null, opts = {}) {
     await renderFrameEntry(hit);
     const idx = frameByTime.indexOf(hit);
     if (idx >= 0 && frameByTime.length) {
-      seekBar.value = String((idx / frameByTime.length) * 1000);
+      seekBar.value = String(
+        frameByTime.length <= 1 ? 1000 : (idx / (frameByTime.length - 1)) * 1000
+      );
       timeLabel.textContent = `${idx + 1}/${frameByTime.length}`;
     } else {
       timeLabel.textContent = formatTime(t);

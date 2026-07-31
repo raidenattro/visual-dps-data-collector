@@ -1,22 +1,83 @@
 /** 区间增强标真：首帧选 person_id + 货框，首尾均包含并逐帧原子保存 */
 
+/** 仅身份变化点/低置信度点需要人工确认；稳定的多人区间自动跟踪 */
+const rangeAnnotManualPersonByFrame = new Map();
+let rangeAnnotAwaitingPersonFrame = null;
+let rangeAnnotSuggestedPersonId = null;
+let rangeAnnotReviewResumeTimer = null;
+
+/** 所有视频共用的稳定人物身份缓存：人物 A/B 与当帧 raw P0/P1 分离。 */
+const stablePersonIdentityByFrame = new Map();
+let stablePersonIdentityComputedThrough = 0;
+let stablePersonIdentityNextId = 0;
+const stablePersonIdentityActiveTracks = new Map();
+const stablePersonIdentityTrackHints = new Map();
+const STABLE_PERSON_MAX_GAP = 25;
+
+function resetStablePersonIdentityCache() {
+  stablePersonIdentityByFrame.clear();
+  stablePersonIdentityComputedThrough = 0;
+  stablePersonIdentityNextId = 0;
+  stablePersonIdentityActiveTracks.clear();
+  stablePersonIdentityTrackHints.clear();
+}
+
+/**
+ * 后台分块可能晚于当前画面返回。只有新数据覆盖了已经计算过的帧时，
+ * 才需要从头重建稳定人物编号；加载更靠后的分块不能让当前 A/B 突然跳变。
+ */
+function markStablePersonIdentityDirtyFrom(frameIdx) {
+  const fi = Math.max(1, parseInt(frameIdx, 10) || 0);
+  if (fi <= stablePersonIdentityComputedThrough) {
+    resetStablePersonIdentityCache();
+  }
+}
+
 function clearRangeAnnotBounds() {
   rangeAnnotStartFrame = null;
   rangeAnnotEndFrame = null;
   rangeAnnotTemplateSnapshot = null;
+  rangeAnnotManualPersonByFrame.clear();
+  rangeAnnotAwaitingPersonFrame = null;
+  rangeAnnotSuggestedPersonId = null;
+  if (rangeAnnotReviewResumeTimer) {
+    clearTimeout(rangeAnnotReviewResumeTimer);
+    rangeAnnotReviewResumeTimer = null;
+  }
   updateRangeAnnotUi();
 }
 
-/** 在首帧选取 person_id / 货框后立即缓存，避免切换事件时丢失暂选 */
-function refreshRangeAnnotTemplateSnapshot() {
+/**
+ * 在首帧选取 person_id / 货框后立即缓存。
+ *
+ * 快照离开首帧后必须冻结：切到尾帧时，上一事件的 pending 选择会被正常清理，
+ * 此时若再次从首帧事件重建快照，就会把已缓存的货框覆盖为空。
+ */
+function refreshRangeAnnotTemplateSnapshot({ force = false } = {}) {
   if (rangeAnnotStartFrame == null || rangeAnnotStartFrame <= 0) {
     rangeAnnotTemplateSnapshot = null;
     return;
   }
   const fi = rangeAnnotStartFrame;
+  if (
+    !force &&
+    rangeAnnotTemplateSnapshot &&
+    Number(rangeAnnotTemplateSnapshot.frameIdx ?? fi) === fi
+  ) {
+    return;
+  }
+  const currentFrameIdx =
+    typeof getResolvedPlaybackFrameIdx === "function"
+      ? parseInt(getResolvedPlaybackFrameIdx(), 10) || 0
+      : 0;
+  if (!force && currentFrameIdx !== fi) {
+    return;
+  }
   const template = getRangeAnnotTemplate(fi);
   if (!template?.ev) {
-    rangeAnnotTemplateSnapshot = null;
+    if (force || !rangeAnnotTemplateSnapshot) {
+      rangeAnnotTemplateSnapshot = null;
+    }
     return;
   }
   let confirmed = normalizeBoxTokenList(template.confirmed);
@@ -29,14 +90,68 @@ function refreshRangeAnnotTemplateSnapshot() {
     personId = personIds[0];
   }
   rangeAnnotTemplateSnapshot = {
+    frameIdx: fi,
     confirmed,
     personId: personId != null ? Number(personId) : null,
   };
 }
 
+function rangeAnnotEventIsStartFrame(ev) {
+  const frameIdx = parseInt(ev?.frame_idx, 10) || 0;
+  return (
+    frameIdx > 0 &&
+    rangeAnnotStartFrame != null &&
+    frameIdx === Number(rangeAnnotStartFrame)
+  );
+}
+
+/** 首帧货框的显式点选/清空可以更新冻结快照，其他帧绝不能覆盖它。 */
+function updateRangeAnnotTemplateBoxesFromEvent(ev, tokens) {
+  if (!rangeAnnotEventIsStartFrame(ev)) return;
+  if (!rangeAnnotTemplateSnapshot) {
+    refreshRangeAnnotTemplateSnapshot({ force: true });
+  }
+  const existing = rangeAnnotTemplateSnapshot || {
+    frameIdx: Number(rangeAnnotStartFrame),
+    confirmed: [],
+    personId: null,
+  };
+  rangeAnnotTemplateSnapshot = {
+    ...existing,
+    frameIdx: Number(rangeAnnotStartFrame),
+    confirmed: normalizeBoxTokenList(tokens),
+  };
+}
+
+/** 首帧 person_id 的显式点选/清空只更新人员字段，保留已冻结货框。 */
+function updateRangeAnnotTemplatePersonFromEvent(ev, personId) {
+  if (!rangeAnnotEventIsStartFrame(ev)) return;
+  if (!rangeAnnotTemplateSnapshot) {
+    refreshRangeAnnotTemplateSnapshot({ force: true });
+  }
+  const existing = rangeAnnotTemplateSnapshot || {
+    frameIdx: Number(rangeAnnotStartFrame),
+    confirmed: [],
+    personId: null,
+  };
+  const normalized =
+    personId == null || personId === "" || !Number.isFinite(Number(personId))
+      ? null
+      : Number(personId);
+  rangeAnnotTemplateSnapshot = {
+    ...existing,
+    frameIdx: Number(rangeAnnotStartFrame),
+    personId: normalized,
+  };
+}
+
 function getRangeAnnotTemplateForApply(startFrame) {
   const fi = parseInt(startFrame, 10) || 0;
-  if (rangeAnnotTemplateSnapshot && rangeAnnotStartFrame === fi) {
+  if (
+    rangeAnnotTemplateSnapshot &&
+    rangeAnnotStartFrame === fi &&
+    Number(rangeAnnotTemplateSnapshot.frameIdx ?? fi) === fi
+  ) {
     const frameEvents = getEventsOnFrame(fi);
     return {
       ev: frameEvents[0] || null,
@@ -110,6 +225,7 @@ function rangePersonCandidates(frameIdx) {
     const personId = Number.isFinite(rawPid) ? rawPid : idx;
     const rawTrack = person?.person_track_id;
     return {
+      personIndex: idx,
       personId,
       trackId: rawTrack != null && String(rawTrack).trim() ? String(rawTrack).trim() : null,
       bbox: normalizeRangePersonBbox(person),
@@ -161,66 +277,559 @@ function rangeBboxContinuityScore(previous, candidate) {
   };
 }
 
+function rankRangePersonCandidates(previous, candidates) {
+  if (!previous || !candidates.length) return [];
+  return candidates
+    .map((candidate) => ({
+      candidate,
+      ...rangeBboxContinuityScore(previous, candidate),
+    }))
+    .sort((a, b) => b.score - a.score);
+}
+
+function stablePersonLabel(stableId) {
+  let value = Math.max(0, parseInt(stableId, 10) || 0);
+  let label = "";
+  do {
+    label = String.fromCharCode(65 + (value % 26)) + label;
+    value = Math.floor(value / 26) - 1;
+  } while (value >= 0);
+  return label;
+}
+
+/**
+ * 右侧人物按钮必须保持固定操作位置：人物 A 永远排在人物 B 前面。
+ * raw P0/P1 只决定当帧保存值，不能决定按钮顺序。
+ */
+function sortStablePersonDisplayOptions(options) {
+  return [...(Array.isArray(options) ? options : [])].sort((a, b) => {
+    const aStable = Number(a?.stableId);
+    const bStable = Number(b?.stableId);
+    const aRank = Number.isFinite(aStable) ? aStable : Number.MAX_SAFE_INTEGER;
+    const bRank = Number.isFinite(bStable) ? bStable : Number.MAX_SAFE_INTEGER;
+    if (aRank !== bRank) return aRank - bRank;
+    const labelOrder = String(a?.stableLabel ?? "").localeCompare(
+      String(b?.stableLabel ?? "")
+    );
+    if (labelOrder) return labelOrder;
+    return Number(a?.pid ?? 0) - Number(b?.pid ?? 0);
+  });
+}
+
+function rangePersonCenterX(candidate) {
+  const bbox = candidate?.bbox;
+  return bbox ? (bbox[0] + bbox[2]) / 2 : Number.POSITIVE_INFINITY;
+}
+
+function rangePersonCenter(candidate) {
+  const bbox = candidate?.bbox;
+  if (!bbox) return null;
+  return {
+    x: (bbox[0] + bbox[2]) / 2,
+    y: (bbox[1] + bbox[3]) / 2,
+  };
+}
+
+/**
+ * 稳定人物匹配使用“上一位置 + 运动趋势”的预测，避免两个人交叉时仅凭
+ * 当前 IoU 把 A/B 互换。track 只提供很小的同轨加分，不主导身份。
+ */
+function scoreStablePersonTrack(track, candidate, frameIdx) {
+  const continuity = rangeBboxContinuityScore(track?.candidate, candidate);
+  const previousCenter = rangePersonCenter(track?.candidate);
+  const nextCenter = rangePersonCenter(candidate);
+  const dt = Math.max(1, Number(frameIdx) - Number(track?.frameIdx || frameIdx - 1));
+  let prediction = 0;
+  if (previousCenter && nextCenter) {
+    const predictedX = previousCenter.x + Number(track?.velocityX || 0) * dt;
+    const predictedY = previousCenter.y + Number(track?.velocityY || 0) * dt;
+    const bbox = track.candidate?.bbox;
+    const diagonal = bbox
+      ? Math.max(40, Math.hypot(bbox[2] - bbox[0], bbox[3] - bbox[1]))
+      : 120;
+    const normalizedDistance =
+      Math.hypot(nextCenter.x - predictedX, nextCenter.y - predictedY) /
+      (diagonal * Math.max(1, Math.sqrt(dt)));
+    prediction = Math.max(0, 1 - normalizedDistance);
+  }
+  const sameTrack =
+    track?.trackId != null &&
+    candidate?.trackId != null &&
+    track.trackId === candidate.trackId;
+  return {
+    score: continuity.score * 0.3 + prediction * 0.65 + (sameTrack ? 0.05 : 0),
+    prediction,
+    iou: continuity.iou,
+    sameTrack,
+  };
+}
+
+/**
+ * 为已加载帧建立稳定的“人物 A/B/…”身份。
+ * 相邻帧空间连续性与运动趋势为主，track 仅作弱提示；raw person_id
+ * 只作为保存值，不参与稳定人物编号。身份编号不复用，因此人员交叉、
+ * 短时遮挡或离场后重新出现时不会因为左右位置变化直接交换 A/B。
+ */
+function buildStablePersonIdentityThrough(frameIdx) {
+  const target = Math.max(1, parseInt(frameIdx, 10) || 0);
+  if (!target || stablePersonIdentityByFrame.has(target)) return;
+  if (target < stablePersonIdentityComputedThrough) {
+    resetStablePersonIdentityCache();
+  }
+
+  for (
+    let fi = stablePersonIdentityComputedThrough + 1;
+    fi <= target;
+    fi += 1
+  ) {
+    const candidates = rangePersonCandidates(fi);
+    const stableByPersonIndex = new Map();
+    const usedStableIds = new Set();
+    const hasLoadedFrame = frameCache?.has(fi);
+
+    if (!hasLoadedFrame) {
+      stablePersonIdentityByFrame.set(fi, []);
+      stablePersonIdentityComputedThrough = fi;
+      continue;
+    }
+
+    const activeTracks = [...stablePersonIdentityActiveTracks.values()].filter(
+      (track) => fi - Number(track.frameIdx || 0) <= STABLE_PERSON_MAX_GAP
+    );
+    if (activeTracks.length && candidates.length) {
+      const pairs = [];
+      activeTracks.forEach((track) => {
+        candidates.forEach((candidate) => {
+          const match = scoreStablePersonTrack(track, candidate, fi);
+          pairs.push({
+            stableId: track.stableId,
+            candidate,
+            ...match,
+          });
+        });
+      });
+      pairs.sort((a, b) => b.score - a.score);
+      const usedPersonIndices = new Set();
+      pairs.forEach((pair) => {
+        if (
+          usedStableIds.has(pair.stableId) ||
+          usedPersonIndices.has(pair.candidate.personIndex)
+        ) {
+          return;
+        }
+        if (
+          pair.score < 0.2 &&
+          pair.prediction < 0.25 &&
+          pair.iou < 0.03 &&
+          !pair.sameTrack
+        ) {
+          return;
+        }
+        stableByPersonIndex.set(pair.candidate.personIndex, pair.stableId);
+        usedStableIds.add(pair.stableId);
+        usedPersonIndices.add(pair.candidate.personIndex);
+      });
+    }
+
+    // 断帧或短暂消失后，track 只用于找回尚未占用的稳定编号。
+    candidates.forEach((candidate) => {
+      if (stableByPersonIndex.has(candidate.personIndex)) return;
+      const hinted =
+        candidate.trackId != null
+          ? stablePersonIdentityTrackHints.get(candidate.trackId)
+          : null;
+      if (hinted == null || usedStableIds.has(hinted)) return;
+      stableByPersonIndex.set(candidate.personIndex, hinted);
+      usedStableIds.add(hinted);
+    });
+
+    [...candidates]
+      .sort(
+        (a, b) =>
+          rangePersonCenterX(a) - rangePersonCenterX(b) ||
+          a.personIndex - b.personIndex
+      )
+      .forEach((candidate) => {
+        if (stableByPersonIndex.has(candidate.personIndex)) return;
+        while (usedStableIds.has(stablePersonIdentityNextId)) {
+          stablePersonIdentityNextId += 1;
+        }
+        stableByPersonIndex.set(
+          candidate.personIndex,
+          stablePersonIdentityNextId
+        );
+        usedStableIds.add(stablePersonIdentityNextId);
+        stablePersonIdentityNextId += 1;
+      });
+
+    const rows = candidates.map((candidate) => {
+      const stableId = stableByPersonIndex.get(candidate.personIndex);
+      const previousTrack = stablePersonIdentityActiveTracks.get(stableId);
+      const previousCenter = rangePersonCenter(previousTrack?.candidate);
+      const nextCenter = rangePersonCenter(candidate);
+      const dt = Math.max(
+        1,
+        fi - Number(previousTrack?.frameIdx || fi - 1)
+      );
+      const measuredVelocityX =
+        previousCenter && nextCenter ? (nextCenter.x - previousCenter.x) / dt : 0;
+      const measuredVelocityY =
+        previousCenter && nextCenter ? (nextCenter.y - previousCenter.y) / dt : 0;
+      const hasMeasuredVelocity = Boolean(previousCenter && nextCenter);
+      const previousVelocitySamples = Number(
+        previousTrack?.velocitySamples || 0
+      );
+      return {
+        frameIdx: fi,
+        personIndex: candidate.personIndex,
+        personId: candidate.personId,
+        trackId: candidate.trackId,
+        stableId,
+        stableLabel: stablePersonLabel(stableId),
+        candidate,
+        velocityX:
+          previousTrack && previousVelocitySamples > 0
+            ? Number(previousTrack.velocityX || 0) * 0.35 +
+              measuredVelocityX * 0.65
+            : measuredVelocityX,
+        velocityY:
+          previousTrack && previousVelocitySamples > 0
+            ? Number(previousTrack.velocityY || 0) * 0.35 +
+              measuredVelocityY * 0.65
+            : measuredVelocityY,
+        velocitySamples: hasMeasuredVelocity
+          ? previousVelocitySamples + 1
+          : previousVelocitySamples,
+      };
+    });
+    stablePersonIdentityByFrame.set(fi, rows);
+    [...stablePersonIdentityActiveTracks.entries()].forEach(
+      ([stableId, track]) => {
+        if (fi - Number(track.frameIdx || 0) > STABLE_PERSON_MAX_GAP) {
+          stablePersonIdentityActiveTracks.delete(stableId);
+        }
+      }
+    );
+    rows.forEach((row) => {
+      stablePersonIdentityActiveTracks.set(row.stableId, row);
+      if (
+        row.trackId != null &&
+        !stablePersonIdentityTrackHints.has(row.trackId)
+      ) {
+        stablePersonIdentityTrackHints.set(row.trackId, row.stableId);
+      }
+    });
+    stablePersonIdentityComputedThrough = fi;
+  }
+}
+
+function getStablePersonDisplayInfo(frameIdx, person, personIndex = 0) {
+  const fi = Math.max(1, parseInt(frameIdx, 10) || 0);
+  if (!fi) return null;
+  buildStablePersonIdentityThrough(fi);
+  const rawPid =
+    person?.person_id != null && Number.isFinite(Number(person.person_id))
+      ? Number(person.person_id)
+      : Number(personIndex);
+  const trackId =
+    person?.person_track_id != null && String(person.person_track_id).trim()
+      ? String(person.person_track_id).trim()
+      : null;
+  const rows = stablePersonIdentityByFrame.get(fi) || [];
+  const row =
+    rows.find((item) => item.personIndex === Number(personIndex)) ||
+    rows.find(
+      (item) =>
+        item.personId === rawPid &&
+        (trackId == null || item.trackId === trackId)
+    ) ||
+    null;
+  if (row) return row;
+  return {
+    frameIdx: fi,
+    personIndex: Number(personIndex),
+    personId: rawPid,
+    trackId,
+    stableId: Number(personIndex),
+    stableLabel: stablePersonLabel(personIndex),
+  };
+}
+
+function getStablePersonDisplayInfoByRawId(frameIdx, personId) {
+  const fi = Math.max(1, parseInt(frameIdx, 10) || 0);
+  const frame = frameCache?.get(fi);
+  const persons = frame?.persons || [];
+  const rawPid = Number(personId);
+  const personIndex = persons.findIndex((person, idx) => {
+    const pid =
+      person?.person_id != null && Number.isFinite(Number(person.person_id))
+        ? Number(person.person_id)
+        : idx;
+    return pid === rawPid;
+  });
+  if (personIndex < 0) return null;
+  return getStablePersonDisplayInfo(fi, persons[personIndex], personIndex);
+}
+
+function getRawPersonIdForStablePerson(frameIdx, stableId) {
+  const fi = Math.max(1, parseInt(frameIdx, 10) || 0);
+  buildStablePersonIdentityThrough(fi);
+  const row = (stablePersonIdentityByFrame.get(fi) || []).find(
+    (item) => Number(item.stableId) === Number(stableId)
+  );
+  return row?.personId ?? null;
+}
+
+/**
+ * 空间连续性建议：IoU 为主，中心距离与面积相似度为辅，track 只有 0.02 弱加分。
+ * 返回 null 表示空间证据不足，仍可交给人工选择，但不会自动写入任何 person_id。
+ */
+function suggestRangePersonByContinuity(previous, candidates) {
+  const ranked = rankRangePersonCandidates(previous, candidates);
+  const best = ranked[0];
+  if (!best) return null;
+  const second = ranked[1];
+  const margin = second ? best.score - second.score : best.score;
+  const iouSeparation = second ? best.iou - second.iou : best.iou;
+  if (best.iou < 0.2) return null;
+  if (second && margin < 0.12 && iouSeparation < 0.15) return null;
+  return best.candidate;
+}
+
 /**
  * Resolve the same physical person by adjacent-frame bbox continuity.
- * Raw person_id and person_track_id may both swap when duplicate detections
- * overlap, so track is only a weak tie-breaker.
+ * - 多人但目标空间轨迹稳定时自动通过；
+ * - raw person_id 重排自动映射，不视为物理身份变化；
+ * - 仅遮挡后重现或空间证据不足时要求人工确认；
+ * - 人工选择成为该帧锚点，后续继续自动跟踪；
+ * - track 只作 0.02 的弱参考。
  */
-function resolveRangePersonAssignments(start, end, selectedPersonId) {
+function resolveRangePersonAssignments(
+  start,
+  end,
+  selectedPersonId,
+  manualPersonByFrame = rangeAnnotManualPersonByFrame
+) {
   const assignments = [];
   const ambiguousFrames = [];
+  const confirmationFrames = [];
+  const confirmationSuggestions = [];
   const missingPersonFrames = [];
   let previous = null;
+  let previousAssignment = null;
+  let needsReacquire = false;
 
   for (let fi = start; fi <= end; fi += 1) {
     const candidates = rangePersonCandidates(fi);
     if (!candidates.length) {
       assignments.push({ frameIdx: fi, personId: null, trackId: null });
       missingPersonFrames.push(fi);
+      previous = null;
+      needsReacquire = true;
       continue;
     }
 
     let chosen = null;
-    if (fi === start) {
+    let reason = "";
+    let continuity = null;
+    const confirmedPersonId =
+      fi === start ? selectedPersonId : manualPersonByFrame?.get(fi);
+    if (confirmedPersonId != null) {
       chosen = candidates.find(
-        (candidate) => Number(candidate.personId) === Number(selectedPersonId)
+        (candidate) => Number(candidate.personId) === Number(confirmedPersonId)
       );
-      if (!chosen && candidates.length === 1) chosen = candidates[0];
-    } else if (previous && candidates.length === 1) {
-      chosen = candidates[0];
+      if (!chosen) {
+        manualPersonByFrame?.delete(fi);
+        confirmationFrames.push(fi);
+        confirmationSuggestions.push({
+          frameIdx: fi,
+          personId: null,
+          reason: "invalid_anchor",
+        });
+        break;
+      }
     } else if (previous) {
-      const ranked = candidates
-        .map((candidate) => ({
-          candidate,
-          ...rangeBboxContinuityScore(previous, candidate),
-        }))
-        .sort((a, b) => b.score - a.score);
+      const ranked = rankRangePersonCandidates(previous, candidates);
       const best = ranked[0];
       const second = ranked[1];
-      const margin = second ? best.score - second.score : best.score;
-      const iouSeparation = second ? best.iou - second.iou : best.iou;
-      if (
-        best.iou >= 0.2 &&
-        (!second || margin >= 0.12 || iouSeparation >= 0.15)
-      ) {
-        chosen = best.candidate;
+      chosen = best?.candidate || null;
+      continuity = best || null;
+      if (chosen && candidates.length >= 2) {
+        const margin = second ? best.score - second.score : best.score;
+        const iouSeparation = second ? best.iou - second.iou : best.iou;
+        if (
+          best.iou < 0.2 ||
+          (second && margin < 0.06 && iouSeparation < 0.08)
+        ) {
+          reason = "low_confidence";
+        }
       }
     } else if (candidates.length === 1) {
       chosen = candidates[0];
+    } else {
+      chosen =
+        candidates.find(
+          (candidate) =>
+            previousAssignment != null &&
+            Number(candidate.personId) === Number(previousAssignment.personId)
+        ) || candidates[0];
+      reason = needsReacquire ? "reacquire" : "low_confidence";
     }
 
     if (!chosen) {
       ambiguousFrames.push(fi);
       break;
     }
+    if (
+      needsReacquire &&
+      fi !== start &&
+      !manualPersonByFrame?.has(fi) &&
+      !reason
+    ) {
+      reason = "reacquire";
+    }
     assignments.push({
       frameIdx: fi,
       personId: chosen.personId,
       trackId: chosen.trackId,
     });
+
+    const manuallyConfirmed =
+      fi !== start && manualPersonByFrame?.has(fi);
+    if (reason && !manuallyConfirmed) {
+      confirmationFrames.push(fi);
+      confirmationSuggestions.push({
+        frameIdx: fi,
+        personId: chosen.personId,
+        previousPersonId: previousAssignment?.personId ?? null,
+        reason,
+        score: continuity?.score ?? null,
+        iou: continuity?.iou ?? null,
+      });
+      break;
+    }
+
     previous = chosen;
+    previousAssignment = {
+      frameIdx: fi,
+      personId: chosen.personId,
+      trackId: chosen.trackId,
+    };
+    needsReacquire = false;
   }
-  return { assignments, ambiguousFrames, missingPersonFrames };
+  return {
+    assignments,
+    ambiguousFrames,
+    confirmationFrames,
+    confirmationSuggestions,
+    missingPersonFrames,
+  };
+}
+
+function summarizeRangePersonAssignments(assignments, maxGroups = 8) {
+  const rows = Array.isArray(assignments) ? assignments : [];
+  if (!rows.length) return "";
+  const groups = [];
+  for (const row of rows) {
+    const frameIdx = parseInt(row?.frameIdx, 10) || 0;
+    if (frameIdx <= 0) continue;
+    const personLabel =
+      row?.personId == null || !Number.isFinite(Number(row.personId))
+        ? "无人"
+        : `P${Number(row.personId)}`;
+    const previous = groups[groups.length - 1];
+    if (
+      previous &&
+      previous.personLabel === personLabel &&
+      previous.end + 1 === frameIdx
+    ) {
+      previous.end = frameIdx;
+    } else {
+      groups.push({ start: frameIdx, end: frameIdx, personLabel });
+    }
+  }
+  const visible = groups.slice(0, Math.max(1, Number(maxGroups) || 8));
+  const text = visible
+    .map((group) =>
+      group.start === group.end
+        ? `${group.start}:${group.personLabel}`
+        : `${group.start}–${group.end}:${group.personLabel}`
+    )
+    .join("，");
+  return groups.length > visible.length
+    ? `${text}，另 ${groups.length - visible.length} 段`
+    : text;
+}
+
+function isRangePersonConfirmationRequired(frameIdx) {
+  const fi = parseInt(frameIdx, 10) || 0;
+  return fi > 0 && fi === rangeAnnotAwaitingPersonFrame;
+}
+
+function getRangePersonConfirmationSuggestion(frameIdx) {
+  return isRangePersonConfirmationRequired(frameIdx)
+    ? rangeAnnotSuggestedPersonId
+    : null;
+}
+
+/**
+ * 由人员单选框/骨架点击回调：
+ * - 首帧/尾帧选择作为区间锚点；
+ * - 当前变化点选择作为人工确认，并自动继续检查下一变化点。
+ */
+function confirmRangePersonSelection(ev, personId) {
+  const fi = parseInt(ev?.frame_idx, 10) || 0;
+  const normalized = Number(personId);
+  const candidates = rangePersonCandidates(fi);
+  const confirmsRangeEndpoint =
+    fi > 0 &&
+    typeof rangeAnnotStartFrame !== "undefined" &&
+    typeof rangeAnnotEndFrame !== "undefined" &&
+    (fi === Number(rangeAnnotStartFrame) ||
+      fi === Number(rangeAnnotEndFrame));
+  const wasAwaitingConfirmation = isRangePersonConfirmationRequired(fi);
+  if (
+    (!wasAwaitingConfirmation && !confirmsRangeEndpoint) ||
+    !Number.isFinite(normalized) ||
+    !candidates.some(
+      (candidate) => Number(candidate.personId) === normalized
+    )
+  ) {
+    return false;
+  }
+  rangeAnnotManualPersonByFrame.set(fi, normalized);
+  if (wasAwaitingConfirmation) {
+    rangeAnnotAwaitingPersonFrame = null;
+    rangeAnnotSuggestedPersonId = null;
+  }
+  return wasAwaitingConfirmation;
+}
+
+function continueRangeIdentityReviewAfterSelection() {
+  if (rangeAnnotReviewResumeTimer) clearTimeout(rangeAnnotReviewResumeTimer);
+  rangeAnnotReviewResumeTimer = setTimeout(() => {
+    rangeAnnotReviewResumeTimer = null;
+    void applyRangeAnnotVerified();
+  }, 0);
+}
+
+async function focusRangePersonConfirmation(frameIdx, suggestedPersonId = null) {
+  const fi = parseInt(frameIdx, 10) || 0;
+  if (fi <= 0) return;
+  rangeAnnotAwaitingPersonFrame = fi;
+  rangeAnnotSuggestedPersonId =
+    suggestedPersonId == null || !Number.isFinite(Number(suggestedPersonId))
+      ? null
+      : Number(suggestedPersonId);
+
+  const ev = getEventsOnFrame(fi)[0] || null;
+  if (ev && typeof seekToEvent === "function") {
+    await seekToEvent(ev);
+  } else if (typeof seekToTimestamp === "function") {
+    const row = typeof frameEntryByIdx === "function" ? frameEntryByIdx(fi) : null;
+    if (row) await seekToTimestamp(row.t, fi, { skipEventSync: false });
+  }
+  if (typeof updateReviewDock === "function") updateReviewDock();
 }
 
 /** 首帧模板：优先当前钉住事件，否则首帧上已有货框/person 选取的事件 */
@@ -292,10 +901,13 @@ function setRangeAnnotStartFromCurrent() {
     return;
   }
   rangeAnnotStartFrame = fi;
+  rangeAnnotManualPersonByFrame.clear();
+  rangeAnnotAwaitingPersonFrame = null;
+  rangeAnnotSuggestedPersonId = null;
   if (rangeAnnotEndFrame != null && rangeAnnotEndFrame < rangeAnnotStartFrame) {
     rangeAnnotEndFrame = null;
   }
-  refreshRangeAnnotTemplateSnapshot();
+  refreshRangeAnnotTemplateSnapshot({ force: true });
   updateRangeAnnotUi();
   setEventReviewSaveStatus(`已设首帧 ${fi} · 请在本帧选择 person_id 与货框`, "");
 }
@@ -308,13 +920,33 @@ function setRangeAnnotEndFromCurrent() {
     return;
   }
   rangeAnnotEndFrame = fi;
+  for (const frameIdx of [...rangeAnnotManualPersonByFrame.keys()]) {
+    if (frameIdx !== Number(rangeAnnotStartFrame)) {
+      rangeAnnotManualPersonByFrame.delete(frameIdx);
+    }
+  }
+  rangeAnnotAwaitingPersonFrame = null;
+  rangeAnnotSuggestedPersonId = null;
   if (rangeAnnotStartFrame != null && rangeAnnotEndFrame < rangeAnnotStartFrame) {
     const tmp = rangeAnnotStartFrame;
     rangeAnnotStartFrame = rangeAnnotEndFrame;
     rangeAnnotEndFrame = tmp;
+    rangeAnnotManualPersonByFrame.clear();
+    rangeAnnotTemplateSnapshot = null;
+    refreshRangeAnnotTemplateSnapshot({ force: true });
   }
   updateRangeAnnotUi();
-  setEventReviewSaveStatus(`已设尾帧 ${fi}`, "");
+  const frozenBoxes = normalizeBoxTokenList(
+    rangeAnnotTemplateSnapshot?.confirmed || []
+  );
+  setEventReviewSaveStatus(
+    `已设尾帧 ${fi}${
+      frozenBoxes.length
+        ? ` · 首帧货框已保留 ${formatConfirmedBoxes(frozenBoxes)}，尾帧无需重复选择`
+        : ""
+    }`,
+    ""
+  );
 }
 
 function updateRangeAnnotUi() {
@@ -334,7 +966,7 @@ function updateRangeAnnotUi() {
     endEl.classList.toggle("is-set", rangeAnnotEndFrame != null);
   }
 
-  let hint = "在首帧选择 person_id 与货框，设置尾帧后一键标真区间内全部帧";
+  let hint = "首帧选择取货人员与货框；设置尾帧后只复核身份变化点";
   let canApply = false;
   let previewN = 0;
 
@@ -534,6 +1166,32 @@ async function applyRangeAnnotVerified() {
     bounds.end,
     check.personId
   );
+  if (personResolution.confirmationFrames.length) {
+    const frameIdx = personResolution.confirmationFrames[0];
+    const suggestion = personResolution.confirmationSuggestions.find(
+      (item) => item.frameIdx === frameIdx
+    );
+    await focusRangePersonConfirmation(frameIdx, suggestion?.personId ?? null);
+    const suggestionStable =
+      suggestion?.personId != null
+        ? getStablePersonDisplayInfoByRawId(frameIdx, suggestion.personId)
+        : null;
+    const reasonLabel =
+      suggestion?.reason === "reacquire"
+          ? "人员消失后重新出现"
+          : suggestion?.reason === "invalid_anchor"
+            ? "原人工锚点已不在当前画面"
+            : "空间连续性置信度较低";
+    const suggestionNote =
+      suggestion?.personId != null
+        ? `；空间连续性建议人物 ${suggestionStable?.stableLabel ?? "?"}（本帧 raw P${suggestion.personId}），请以画面为准`
+        : "；空间连续性不足，不能给出可靠建议";
+    setEventReviewSaveStatus(
+      `区间身份复核：帧 ${frameIdx} 检测到${reasonLabel}。整段尚未保存，请确认本帧${suggestionNote}；可按 1/2 快选人物 A/B`,
+      "error"
+    );
+    return;
+  }
   if (personResolution.ambiguousFrames.length) {
     const sample = personResolution.ambiguousFrames.slice(0, 5).join(", ");
     setEventReviewSaveStatus(
@@ -553,13 +1211,18 @@ async function applyRangeAnnotVerified() {
     )
   );
 
-  const personNote = check.personId != null ? ` · P${check.personId}` : "";
+  const personAssignmentSummary = summarizeRangePersonAssignments(
+    personResolution.assignments
+  );
+  const personNote = personAssignmentSummary
+    ? `\nraw person_id 逐帧映射：${personAssignmentSummary}`
+    : "";
   const missingPersonWarning = personResolution.missingPersonFrames.length
     ? `\n人员提示：${personResolution.missingPersonFrames.length} 帧没有人体检测，将保留逐帧货框标真但不填写 person_id。`
     : "";
   if (
     !window.confirm(
-      `确定区间逐帧标真？\n\n帧范围：${bounds.start} – ${bounds.end}（含首尾）\n帧数：${expectedN}\n货框：${formatConfirmedBoxes(check.confirmed)}${personNote}\n\n人员将按相邻帧人体框连续性对应；track 仅作辅助，不会盲目跟随换到另一个人。${missingPersonWarning}`
+      `确定区间逐帧标真？\n\n帧范围：${bounds.start} – ${bounds.end}（含首尾）\n帧数：${expectedN}\n货框：${formatConfirmedBoxes(check.confirmed)}${personNote}\n\n人物 A/B 已按相邻帧人体框连续性稳定跟踪；raw P0/P1 重排已自动映射，低置信度点已经人工确认，track 仅作弱辅助。每帧仍写入该帧真实 person_id。${missingPersonWarning}`
     )
   ) {
     return;

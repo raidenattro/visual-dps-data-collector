@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>骨架采集与回放</title>
-  <link rel="stylesheet" href="style.css?v=66" />
+  <link rel="stylesheet" href="style.css?v=67" />
 </head>
 <body>
   <header>
@@ -420,7 +420,7 @@
             <div class="playback-records-toolbar">
               <h2 class="playback-records-heading heading-with-tip">
                 已保存记录
-                <button type="button" class="field-tip" data-tip="先选机位目录，再选记录；单击选中后点「加载并回放」或双击行直接加载。无碰撞计算时显示「碰撞未计算」标记。">?</button>
+                <button type="button" class="field-tip" data-tip="先选机位目录，再单击一条记录即可自动加载并回放；加载期间会锁定列表，避免重复请求。无碰撞计算时显示「碰撞未计算」标记。">?</button>
               </h2>
               <button type="button" id="playback-load-record" class="primary-btn" disabled>加载并回放</button>
             </div>
@@ -509,8 +509,20 @@
           </div>
           <div class="playback-transport">
             <div class="controls">
-              <button type="button" id="play-btn">播放</button>
-              <button type="button" id="pause-btn">暂停</button>
+              <div class="playback-frame-toolbar" role="group" aria-label="视频帧导航">
+                <button type="button" id="playback-first-frame-btn" class="playback-frame-nav-btn" title="跳到首帧（Home）" aria-label="跳到首帧">|◀</button>
+                <button type="button" id="playback-back-10-btn" class="playback-frame-nav-btn" title="后退 10 帧（Ctrl+←）" aria-label="后退10帧">◀◀</button>
+                <button type="button" id="playback-back-1-btn" class="playback-frame-nav-btn" title="后退 1 帧（←；长按 3× 快退）" aria-label="后退1帧">◀</button>
+                <button type="button" id="play-btn" class="playback-frame-nav-btn playback-frame-play-btn" aria-pressed="false" title="播放 / 暂停（空格）" aria-label="播放">▶</button>
+                <button type="button" id="playback-forward-1-btn" class="playback-frame-nav-btn" title="前进 1 帧（→；长按 3× 快进）" aria-label="前进1帧">▶</button>
+                <button type="button" id="playback-forward-10-btn" class="playback-frame-nav-btn" title="前进 10 帧（Ctrl+→）" aria-label="前进10帧">▶▶</button>
+                <button type="button" id="playback-last-frame-btn" class="playback-frame-nav-btn" title="跳到末帧（End）" aria-label="跳到末帧">▶|</button>
+                <span class="playback-frame-toolbar-separator" aria-hidden="true"></span>
+                <label class="playback-frame-input-label" title="输入帧号并按 Enter 跳转（G 聚焦）">
+                  <span class="sr-only">跳转到具体帧</span>
+                  <input type="number" id="playback-frame-input" min="1" step="1" inputmode="numeric" placeholder="帧" aria-label="跳转到具体帧" />
+                </label>
+              </div>
               <button type="button" id="end-playback-btn">停止回放</button>
               <label class="playback-det-bbox-label toggle-row" title="叠加显示人体骨架连线与关键点（默认关闭，避免遮挡标注）">
                 <input type="checkbox" id="playback-show-skeleton" />
@@ -616,11 +628,6 @@
               </div>
               </div>
               <div class="event-review-dock-block event-review-dock-block--transport">
-              <div class="event-review-frame-nav">
-                <button type="button" id="event-prev-frame-btn" class="btn-review-frame-nav" title="快捷键 ←">◀ 上一帧</button>
-                <span id="event-review-frame-pos" class="event-review-frame-pos">帧 —</span>
-                <button type="button" id="event-next-frame-btn" class="btn-review-frame-nav" title="快捷键 →">下一帧 ▶</button>
-              </div>
               <div class="event-review-actions event-review-actions--primary">
                 <button type="button" id="event-prev-btn" class="btn-review-nav" title="快捷键 ↑">‹ 上一条</button>
                 <button type="button" id="event-skip-next-btn" class="btn-review-skip" title="快捷键 N">下一条 ›</button>
@@ -691,18 +698,18 @@
   <script src="annotateVisualMode.js?v=2"></script>
   <!-- 回放/采集主逻辑（由 app.monolith.js 拆分，按依赖顺序加载） -->
   <script src="app/00-core.js?v=73"></script>
-  <script src="app/01-layout-frames.js?v=52"></script>
-  <script src="app/02-playback-selection.js?v=34"></script>
+  <script src="app/01-layout-frames.js?v=54"></script>
+  <script src="app/02-playback-selection.js?v=35"></script>
   <script src="app/03-tabs.js?v=36"></script>
   <script src="app/04-collision-config.js?v=35"></script>
   <script src="app/05-collect.js?v=42"></script>
-  <script src="app/06-records.js?v=55"></script>
+  <script src="app/06-records.js?v=56"></script>
   <script src="app/07-playback-stage.js?v=71"></script>
-  <script src="app/08-event-review.js?v=87"></script>
-  <script src="app/08-event-review-range.js?v=3"></script>
-  <script src="app/09-playback-events.js?v=94"></script>
-  <script src="app/10-render-collision.js?v=108"></script>
-  <script src="app/11-playback-controls.js?v=92"></script>
+  <script src="app/08-event-review.js?v=94"></script>
+  <script src="app/08-event-review-range.js?v=12"></script>
+  <script src="app/09-playback-events.js?v=99"></script>
+  <script src="app/10-render-collision.js?v=116"></script>
+  <script src="app/11-playback-controls.js?v=98"></script>
   <script src="app/13-playback-skeleton-features.js?v=9"></script>
   <script src="annotate.js?v=17"></script>
   <script src="accuracy.js?v=14"></script>

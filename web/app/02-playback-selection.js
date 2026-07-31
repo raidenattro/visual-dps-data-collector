@@ -1,9 +1,17 @@
 /** 回放记录选中与 Tab 离开挂起 */
 let selectedPlaybackRecord = null;
+let playbackRecordOpenPromise = null;
 
 function updatePlaybackLoadButton() {
   const btn = document.getElementById("playback-load-record");
-  if (btn) btn.disabled = !selectedPlaybackRecord?.recordId;
+  if (!btn) return;
+  const loading = Boolean(playbackRecordOpenPromise);
+  btn.disabled = loading || !selectedPlaybackRecord?.recordId;
+  btn.textContent = loading ? "正在加载…" : "加载并回放";
+}
+
+function isPlaybackRecordOpening() {
+  return Boolean(playbackRecordOpenPromise);
 }
 
 function selectPlaybackRecordItem(li) {
@@ -36,7 +44,32 @@ async function startPlaybackFromSelectedRecord() {
     setPlaybackInfo("❌ 请先在下方列表点击选择一条记录");
     return;
   }
-  await openRecordReplay(sel.recordId, sel.displayName, sel.poseFile, sel.hasVideo);
+  if (playbackRecordOpenPromise) {
+    return playbackRecordOpenPromise;
+  }
+
+  const openPromise = openRecordReplay(
+    sel.recordId,
+    sel.displayName,
+    sel.poseFile,
+    sel.hasVideo
+  );
+  playbackRecordOpenPromise = openPromise;
+  updatePlaybackLoadButton();
+  document
+    .getElementById("session-list")
+    ?.classList.add("playback-record-list-loading");
+  try {
+    await openPromise;
+  } finally {
+    if (playbackRecordOpenPromise === openPromise) {
+      playbackRecordOpenPromise = null;
+      document
+        .getElementById("session-list")
+        ?.classList.remove("playback-record-list-loading");
+      updatePlaybackLoadButton();
+    }
+  }
 }
 
 // --- 标签页 ---

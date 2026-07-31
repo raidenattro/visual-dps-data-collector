@@ -71,6 +71,9 @@ function invalidateDisplayLayoutCache() {
 
 function resetFrameFetchState() {
   frameCache.clear();
+  if (typeof resetStablePersonIdentityCache === "function") {
+    resetStablePersonIdentityCache();
+  }
   loadedChunkKeys.clear();
   prefetchPromises.clear();
   lastRenderedFrameIdx = -1;
@@ -149,6 +152,11 @@ async function prefetchFrameChunk(from, to) {
       // 回放索引用 source_frame_idx，缓存双键避免取不到帧
       if (sfi > 0) frameCache.set(sfi, fr);
     });
+    if (typeof markStablePersonIdentityDirtyFrom === "function") {
+      markStablePersonIdentityDirtyFrom(lo);
+    } else if (typeof resetStablePersonIdentityCache === "function") {
+      resetStablePersonIdentityCache();
+    }
     loadedChunkKeys.add(key);
   })().finally(() => {
     prefetchPromises.delete(key);

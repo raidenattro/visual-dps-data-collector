@@ -1246,8 +1246,29 @@ function playbackTimelineSecFromVideo() {
   return fromClock;
 }
 
-/** 进度条/时间标签与事件 marker 共用 timeline 轴，避免播放与 seek 间跳动 */
-function updatePlaybackSeekBarUi(timeSec = null) {
+/** 当前骨架帧在实际 timeline 索引中的进度；不依赖视频 duration / PTS。 */
+function playbackFrameProgress(frameIdx) {
+  const fi = parseInt(frameIdx, 10) || 0;
+  if (!fi || !frameByTime?.length) return null;
+  const idx = frameByTime.findIndex((item) => Number(item?.frameIdx) === fi);
+  if (idx < 0) return null;
+  if (frameByTime.length <= 1) return 1;
+  return idx / (frameByTime.length - 1);
+}
+
+/** 由进度条 0–1000 反查实际 timeline 条目，首尾均可精确到达。 */
+function playbackFrameEntryForSeekValue(value) {
+  if (!frameByTime?.length) return null;
+  const ratio = Math.max(0, Math.min(1, (Number(value) || 0) / 1000));
+  const idx = Math.round(ratio * Math.max(0, frameByTime.length - 1));
+  return frameByTime[Math.min(idx, frameByTime.length - 1)] || null;
+}
+
+/**
+ * 进度条优先使用权威骨架帧位置。
+ * 视频 duration、容器 PTS 与骨架 timeline 长度不一致时，也能保证最后一帧为 100%。
+ */
+function updatePlaybackSeekBarUi(timeSec = null, frameIdx = null) {
   if (!seekBar || !videoEl?.duration || !Number.isFinite(videoEl.duration) || videoEl.duration <= 0) {
     return;
   }
@@ -1255,7 +1276,17 @@ function updatePlaybackSeekBarUi(timeSec = null) {
     timeSec != null && Number.isFinite(Number(timeSec))
       ? Math.max(0, Number(timeSec))
       : playbackTimelineSecFromVideo();
-  seekBar.value = String((t / videoEl.duration) * 1000);
+  const explicitFi = parseInt(frameIdx, 10) || 0;
+  const authorityFi =
+    !explicitFi && typeof getPlaybackAuthorityFrameIdx === "function"
+      ? parseInt(getPlaybackAuthorityFrameIdx(), 10) || 0
+      : 0;
+  const progress = playbackFrameProgress(explicitFi || authorityFi);
+  seekBar.value = String(
+    progress != null
+      ? Math.max(0, Math.min(1000, progress * 1000))
+      : Math.max(0, Math.min(1000, (t / videoEl.duration) * 1000))
+  );
   if (timeLabel) timeLabel.textContent = formatTime(t);
 }
 
@@ -1485,7 +1516,17 @@ function drawDetBboxes(frame, inferW, inferH) {
     const top = Math.min(y1, y2);
     ctx.strokeRect(left, top, Math.abs(x2 - x1), Math.abs(y2 - y1));
 
-    const label = person?.person_id != null ? `#${person.person_id}` : `#${idx}`;
+    const frameIdx =
+      Number(frame?.frame_idx) || Number(frame?.source_frame_idx) || 0;
+    const stable =
+      typeof getStablePersonDisplayInfo === "function"
+        ? getStablePersonDisplayInfo(frameIdx, person, idx)
+        : null;
+    const label = stable
+      ? `人${stable.stableLabel}`
+      : person?.person_id != null
+        ? `P${person.person_id}`
+        : `P${idx}`;
     ctx.setLineDash([]);
     ctx.font = "12px system-ui, sans-serif";
     ctx.fillStyle = "rgba(251, 146, 60, 0.95)";
@@ -1519,7 +1560,10 @@ function drawPersonIdLabels(frame, inferW, inferH, opts = {}) {
       typeof eventMatchesPlaybackFrame === "function" &&
       eventMatchesPlaybackFrame(ev, frameIdx)
     ) {
-      selectedPid = getEventPersonId(ev);
+      const forceManualRangeChoice =
+        typeof isRangePersonConfirmationRequired === "function" &&
+        isRangePersonConfirmationRequired(frameIdx);
+      selectedPid = forceManualRangeChoice ? null : getEventPersonId(ev);
     }
   }
 
@@ -1529,11 +1573,19 @@ function drawPersonIdLabels(frame, inferW, inferH, opts = {}) {
 
   framePersons.forEach((person, idx) => {
     const pid = person.person_id != null ? person.person_id : idx;
+    const frameIdx =
+      Number(frame?.frame_idx) || Number(frame?.source_frame_idx) || 0;
+    const stable =
+      typeof getStablePersonDisplayInfo === "function"
+        ? getStablePersonDisplayInfo(frameIdx, person, idx)
+        : null;
     const { ax, ay } = resolvePersonLabelAnchor(person);
     if (!Number.isFinite(ax) || !Number.isFinite(ay)) return;
 
     const [dx, dy] = mapInferToDisplay(ax, ay, inferW, inferH, layout);
-    const text = `P${pid}`;
+    // 画面主标签只显示跨帧稳定身份；raw P0/P1 仅在右侧详情中保留，
+    // 避免检测顺序改变时让用户误以为左右两个人互换了编号。
+    const text = stable ? `人物${stable.stableLabel}` : `P${pid}`;
     const padX = 6;
     const padY = 3;
     const metrics = ctx.measureText(text);
@@ -1555,8 +1607,11 @@ function drawPersonIdLabels(frame, inferW, inferH, opts = {}) {
   ctx.restore();
 }
 
-/** 画面坐标点击命中骨架人员（返回 person_id） */
-function hitTestPersonAtClient(clientX, clientY) {
+/**
+ * 画面坐标点击命中骨架人员，并保留命中来源。
+ * 人物框会覆盖手部货框，因此调用方需要区分“人物标签”和宽泛的人体框命中。
+ */
+function hitTestPersonDetailAtClient(clientX, clientY) {
   if (typeof frameCache === "undefined") return null;
   const ev = typeof getPinnedPlaybackEvent === "function" ? getPinnedPlaybackEvent() : null;
   if (!ev) return null;
@@ -1570,24 +1625,110 @@ function hitTestPersonAtClient(clientX, clientY) {
   const inferW = frame.infer_width || poseData?.infer_width || 0;
   const inferH = frame.infer_height || poseData?.infer_height || 0;
   const layout = pausedPlaybackLayout || frozenPlaybackLayout || getDisplayLayout();
-  const hitRadius = 22;
-
+  const hitRadius = 28;
   let best = null;
-  let bestDist = hitRadius;
+  let bestScore = Number.POSITIVE_INFINITY;
 
   frame.persons.forEach((person, idx) => {
     const pid = person.person_id != null ? person.person_id : idx;
     const { ax, ay } = resolvePersonLabelAnchor(person);
     if (!Number.isFinite(ax) || !Number.isFinite(ay)) return;
     const [dx, dy] = mapInferToDisplay(ax, ay, inferW, inferH, layout);
-    const dist = Math.hypot(x - dx, y - (dy - 26));
-    if (dist <= bestDist) {
-      bestDist = dist;
-      best = Number(pid);
+    const stable =
+      typeof getStablePersonDisplayInfo === "function"
+        ? getStablePersonDisplayInfo(fi, person, idx)
+        : null;
+    ctx.save();
+    ctx.font = "bold 14px system-ui, sans-serif";
+    const labelText = stable ? `人物${stable.stableLabel}` : `P${pid}`;
+    const labelW = ctx.measureText(labelText).width + 12;
+    ctx.restore();
+    const labelLeft = dx - labelW / 2;
+    const labelTop = dy - 36;
+    const insideLabel =
+      x >= labelLeft &&
+      x <= labelLeft + labelW &&
+      y >= labelTop - 4 &&
+      y <= labelTop + 24;
+
+    const bbox = personDetBbox(person);
+    let insideBbox = false;
+    let bboxCenterDistance = Number.POSITIVE_INFINITY;
+    if (bbox) {
+      const [x1, y1] = mapInferToDisplay(bbox[0], bbox[1], inferW, inferH, layout);
+      const [x2, y2] = mapInferToDisplay(bbox[2], bbox[3], inferW, inferH, layout);
+      const left = Math.min(x1, x2);
+      const right = Math.max(x1, x2);
+      const top = Math.min(y1, y2);
+      const bottom = Math.max(y1, y2);
+      insideBbox = x >= left && x <= right && y >= top && y <= bottom;
+      bboxCenterDistance = Math.hypot(
+        x - (left + right) / 2,
+        y - (top + bottom) / 2
+      );
+    }
+
+    let nearestKeypointDistance = Number.POSITIVE_INFINITY;
+    (person?.keypoints || []).forEach((kp) => {
+      if (!kp || Number(kp[2]) <= 0.2) return;
+      const [kx, ky] = mapInferToDisplay(kp[0], kp[1], inferW, inferH, layout);
+      nearestKeypointDistance = Math.min(
+        nearestKeypointDistance,
+        Math.hypot(x - kx, y - ky)
+      );
+    });
+
+    const labelDistance = Math.hypot(x - dx, y - (dy - 26));
+    let hitKind = null;
+    let score = Number.POSITIVE_INFINITY;
+    if (insideLabel) {
+      hitKind = "label";
+      score = -1000;
+    } else if (nearestKeypointDistance <= hitRadius) {
+      hitKind = "keypoint";
+      score = nearestKeypointDistance;
+    } else if (insideBbox) {
+      hitKind = "bbox";
+      score = 100 + bboxCenterDistance;
+    } else if (labelDistance <= hitRadius) {
+      hitKind = "label";
+      score = labelDistance;
+    }
+    if (score < bestScore) {
+      bestScore = score;
+      best = {
+        personId: Number(pid),
+        kind: hitKind,
+        score,
+      };
     }
   });
 
   return best;
+}
+
+/** 兼容旧调用：只返回本帧 raw person_id。 */
+function hitTestPersonAtClient(clientX, clientY) {
+  return hitTestPersonDetailAtClient(clientX, clientY)?.personId ?? null;
+}
+
+/**
+ * 人物和货框重叠时的点击优先级：
+ * 1. 人物文字标签是明确选人动作；
+ * 2. 货框多边形优先于宽泛的人体框/骨架命中；
+ * 3. 没有货框时才用骨架或人体框选人。
+ */
+function resolveEventReviewCanvasHit(personHit, annotationHit) {
+  if (personHit?.kind === "label") {
+    return { kind: "person", value: personHit.personId };
+  }
+  if (annotationHit) {
+    return { kind: "annotation", value: annotationHit };
+  }
+  if (personHit?.personId != null) {
+    return { kind: "person", value: personHit.personId };
+  }
+  return null;
 }
 
 /** 骨骼特征 track 标签（锚点跟随当前帧骨架，不依赖 API 缓存坐标） */
@@ -1631,11 +1772,19 @@ function drawPersonFeatureTrackLabels(frame, inferW, inferH) {
         ? person.person_track_id
         : idx + 1;
     const pid = person.person_id != null ? person.person_id : idx;
+    const frameIdx =
+      Number(frame?.frame_idx) || Number(frame?.source_frame_idx) || 0;
+    const stable =
+      typeof getStablePersonDisplayInfo === "function"
+        ? getStablePersonDisplayInfo(frameIdx, person, idx)
+        : null;
     const { ax, ay } = resolvePersonLabelAnchor(person);
     if (!Number.isFinite(ax) || !Number.isFinite(ay)) return;
 
     const [dx, dy] = mapInferToDisplay(ax, ay, inferW, inferH, layout);
-    const text = `T${trackId} · P${pid}`;
+    const text = stable
+      ? `人${stable.stableLabel} · T${trackId} · P${pid}`
+      : `T${trackId} · P${pid}`;
     const padX = 5;
     const padY = 3;
     const metrics = ctx.measureText(text);
@@ -1899,6 +2048,22 @@ async function renderSkeletonSyncedToVideo(opts = {}) {
       layout,
       playback: true,
     };
+    // 精确逐帧/事件跳转必须按 frame_idx 取骨架。不能把 frame_idx 再换算成
+    // mediaTime 后二次映射，否则容器 PTS 偏移会让 157 帧画面叠上 160 帧骨架。
+    if (explicitFrameIdx > 0) {
+      const authority =
+        typeof getPlaybackAuthorityFrameIdx === "function"
+          ? getPlaybackAuthorityFrameIdx()
+          : null;
+      if (
+        authority != null &&
+        authority > 0 &&
+        Number(authority) !== Number(explicitFrameIdx)
+      ) {
+        return 0;
+      }
+      return ensureRenderPlaybackFrameByIdx(explicitFrameIdx, drawOpts);
+    }
     let mediaTime = opts.mediaTime;
     if (mediaTime == null && opts.waitPresented !== false && videoEl.paused) {
       mediaTime = await waitPresentedVideoFrame(videoEl);
@@ -2492,6 +2657,8 @@ function playbackRenderLoop(now, metadata) {
     return;
   }
 
+  let playbackUiFrameIdx = null;
+  let playbackUiTimeSec = null;
   if (videoEl.readyState >= 2) {
     if (metadata?.mediaTime != null && Number.isFinite(Number(metadata.mediaTime))) {
       lastPlaybackMediaTimeSec = Number(metadata.mediaTime);
@@ -2499,6 +2666,8 @@ function playbackRenderLoop(now, metadata) {
     const rvfcTime = resolveRvfcMediaTime(metadata?.mediaTime);
     const timeSec = rvfcTime != null ? rvfcTime : Math.max(0, Number(videoEl?.currentTime) || 0);
     const nextIdx = frameIdxAtVideoTime(timeSec, { playback: true });
+    playbackUiFrameIdx = nextIdx > 0 ? nextIdx : null;
+    playbackUiTimeSec = timeSec;
     if (nextIdx > 0 && nextIdx !== tickVideoFrameIdx) {
       tickVideoFrameIdx = nextIdx;
       syncRenderPlaybackFrame(timeSec, { playback: true });
@@ -2517,7 +2686,7 @@ function playbackRenderLoop(now, metadata) {
   const perfNow = typeof now === "number" && Number.isFinite(now) ? now : performance.now();
   if (perfNow - lastPlaybackUiSyncMs >= 120) {
     lastPlaybackUiSyncMs = perfNow;
-    updatePlaybackSeekBarUi();
+    updatePlaybackSeekBarUi(playbackUiTimeSec, playbackUiFrameIdx);
   }
 
   if (!videoEl.paused && videoEl.readyState >= 2) {
@@ -2555,6 +2724,7 @@ function stopPlayback() {
   clearInterval(jsonOnlyTimer);
   jsonOnlyTimer = null;
   cancelPlaybackRenderLoop();
+  if (typeof syncPlaybackToggleButton === "function") syncPlaybackToggleButton();
 }
 
 function finishPlaybackSession() {
@@ -2578,9 +2748,12 @@ function startJsonOnlyPlayback(startIdx = 0) {
     jsonOnlyFrameIdx = idx;
     const entry = frameByTime[idx];
     await renderFrameEntry(entry);
-    seekBar.value = String((idx / frameByTime.length) * 1000);
+    seekBar.value = String(
+      frameByTime.length <= 1 ? 1000 : (idx / (frameByTime.length - 1)) * 1000
+    );
     timeLabel.textContent = `${idx + 1}/${frameByTime.length}`;
     syncActiveEventFromPlaybackPosition({ timeSec: entry?.t, frameIdx: entry?.frameIdx });
     idx += 1;
   }, 1000 / (fps * rate));
+  if (typeof syncPlaybackToggleButton === "function") syncPlaybackToggleButton();
 }

@@ -525,12 +525,16 @@ function bindRecordListEvents(list) {
   list.querySelectorAll(".record-item").forEach((li) => {
     li.addEventListener("click", (e) => {
       if (e.target.closest("a, button")) return;
+      if (
+        typeof isPlaybackRecordOpening === "function" &&
+        isPlaybackRecordOpening()
+      ) {
+        return;
+      }
       selectPlaybackRecordItem(li);
-    });
-    li.addEventListener("dblclick", (e) => {
-      if (e.target.closest("a, button")) return;
-      selectPlaybackRecordItem(li);
-      startPlaybackFromSelectedRecord().catch((err) => setPlaybackInfo(`❌ ${err.message}`));
+      startPlaybackFromSelectedRecord().catch((err) =>
+        setPlaybackInfo(`❌ ${err.message}`)
+      );
     });
   });
   const keepId = selectedPlaybackRecord?.recordId || currentRecordId || "";
@@ -1275,12 +1279,10 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
   }
   await buildFrameIndex(recordId);
   showPlaybackStageLoading(`【${displayName || recordId}】加载骨架…`);
-  await prefetchAllPlaybackChunksInBackground(recordId, (pct) => {
-    const msg = `【${displayName || recordId}】加载骨架 ${pct}%…`;
-    setPlaybackInfo(msg);
-    if (pct < 100) updatePlaybackStageLoading(msg);
-    else hidePlaybackStageLoading();
-  });
+  // 首次打开只阻塞首个骨架分块；其余分块在视频就绪后后台预取。
+  // 这样左侧记录单击一次即可很快看到首屏，不必等待整段 Parquet 全量加载。
+  await prefetchFrameChunksParallel(1, 1);
+  updatePlaybackStageLoading(`【${displayName || recordId}】首屏骨架已就绪，正在加载标注…`);
   const annResult = await applyPlaybackRecordAnnotation(recordId);
   const eventsPromise = loadPlaybackEvents(recordId);
   if (typeof loadPlaybackSkeletonFeatures === "function") {
@@ -1304,6 +1306,9 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
   const videoResult = await prepareAndLoadRecordVideo(recordId, displayName || recordId);
   const videoLoaded = !!videoResult.loaded;
   const usedOriginalVideo = !!videoResult.usedOriginal;
+  void prefetchAllPlaybackChunksInBackground(recordId).catch((err) => {
+    console.warn("后台预取骨架失败", err);
+  });
   await eventsPromise;
   const hadPendingAccuracyNav = !!pendingPlaybackAccuracyNav;
   if (playbackEvents.length && !hadPendingAccuracyNav) {
