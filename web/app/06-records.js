@@ -10,12 +10,21 @@ let playbackPoseTier = "rtmpose-t";
 let playbackAnnotationSource = "tier";
 /** 已知标签（来自 /api/tags） */
 let playbackKnownTags = [];
-/** 按模型层缓存的记录列表，切换 tier 时即时展示 */
+/** 当前筛选下的全量机位摘要 */
+let playbackCameraSummaries = [];
+let playbackCameraSummaryMeta = { totalCameras: 0, totalRecords: 0 };
+/** 按“模型层 + 机位 + 筛选”缓存的记录列表 */
 const playbackRecordsByTier = new Map();
-/** 每层分页加载状态：items / nextOffset / hasMore / loadingMore */
+/** 按“模型层 + 机位 + 筛选”维护分页状态 */
 const playbackTierLoadState = new Map();
-/** 同 tier 并发 load 去重 */
+/** 按“模型层 + 筛选”缓存一级机位摘要 */
+const playbackCameraSummariesCache = new Map();
+/** 同查询并发 load 去重 */
 const playbackRecordsLoadInflight = new Map();
+/** 一级机位列表滚动位置 */
+const playbackCameraScrollPositions = new Map();
+let playbackRecordsRequestGeneration = 0;
+let playbackRecordsAbortController = null;
 
 const RECORD_LIST_PAGE_SIZE = 200;
 const POSE_MODEL_TIERS = new Set(["rtmpose-t", "rtmpose-s", "rtmpose-m"]);
@@ -33,16 +42,6 @@ function recordGroupKey(s) {
   const slug = s.camera_slug || cameraSlugFromRecordId(s.record_id);
   if (slug === "_ungrouped") return s.camera_label || "未分组";
   return slug || s.camera_label || "未分类";
-}
-
-function buildRecordGroups(items) {
-  const groups = new Map();
-  for (const s of items) {
-    const key = recordGroupKey(s);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(s);
-  }
-  return groups;
 }
 
 function cameraSlugForRecordId(recordId) {
@@ -78,29 +77,6 @@ function parseTagFilterQuery() {
     .filter(Boolean);
 }
 
-function recordHasAllTags(s, requiredTags) {
-  if (!requiredTags.length) return true;
-  const tags = (Array.isArray(s.tags) ? s.tags : []).map((t) => String(t).toLowerCase());
-  return requiredTags.every((t) => tags.includes(t));
-}
-
-function recordMatchesReviewFilter(s) {
-  const status = String($("#playback-review-status-filter")?.value || "all").trim().toLowerCase();
-  const st = String(s.event_review_status || "not_started").trim().toLowerCase();
-  if (status === "all" || !status) return true;
-  if (status === "reviewed") return st === "completed" || st === "no_collision";
-  return st === status;
-}
-
-function recordMatchesVerifiedFilter(s) {
-  const mode = String($("#playback-verified-filter")?.value || "all").trim().toLowerCase();
-  const count = Number(s.event_review_verified_count || 0);
-  if (mode === "all" || !mode) return true;
-  if (mode === "yes") return count > 0;
-  if (mode === "no") return count <= 0;
-  return true;
-}
-
 function playbackReviewFilterQuery() {
   const status = String($("#playback-review-status-filter")?.value || "all").trim().toLowerCase();
   return status === "all" ? "" : status;
@@ -113,18 +89,42 @@ function playbackVerifiedFilterQuery() {
   return "";
 }
 
-function filterPlaybackRecords(items) {
-  const filterQ = String($("#playback-record-filter")?.value || "")
-    .trim()
-    .toLowerCase();
-  const tagFilter = parseTagFilterQuery();
-  return items.filter((s) => {
-    if (filterQ && !recordSearchBlob(s).includes(filterQ)) return false;
-    if (!recordHasAllTags(s, tagFilter)) return false;
-    if (!recordMatchesReviewFilter(s)) return false;
-    if (!recordMatchesVerifiedFilter(s)) return false;
-    return true;
-  });
+function playbackRecordSearchQuery() {
+  return String($("#playback-record-filter")?.value || "").trim();
+}
+
+function playbackFilterParams() {
+  return {
+    q: playbackRecordSearchQuery(),
+    tags: parseTagFilterQuery().join(","),
+    reviewStatus: playbackReviewFilterQuery(),
+    hasVerified: playbackVerifiedFilterQuery(),
+  };
+}
+
+function playbackFilterSignature() {
+  const params = playbackFilterParams();
+  return JSON.stringify(params);
+}
+
+function appendPlaybackFilterQuery(searchParams) {
+  const filters = playbackFilterParams();
+  if (filters.q) searchParams.set("q", filters.q);
+  if (filters.tags) searchParams.set("tags", filters.tags);
+  if (filters.reviewStatus) searchParams.set("review_status", filters.reviewStatus);
+  if (filters.hasVerified) searchParams.set("has_verified", filters.hasVerified);
+  return searchParams;
+}
+
+function cameraSummaryCacheKey(tier = playbackPoseTier) {
+  return `${String(tier || "rtmpose-t").trim()}|${playbackFilterSignature()}`;
+}
+
+function cameraRecordCacheKey(
+  tier = playbackPoseTier,
+  cameraSlug = playbackSelectedCameraSlug
+) {
+  return `${String(tier || "rtmpose-t").trim()}|${String(cameraSlug || "").trim()}|${playbackFilterSignature()}`;
 }
 
 function renderRecordTags(s) {
@@ -185,36 +185,59 @@ async function patchRecordTags(recordId, { add = [], remove = [] } = {}) {
   const tags = Array.isArray(data.tags) ? data.tags : [];
   patchRecordTagsInCache(recordId, tags);
   commitPlaybackRecordsCacheToTier();
+  playbackCameraSummariesCache.clear();
   await fetchKnownTags();
-  renderPlaybackRecordsList(playbackRecordsCache);
+  if (parseTagFilterQuery().length) {
+    const key = cameraRecordCacheKey();
+    playbackRecordsByTier.delete(key);
+    playbackTierLoadState.delete(key);
+    await loadRecords({ quiet: true });
+  } else {
+    renderPlaybackRecordsList(playbackRecordsCache);
+  }
   return tags;
 }
 
-function getTierLoadState(tier) {
-  const key = String(tier || "rtmpose-t").trim();
+function getTierLoadState(
+  tier = playbackPoseTier,
+  cameraSlug = playbackSelectedCameraSlug
+) {
+  const key = cameraRecordCacheKey(tier, cameraSlug);
   if (!playbackTierLoadState.has(key)) {
     playbackTierLoadState.set(key, {
       items: [],
       nextOffset: 0,
       hasMore: true,
       loadingMore: false,
+      total: 0,
     });
   }
   return playbackTierLoadState.get(key);
 }
 
-function commitPlaybackRecordsCacheToTier(tier = playbackPoseTier) {
-  const key = String(tier || "rtmpose-t").trim();
+function commitPlaybackRecordsCacheToTier(
+  tier = playbackPoseTier,
+  cameraSlug = playbackSelectedCameraSlug
+) {
+  if (!cameraSlug) return;
+  const key = cameraRecordCacheKey(tier, cameraSlug);
   playbackRecordsByTier.set(key, [...playbackRecordsCache]);
   const state = playbackTierLoadState.get(key);
   if (state) state.items = playbackRecordsCache;
 }
 
 function resetTierLoadState(tier) {
-  const key = String(tier || "").trim();
-  if (!key) return;
-  playbackTierLoadState.delete(key);
-  playbackRecordsByTier.delete(key);
+  const prefix = `${String(tier || "").trim()}|`;
+  if (prefix === "|") return;
+  for (const key of [...playbackTierLoadState.keys()]) {
+    if (key.startsWith(prefix)) playbackTierLoadState.delete(key);
+  }
+  for (const key of [...playbackRecordsByTier.keys()]) {
+    if (key.startsWith(prefix)) playbackRecordsByTier.delete(key);
+  }
+  for (const key of [...playbackCameraSummariesCache.keys()]) {
+    if (key.startsWith(prefix)) playbackCameraSummariesCache.delete(key);
+  }
 }
 
 function invalidatePlaybackTierCache(tier = "") {
@@ -222,6 +245,7 @@ function invalidatePlaybackTierCache(tier = "") {
   else {
     playbackTierLoadState.clear();
     playbackRecordsByTier.clear();
+    playbackCameraSummariesCache.clear();
   }
 }
 
@@ -398,7 +422,15 @@ function patchPlaybackRecordReviewStatus(recordId, status, label = "") {
   });
   if (changed) {
     commitPlaybackRecordsCacheToTier();
-    renderPlaybackRecordsList(playbackRecordsCache);
+    playbackCameraSummariesCache.delete(cameraSummaryCacheKey());
+    if (playbackReviewFilterQuery() || playbackVerifiedFilterQuery()) {
+      const key = cameraRecordCacheKey();
+      playbackRecordsByTier.delete(key);
+      playbackTierLoadState.delete(key);
+      void loadRecords({ quiet: true });
+    } else {
+      renderPlaybackRecordsList(playbackRecordsCache);
+    }
   }
 }
 
@@ -458,11 +490,14 @@ function renderRecordItem(s) {
       </li>`;
 }
 
-function renderCameraGroupItem(key, groupItems) {
-  const total = groupItems.length;
-  const title = groupItems[0]?.camera_label || key;
-  const groupReview = aggregateReviewStatus(groupItems);
-  const groupReviewPill = renderReviewPill(groupReview);
+function renderCameraGroupItem(summary) {
+  const key = summary.camera_slug || "_ungrouped";
+  const total = Number(summary.record_count || 0);
+  const title = summary.camera_label || key;
+  const groupReviewPill = renderReviewPill(
+    summary.event_review_status,
+    summary.event_review_label
+  );
   const esc = recordItemEsc;
   return `
     <li class="camera-group-item" data-camera-slug="${esc(key)}" role="button" tabindex="0">
@@ -477,20 +512,17 @@ function renderCameraGroupItem(key, groupItems) {
     </li>`;
 }
 
-function playbackRecordsCountSuffix(tier = playbackPoseTier) {
-  const state = playbackTierLoadState.get(String(tier || "rtmpose-t").trim());
-  if (!state?.hasMore) return "";
-  return "（已加载部分，可加载更多）";
-}
-
 function renderRecordsLoadMoreFooter() {
-  const tier = playbackPoseTier || "rtmpose-t";
-  const state = playbackTierLoadState.get(tier);
-  if (!state?.hasMore) return "";
+  if (!playbackSelectedCameraSlug) return "";
+  const state = getTierLoadState(playbackPoseTier, playbackSelectedCameraSlug);
+  const loaded = state.items.length;
+  const total = Number(state.total || loaded);
+  const progress = `<span class="hint playback-records-page-progress">已加载 ${loaded} / ${total} 条</span>`;
+  if (!state.hasMore) return `<p class="playback-records-load-more">${progress}</p>`;
   if (state.loadingMore) {
-    return `<p class="hint playback-records-load-more">加载更多…</p>`;
+    return `<p class="playback-records-load-more">${progress}<br><span class="hint">加载更多…</span></p>`;
   }
-  return `<p class="playback-records-load-more"><button type="button" class="link-btn playback-load-more-btn">加载更多记录…</button></p>`;
+  return `<p class="playback-records-load-more">${progress}<br><button type="button" class="link-btn playback-load-more-btn">加载更多记录…</button></p>`;
 }
 
 function bindRecordListEvents(list) {
@@ -499,26 +531,37 @@ function bindRecordListEvents(list) {
     void loadMoreRecords();
   });
   list.querySelectorAll(".record-back-cameras").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
+    btn.addEventListener("click", async (e) => {
       e.preventDefault();
       playbackSelectedCameraSlug = null;
       playbackCameraListPinned = true;
-      renderPlaybackRecordsList(playbackRecordsCache);
+      playbackRecordsCache = [];
+      if (playbackCameraSummariesCache.has(cameraSummaryCacheKey())) {
+        const cached = playbackCameraSummariesCache.get(cameraSummaryCacheKey());
+        playbackCameraSummaries = cached.items;
+        playbackCameraSummaryMeta = cached.meta;
+        renderPlaybackRecordsList([]);
+      } else {
+        await loadRecords({ quiet: false });
+      }
     });
   });
   list.querySelectorAll(".camera-group-item").forEach((li) => {
-    const open = () => {
+    const open = async () => {
       const slug = li.dataset.cameraSlug;
       if (!slug) return;
+      playbackCameraScrollPositions.set(cameraSummaryCacheKey(), list.scrollTop);
       playbackSelectedCameraSlug = slug;
       playbackCameraListPinned = false;
-      renderPlaybackRecordsList(playbackRecordsCache);
+      playbackRecordsCache =
+        playbackRecordsByTier.get(cameraRecordCacheKey(playbackPoseTier, slug)) || [];
+      await loadRecords({ quiet: Boolean(playbackRecordsCache.length) });
     };
-    li.addEventListener("click", open);
+    li.addEventListener("click", () => void open());
     li.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
-        open();
+        void open();
       }
     });
   });
@@ -607,66 +650,56 @@ function renderPlaybackRecordsList(items) {
   closeRecordTagPicker();
   const list = $("#session-list");
   const countEl = $("#playback-record-count");
-  const filterQ = String($("#playback-record-filter")?.value || "")
-    .trim()
-    .toLowerCase();
-  const tagFilter = parseTagFilterQuery();
   const hasFilter = Boolean(
-    filterQ || tagFilter.length || playbackReviewFilterQuery() || playbackVerifiedFilterQuery()
+    playbackRecordSearchQuery() ||
+      parseTagFilterQuery().length ||
+      playbackReviewFilterQuery() ||
+      playbackVerifiedFilterQuery()
   );
-  if (!items.length) {
-    list.innerHTML = "<p class='hint playback-records-empty'>暂无记录（请先在采集页完成采集）</p>";
-    if (countEl) countEl.textContent = "";
-    playbackSelectedCameraSlug = null;
-    playbackCameraListPinned = false;
-    selectedPlaybackRecord = null;
-    updatePlaybackLoadButton();
-    return;
-  }
-  const filtered = filterPlaybackRecords(items);
-  const groups = buildRecordGroups(filtered);
   const keepId = selectedPlaybackRecord?.recordId || currentRecordId || "";
-  const keys = [...groups.keys()].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-
-  if (playbackSelectedCameraSlug && !groups.has(playbackSelectedCameraSlug)) {
-    playbackSelectedCameraSlug = null;
-  }
-  if (!playbackSelectedCameraSlug && keepId && !playbackCameraListPinned) {
-    const autoSlug = cameraSlugForRecordId(keepId);
-    if (autoSlug && groups.has(autoSlug)) playbackSelectedCameraSlug = autoSlug;
-  }
-
-  if (!filtered.length) {
-    list.innerHTML = "<p class='hint playback-records-empty'>无匹配记录</p>";
-    if (countEl) countEl.textContent = hasFilter ? `0 / ${items.length} 条` : "";
-    bindRecordListEvents(list);
-    return;
-  }
 
   if (!playbackSelectedCameraSlug) {
+    const summaries = [...playbackCameraSummaries].sort((a, b) =>
+      String(a.camera_slug || "").localeCompare(String(b.camera_slug || ""), undefined, {
+        numeric: true,
+      })
+    );
     if (countEl) {
       const tierLabel = playbackPoseTier || "rtmpose-t";
-      const moreHint = playbackRecordsCountSuffix(tierLabel);
       countEl.textContent = hasFilter
-        ? `${tierLabel} · ${keys.length} 个机位 · 匹配 ${filtered.length} / ${items.length} 条${moreHint}`
-        : `${tierLabel} · ${keys.length} 个机位 · 共 ${items.length} 条${moreHint}`;
+        ? `${tierLabel} · 匹配 ${playbackCameraSummaryMeta.totalCameras} 个机位 · ${playbackCameraSummaryMeta.totalRecords} 条`
+        : `${tierLabel} · ${playbackCameraSummaryMeta.totalCameras} 个机位 · 共 ${playbackCameraSummaryMeta.totalRecords} 条`;
     }
-    list.innerHTML = `<ul class="camera-group-list">${keys
-      .map((key) => renderCameraGroupItem(key, groups.get(key)))
-      .join("")}</ul>${renderRecordsLoadMoreFooter()}`;
+    if (!summaries.length) {
+      list.innerHTML = `<p class='hint playback-records-empty'>${
+        hasFilter ? "无匹配记录" : "暂无记录（请先在采集页完成采集）"
+      }</p>`;
+      bindRecordListEvents(list);
+      return;
+    }
+    list.innerHTML = `<ul class="camera-group-list">${summaries
+      .map(renderCameraGroupItem)
+      .join("")}</ul>`;
     bindRecordListEvents(list);
+    const savedScroll = playbackCameraScrollPositions.get(cameraSummaryCacheKey()) || 0;
+    requestAnimationFrame(() => {
+      if (!playbackSelectedCameraSlug) list.scrollTop = savedScroll;
+    });
     return;
   }
 
-  const groupItems = groups.get(playbackSelectedCameraSlug) || [];
-  const title = groupItems[0]?.camera_label || playbackSelectedCameraSlug;
-  const groupReview = aggregateReviewStatus(groupItems);
-  const groupReviewPill = renderReviewPill(groupReview);
-  const rows = groupItems.map(renderRecordItem).join("");
+  const state = getTierLoadState(playbackPoseTier, playbackSelectedCameraSlug);
+  const summary = playbackCameraSummaries.find(
+    (item) => item.camera_slug === playbackSelectedCameraSlug
+  );
+  const title = summary?.camera_label || items[0]?.camera_label || playbackSelectedCameraSlug;
+  const groupReviewPill = renderReviewPill(
+    summary?.event_review_status || aggregateReviewStatus(items),
+    summary?.event_review_label
+  );
+  const rows = items.map(renderRecordItem).join("");
   if (countEl) {
-    countEl.textContent = hasFilter
-      ? `机位 ${title} · 匹配 ${groupItems.length} 条`
-      : `机位 ${title} · ${groupItems.length} 条`;
+    countEl.textContent = `机位 ${title} · ${hasFilter ? "匹配 " : ""}${state.total} 条`;
   }
   list.innerHTML = `
     <div class="record-camera-nav">
@@ -682,35 +715,98 @@ function renderPlaybackRecordsList(items) {
     ${
       rows
         ? `<ul class="session-list">${rows}</ul>${renderRecordsLoadMoreFooter()}`
-        : "<p class='hint playback-records-empty'>该机位下无匹配记录</p>"
+        : `<p class='hint playback-records-empty'>该机位下${
+            hasFilter ? "无匹配记录" : "暂无记录"
+          }</p>`
     }`;
   bindRecordListEvents(list);
   if (keepId) highlightPlaybackRecordInList(keepId);
 }
 
-/** 拉取单页记录；仅 offset=0 可带 sync=1 */
+function startPlaybackRecordsRequest() {
+  playbackRecordsRequestGeneration += 1;
+  playbackRecordsAbortController?.abort();
+  playbackRecordsAbortController = new AbortController();
+  return {
+    generation: playbackRecordsRequestGeneration,
+    signal: playbackRecordsAbortController.signal,
+  };
+}
+
+function isPlaybackRecordsRequestCurrent(generation, tier, cameraSlug, filterSignature) {
+  return (
+    generation === playbackRecordsRequestGeneration &&
+    tier === (playbackPoseTier || "rtmpose-t") &&
+    cameraSlug === (playbackSelectedCameraSlug || "") &&
+    filterSignature === playbackFilterSignature()
+  );
+}
+
+async function fetchRecordCameraSummaries({
+  poseTier = playbackPoseTier,
+  sync = false,
+  signal,
+} = {}) {
+  const params = appendPlaybackFilterQuery(
+    new URLSearchParams({ pose_tier: String(poseTier || "rtmpose-t").trim() })
+  );
+  if (sync) params.set("sync", "1");
+  const res = await fetch(`/api/record-cameras?${params}`, { signal });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || res.statusText || "加载机位列表失败");
+  }
+  const body = await res.json();
+  return {
+    items: Array.isArray(body.items) ? body.items : [],
+    totalCameras: Number(body.total_cameras || 0),
+    totalRecords: Number(body.total_records || 0),
+  };
+}
+
+/** 拉取当前机位的一页记录；仅 offset=0 可带 sync=1 */
 async function fetchRecordSummariesPage({
   poseTier = playbackPoseTier,
+  cameraSlug = playbackSelectedCameraSlug,
   offset = 0,
   limit = RECORD_LIST_PAGE_SIZE,
   sync = false,
+  signal,
 } = {}) {
   const tier = String(poseTier || "rtmpose-t").trim();
-  const syncQs = offset === 0 && sync ? "&sync=1" : "";
-  const res = await fetch(
-    `/api/records?summary=1&offset=${offset}&limit=${limit}&pose_tier=${encodeURIComponent(tier)}${syncQs}`
+  const params = appendPlaybackFilterQuery(
+    new URLSearchParams({
+      summary: "1",
+      page_meta: "1",
+      offset: String(offset),
+      limit: String(limit),
+      pose_tier: tier,
+      camera_slug: String(cameraSlug || "").trim(),
+    })
   );
+  if (offset === 0 && sync) params.set("sync", "1");
+  const res = await fetch(`/api/records?${params}`, { signal });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || res.statusText || "加载记录失败");
   }
-  const batch = await res.json();
-  return Array.isArray(batch) ? batch : [];
+  const body = await res.json();
+  return {
+    items: Array.isArray(body.items) ? body.items : [],
+    total: Number(body.total || 0),
+    hasMore: Boolean(body.has_more),
+    nextOffset: Number(body.next_offset || 0),
+  };
 }
 
-async function loadRecordsPage(tier, { sync = false, append = false } = {}) {
+async function loadRecordsPage(
+  tier,
+  cameraSlug,
+  { sync = false, append = false, generation, signal } = {}
+) {
   const key = String(tier || "rtmpose-t").trim();
-  const state = getTierLoadState(key);
+  const camera = String(cameraSlug || "").trim();
+  const state = getTierLoadState(key, camera);
   if (append && !state.hasMore) return state.items;
 
   const offset = append ? state.nextOffset : 0;
@@ -718,117 +814,194 @@ async function loadRecordsPage(tier, { sync = false, append = false } = {}) {
     state.items = [];
     state.nextOffset = 0;
     state.hasMore = true;
+    state.total = 0;
   }
 
-  const batch = await fetchRecordSummariesPage({
+  const page = await fetchRecordSummariesPage({
     poseTier: key,
+    cameraSlug: camera,
     offset,
     limit: RECORD_LIST_PAGE_SIZE,
     sync: !append && sync,
+    signal,
   });
+  if (
+    generation != null &&
+    !isPlaybackRecordsRequestCurrent(generation, key, camera, playbackFilterSignature())
+  ) {
+    return state.items;
+  }
 
-  if (append) state.items.push(...batch);
-  else state.items = batch;
-  state.nextOffset = state.items.length;
-  state.hasMore = batch.length >= RECORD_LIST_PAGE_SIZE;
-  playbackRecordsByTier.set(key, [...state.items]);
+  if (append) {
+    const seen = new Set(state.items.map((item) => item.record_id));
+    state.items.push(...page.items.filter((item) => !seen.has(item.record_id)));
+  } else {
+    state.items = page.items;
+  }
+  state.nextOffset = page.nextOffset;
+  state.hasMore = page.hasMore;
+  state.total = page.total;
+  playbackRecordsByTier.set(cameraRecordCacheKey(key, camera), [...state.items]);
   return state.items;
 }
 
 async function loadMoreRecords() {
   const tier = playbackPoseTier || "rtmpose-t";
-  const state = getTierLoadState(tier);
+  const camera = playbackSelectedCameraSlug || "";
+  if (!camera) return;
+  const filterSignature = playbackFilterSignature();
+  const state = getTierLoadState(tier, camera);
   if (!state.hasMore || state.loadingMore) return;
+  const { generation, signal } = startPlaybackRecordsRequest();
   state.loadingMore = true;
   renderPlaybackRecordsList(playbackRecordsCache);
   try {
-    const items = await loadRecordsPage(tier, { append: true });
+    const items = await loadRecordsPage(tier, camera, {
+      append: true,
+      generation,
+      signal,
+    });
+    if (!isPlaybackRecordsRequestCurrent(generation, tier, camera, filterSignature)) return;
     playbackRecordsCache = items;
-    await fetchKnownTags();
     renderPlaybackRecordsList(items);
   } catch (err) {
+    if (err?.name === "AbortError") return;
     const msg = err?.message ? `加载更多失败：${err.message}` : "加载更多失败";
     setPlaybackInfo(`❌ ${msg}`);
   } finally {
     state.loadingMore = false;
-    renderPlaybackRecordsList(playbackRecordsCache);
+    if (isPlaybackRecordsRequestCurrent(generation, tier, camera, filterSignature)) {
+      renderPlaybackRecordsList(playbackRecordsCache);
+    }
   }
 }
 
 async function loadRecords({ quiet = false, force = false } = {}) {
   const list = $("#session-list");
   const tier = playbackPoseTier || "rtmpose-t";
+  const camera = playbackSelectedCameraSlug || "";
+  const filterSignature = playbackFilterSignature();
+  const requestKey = camera
+    ? cameraRecordCacheKey(tier, camera)
+    : cameraSummaryCacheKey(tier);
 
-  if (!force) {
-    const cached = playbackRecordsByTier.get(tier);
-    if (cached?.length) {
-      playbackRecordsCache = cached;
-      await fetchKnownTags();
-      renderPlaybackRecordsList(playbackRecordsCache);
-      return;
-    }
+  if (force) resetTierLoadState(tier);
+  if (!force && !camera && playbackCameraSummariesCache.has(requestKey)) {
+    const cached = playbackCameraSummariesCache.get(requestKey);
+    playbackCameraSummaries = cached.items;
+    playbackCameraSummaryMeta = cached.meta;
+    playbackRecordsCache = [];
+    renderPlaybackRecordsList([]);
+    return;
+  }
+  if (!force && camera && playbackRecordsByTier.has(requestKey)) {
+    playbackRecordsCache = playbackRecordsByTier.get(requestKey) || [];
+    renderPlaybackRecordsList(playbackRecordsCache);
+    return;
   }
 
-  if (playbackRecordsLoadInflight.has(tier)) {
+  if (!force && playbackRecordsLoadInflight.has(requestKey)) {
     try {
-      await playbackRecordsLoadInflight.get(tier);
+      await playbackRecordsLoadInflight.get(requestKey);
     } catch {
       /* 由首次请求展示错误 */
-    }
-    if ((playbackPoseTier || "rtmpose-t") === tier) {
-      playbackRecordsCache = playbackRecordsByTier.get(tier) || [];
-      if (playbackRecordsCache.length) renderPlaybackRecordsList(playbackRecordsCache);
     }
     return;
   }
 
+  const { generation, signal } = startPlaybackRecordsRequest();
   const run = (async () => {
-    if (force) resetTierLoadState(tier);
-    if (!quiet && !playbackRecordsByTier.get(tier)?.length) {
-      if (list) list.innerHTML = "<p class='hint playback-records-empty'>加载记录中…</p>";
+    if (!quiet && list) {
+      list.innerHTML = `<p class='hint playback-records-empty'>${
+        camera ? "加载记录中…" : "加载机位列表中…"
+      }</p>`;
     }
-    const items = await loadRecordsPage(tier, { sync: Boolean(force), append: false });
-    if ((playbackPoseTier || "rtmpose-t") !== tier) return items;
+    if (!camera) {
+      const result = await fetchRecordCameraSummaries({
+        poseTier: tier,
+        sync: Boolean(force),
+        signal,
+      });
+      if (!isPlaybackRecordsRequestCurrent(generation, tier, "", filterSignature)) return [];
+      playbackCameraSummaries = result.items;
+      playbackCameraSummaryMeta = {
+        totalCameras: result.totalCameras,
+        totalRecords: result.totalRecords,
+      };
+      playbackCameraSummariesCache.set(requestKey, {
+        items: [...result.items],
+        meta: { ...playbackCameraSummaryMeta },
+      });
+      playbackRecordsCache = [];
+      renderPlaybackRecordsList([]);
+      await fetchKnownTags();
+      return [];
+    }
+
+    if (!playbackCameraSummariesCache.has(cameraSummaryCacheKey(tier))) {
+      const cameras = await fetchRecordCameraSummaries({
+        poseTier: tier,
+        sync: Boolean(force),
+        signal,
+      });
+      if (!isPlaybackRecordsRequestCurrent(generation, tier, camera, filterSignature)) return [];
+      playbackCameraSummaries = cameras.items;
+      playbackCameraSummaryMeta = {
+        totalCameras: cameras.totalCameras,
+        totalRecords: cameras.totalRecords,
+      };
+      playbackCameraSummariesCache.set(cameraSummaryCacheKey(tier), {
+        items: [...cameras.items],
+        meta: { ...playbackCameraSummaryMeta },
+      });
+    }
+    const items = await loadRecordsPage(tier, camera, {
+      sync: Boolean(force),
+      append: false,
+      generation,
+      signal,
+    });
+    if (!isPlaybackRecordsRequestCurrent(generation, tier, camera, filterSignature)) return items;
     playbackRecordsCache = items;
     await fetchKnownTags();
     renderPlaybackRecordsList(items);
     return items;
   })();
 
-  playbackRecordsLoadInflight.set(tier, run);
+  playbackRecordsLoadInflight.set(requestKey, run);
   try {
     await run;
   } catch (err) {
+    if (err?.name === "AbortError") return;
     const msg = err?.message ? `无法加载列表：${err.message}` : "无法加载列表";
-    if ((playbackPoseTier || "rtmpose-t") === tier && list) {
+    if (isPlaybackRecordsRequestCurrent(generation, tier, camera, filterSignature) && list) {
       list.innerHTML = `<p class='hint playback-records-empty'>${msg}</p>`;
     }
     throw err;
   } finally {
-    playbackRecordsLoadInflight.delete(tier);
+    playbackRecordsLoadInflight.delete(requestKey);
   }
 }
 
-/** 分页加载直至目标记录出现在当前模型层列表中 */
+/** 在目标记录所属机位内分页，直至记录出现 */
 async function ensurePlaybackRecordInList(recordId, tier = playbackPoseTier) {
   const rid = String(recordId || "").trim();
   const key = String(tier || playbackPoseTier || "rtmpose-t").trim();
   if (!rid) return false;
-
-  const hasRecord = () => (playbackRecordsByTier.get(key) || []).some((s) => s.record_id === rid);
+  const camera = cameraSlugFromRecordId(rid) || playbackSelectedCameraSlug || "";
+  if (!camera) return false;
+  playbackSelectedCameraSlug = camera;
+  const cacheKey = cameraRecordCacheKey(key, camera);
+  const hasRecord = () =>
+    (playbackRecordsByTier.get(cacheKey) || []).some((item) => item.record_id === rid);
   if (hasRecord()) return true;
-
-  const savedTier = playbackPoseTier;
   playbackPoseTier = key;
-  try {
-    while (getTierLoadState(key).hasMore) {
-      await loadMoreRecords();
-      if (hasRecord()) return true;
-    }
-    return hasRecord();
-  } finally {
-    playbackPoseTier = savedTier;
+  await loadRecords({ quiet: true });
+  while (getTierLoadState(key, camera).hasMore) {
+    await loadMoreRecords();
+    if (hasRecord()) return true;
   }
+  return hasRecord();
 }
 
 /**
@@ -897,12 +1070,15 @@ async function navigateToPlaybackRecord({
   playbackSelectedCameraSlug = slug || null;
   playbackCameraListPinned = false;
 
-  await loadRecords({ quiet: Boolean(playbackRecordsByTier.get(tier)?.length) });
+  await loadRecords({
+    quiet: playbackRecordsByTier.has(cameraRecordCacheKey(tier, slug)),
+  });
   const found = await ensurePlaybackRecordInList(rid, tier);
 
   playbackPoseTier = tier;
   if (tierSel) tierSel.value = tier;
-  playbackRecordsCache = playbackRecordsByTier.get(tier) || [];
+  playbackRecordsCache =
+    playbackRecordsByTier.get(cameraRecordCacheKey(tier, playbackSelectedCameraSlug)) || [];
 
   if (slug) playbackSelectedCameraSlug = slug;
   else focusPlaybackCameraForRecord(rid);
@@ -964,7 +1140,9 @@ function initPlaybackRecordFilter() {
       playbackSelectedCameraSlug = null;
       playbackCameraListPinned = false;
       syncPlaybackAnnotationSourceOptionLabel();
-      await loadRecords({ quiet: playbackRecordsByTier.has(playbackPoseTier) });
+      await loadRecords({
+        quiet: playbackCameraSummariesCache.has(cameraSummaryCacheKey(playbackPoseTier)),
+      });
       if (currentRecordId && playbackAnnotationSource === "tier") {
         const annResult = await applyPlaybackRecordAnnotation(currentRecordId);
         redrawCurrentFrame();
@@ -974,12 +1152,17 @@ function initPlaybackRecordFilter() {
       }
     });
   }
+  const reloadForFilterChange = () => {
+    selectedPlaybackRecord = null;
+    updatePlaybackLoadButton();
+    void loadRecords({ quiet: false });
+  };
   if (input && !input.dataset.bound) {
     input.dataset.bound = "1";
     let t = null;
     input.addEventListener("input", () => {
       if (t) clearTimeout(t);
-      t = setTimeout(() => renderPlaybackRecordsList(playbackRecordsCache), 200);
+      t = setTimeout(reloadForFilterChange, 250);
     });
   }
   if (tagInput && !tagInput.dataset.bound) {
@@ -987,7 +1170,7 @@ function initPlaybackRecordFilter() {
     let t = null;
     tagInput.addEventListener("input", () => {
       if (t) clearTimeout(t);
-      t = setTimeout(() => renderPlaybackRecordsList(playbackRecordsCache), 200);
+      t = setTimeout(reloadForFilterChange, 250);
     });
   }
   const reviewSel = $("#playback-review-status-filter");
@@ -995,7 +1178,7 @@ function initPlaybackRecordFilter() {
   const bindFilterSelect = (sel) => {
     if (!sel || sel.dataset.bound) return;
     sel.dataset.bound = "1";
-    sel.addEventListener("change", () => renderPlaybackRecordsList(playbackRecordsCache));
+    sel.addEventListener("change", reloadForFilterChange);
   };
   bindFilterSelect(reviewSel);
   bindFilterSelect(verifiedSel);
@@ -1246,20 +1429,27 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
     const tierOpt = annSrcSel?.querySelector('option[value="tier"]');
     if (tierOpt) tierOpt.textContent = `${recordTier} 模型标注`;
   }
-  if (!playbackRecordsByTier.get(playbackPoseTier)?.length) {
+  focusPlaybackCameraForRecord(recordId);
+  const recordListKey = cameraRecordCacheKey(
+    playbackPoseTier,
+    playbackSelectedCameraSlug
+  );
+  if (!playbackRecordsByTier.has(recordListKey)) {
     await loadRecords({ quiet: true });
   } else {
-    playbackRecordsCache = playbackRecordsByTier.get(playbackPoseTier) || [];
+    playbackRecordsCache = playbackRecordsByTier.get(recordListKey) || [];
   }
-  focusPlaybackCameraForRecord(recordId);
   renderPlaybackRecordsList(playbackRecordsCache);
   highlightPlaybackRecordInList(recordId);
   resetFrameFetchState();
+  const openGeneration = frameFetchGeneration;
   const manifestUrl = recordApiUrl(recordId, "/manifest.json");
-  const poseRes = await fetch(manifestUrl);
+  const poseRes = await fetch(manifestUrl, { signal: frameFetchController?.signal });
+  if (openGeneration !== frameFetchGeneration || recordId !== currentRecordId) return;
   if (!poseRes.ok) {
     const fallbackUrl = recordApiUrl(recordId, "/pose.json");
-    const fallback = await fetch(fallbackUrl);
+    const fallback = await fetch(fallbackUrl, { signal: frameFetchController?.signal });
+    if (openGeneration !== frameFetchGeneration || recordId !== currentRecordId) return;
     if (!fallback.ok) {
       throw new Error(
         `无法加载骨架记录（manifest ${poseRes.status} / pose ${fallback.status}）\n${manifestUrl}`
@@ -1273,16 +1463,19 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
     }
     poseData = await poseRes.json();
   }
-  await buildFrameIndex(recordId);
-  showPlaybackStageLoading(`【${displayName || recordId}】加载骨架…`);
-  await prefetchAllPlaybackChunksInBackground(recordId, (pct) => {
-    const msg = `【${displayName || recordId}】加载骨架 ${pct}%…`;
-    setPlaybackInfo(msg);
-    if (pct < 100) updatePlaybackStageLoading(msg);
-    else hidePlaybackStageLoading();
-  });
-  const annResult = await applyPlaybackRecordAnnotation(recordId);
+  showPlaybackStageLoading(`【${displayName || recordId}】加载回放…`);
+  const timelinePromise = buildFrameIndex(recordId, { reset: false });
+  const annotationPromise = applyPlaybackRecordAnnotation(recordId);
+  const initialFramesPromise = timelinePromise.then(() => prefetchInitialPlaybackChunks());
+  const videoPromise = prepareAndLoadRecordVideo(recordId, displayName || recordId);
+  await timelinePromise;
+  if (openGeneration !== frameFetchGeneration || recordId !== currentRecordId) return;
+  const annResult = await annotationPromise;
+  if (openGeneration !== frameFetchGeneration || recordId !== currentRecordId) return;
   const eventsPromise = loadPlaybackEvents(recordId);
+  const [videoResult] = await Promise.all([videoPromise, initialFramesPromise]);
+  if (openGeneration !== frameFetchGeneration || recordId !== currentRecordId) return;
+  hidePlaybackStageLoading();
   if (typeof loadPlaybackSkeletonFeatures === "function") {
     void loadPlaybackSkeletonFeatures(recordId);
   }
@@ -1301,7 +1494,6 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
   const storageHint = (poseData?.schema || 1) >= 2 ? " · Parquet" : "";
   const baseHint = `【${label}】${jsonFile}（${poseData.frame_count ?? 0} 帧${storageHint}）`;
 
-  const videoResult = await prepareAndLoadRecordVideo(recordId, displayName || recordId);
   const videoLoaded = !!videoResult.loaded;
   const usedOriginalVideo = !!videoResult.usedOriginal;
   await eventsPromise;
