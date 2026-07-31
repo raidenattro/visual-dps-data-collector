@@ -202,31 +202,48 @@ def refresh_record_summary(record_id: str, paths: AppPaths | None = None) -> boo
 def list_record_summaries(
     *,
     pose_tier: str | None = None,
-    camera_slug: str | None = None,
-    search_query: str | None = None,
     offset: int = 0,
     limit: int = 0,
     allowed_ids: set[str] | None = None,
     review_status: str | None = None,
     has_verified: bool | None = None,
 ) -> list[dict[str, Any]]:
-    """从索引读取列表摘要（稳定按 source_mtime 倒序、record_id 升序）。"""
+    """从索引读取列表摘要（按 source_mtime 倒序）。"""
     init_data_store()
     sql = "SELECT summary_json FROM record_index"
-    clauses, params = _record_summary_filter_sql(
-        pose_tier=pose_tier,
-        camera_slug=camera_slug,
-        search_query=search_query,
-        allowed_ids=allowed_ids,
-        review_status=review_status,
-        has_verified=has_verified,
-    )
-    if allowed_ids is not None and not allowed_ids:
-        return []
+    params: list[Any] = []
+    clauses: list[str] = []
+
+    tier = str(pose_tier or "").strip().lower()
+    if tier:
+        clauses.append("pose_model_tier = ?")
+        params.append(tier)
+
+    review_filter = str(review_status or "").strip().lower()
+    if review_filter in REVIEW_STATUS_FILTERS:
+        if review_filter == "reviewed":
+            placeholders = ",".join("?" for _ in REVIEW_STATUS_TERMINAL)
+            clauses.append(f"event_review_status IN ({placeholders})")
+            params.extend(sorted(REVIEW_STATUS_TERMINAL))
+        else:
+            clauses.append("event_review_status = ?")
+            params.append(review_filter)
+
+    if has_verified is True:
+        clauses.append("event_review_verified_count > 0")
+    elif has_verified is False:
+        clauses.append("event_review_verified_count = 0")
+
+    if allowed_ids is not None:
+        if not allowed_ids:
+            return []
+        placeholders = ",".join("?" for _ in allowed_ids)
+        clauses.append(f"record_id IN ({placeholders})")
+        params.extend(sorted(allowed_ids))
 
     if clauses:
         sql += " WHERE " + " AND ".join(clauses)
-    sql += " ORDER BY source_mtime DESC, record_id ASC"
+    sql += " ORDER BY source_mtime DESC"
 
     lim = int(limit)
     off = max(0, int(offset))
@@ -253,153 +270,6 @@ def list_record_summaries(
             payload.setdefault("tags", [])
             items.append(payload)
     return items
-
-
-def _record_summary_filter_sql(
-    *,
-    pose_tier: str | None = None,
-    camera_slug: str | None = None,
-    search_query: str | None = None,
-    allowed_ids: set[str] | None = None,
-    review_status: str | None = None,
-    has_verified: bool | None = None,
-) -> tuple[list[str], list[Any]]:
-    clauses: list[str] = []
-    params: list[Any] = []
-
-    tier = str(pose_tier or "").strip().lower()
-    if tier:
-        clauses.append("pose_model_tier = ?")
-        params.append(tier)
-
-    camera = str(camera_slug or "").strip()
-    if camera:
-        clauses.append("camera_slug = ?")
-        params.append(camera)
-
-    query = str(search_query or "").strip()
-    if query:
-        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        pattern = f"%{escaped}%"
-        clauses.append(
-            "(record_id LIKE ? ESCAPE '\\' COLLATE NOCASE "
-            "OR summary_json LIKE ? ESCAPE '\\' COLLATE NOCASE "
-            "OR EXISTS ("
-            "SELECT 1 FROM record_tags rt "
-            "JOIN tags t ON t.id = rt.tag_id "
-            "WHERE rt.record_id = record_index.record_id "
-            "AND t.name LIKE ? ESCAPE '\\' COLLATE NOCASE"
-            "))"
-        )
-        params.extend((pattern, pattern, pattern))
-
-    review_filter = str(review_status or "").strip().lower()
-    if review_filter in REVIEW_STATUS_FILTERS:
-        if review_filter == "reviewed":
-            placeholders = ",".join("?" for _ in REVIEW_STATUS_TERMINAL)
-            clauses.append(f"event_review_status IN ({placeholders})")
-            params.extend(sorted(REVIEW_STATUS_TERMINAL))
-        else:
-            clauses.append("event_review_status = ?")
-            params.append(review_filter)
-
-    if has_verified is True:
-        clauses.append("event_review_verified_count > 0")
-    elif has_verified is False:
-        clauses.append("event_review_verified_count = 0")
-
-    if allowed_ids is not None and allowed_ids:
-        placeholders = ",".join("?" for _ in allowed_ids)
-        clauses.append(f"record_id IN ({placeholders})")
-        params.extend(sorted(allowed_ids))
-
-    return clauses, params
-
-
-def count_record_summaries(
-    *,
-    pose_tier: str | None = None,
-    camera_slug: str | None = None,
-    search_query: str | None = None,
-    allowed_ids: set[str] | None = None,
-    review_status: str | None = None,
-    has_verified: bool | None = None,
-) -> int:
-    """返回与列表完全相同筛选条件下的记录总数。"""
-    init_data_store()
-    if allowed_ids is not None and not allowed_ids:
-        return 0
-    clauses, params = _record_summary_filter_sql(
-        pose_tier=pose_tier,
-        camera_slug=camera_slug,
-        search_query=search_query,
-        allowed_ids=allowed_ids,
-        review_status=review_status,
-        has_verified=has_verified,
-    )
-    sql = "SELECT COUNT(*) AS count FROM record_index"
-    if clauses:
-        sql += " WHERE " + " AND ".join(clauses)
-    with get_db() as conn:
-        row = conn.execute(sql, params).fetchone()
-    return int(row["count"] or 0) if row else 0
-
-
-def list_record_camera_summaries(
-    *,
-    pose_tier: str | None = None,
-    search_query: str | None = None,
-    allowed_ids: set[str] | None = None,
-    review_status: str | None = None,
-    has_verified: bool | None = None,
-) -> dict[str, Any]:
-    """返回筛选后的全量机位摘要；不把记录详情传给浏览器。"""
-    from pose_store import event_review_status_label
-
-    items = list_record_summaries(
-        pose_tier=pose_tier,
-        search_query=search_query,
-        allowed_ids=allowed_ids,
-        review_status=review_status,
-        has_verified=has_verified,
-    )
-    groups: dict[str, dict[str, Any]] = {}
-    for item in items:
-        slug = str(item.get("camera_slug") or "").strip()
-        if not slug:
-            parts = [part for part in str(item.get("record_id") or "").split("/") if part]
-            slug = parts[1] if len(parts) >= 3 else (parts[0] if len(parts) >= 2 else "_ungrouped")
-        group = groups.setdefault(
-            slug,
-            {
-                "camera_slug": slug,
-                "camera_label": str(item.get("camera_label") or "").strip() or slug,
-                "record_count": 0,
-                "_statuses": [],
-            },
-        )
-        group["record_count"] += 1
-        group["_statuses"].append(str(item.get("event_review_status") or REVIEW_STATUS_NOT_STARTED))
-
-    result: list[dict[str, Any]] = []
-    for group in groups.values():
-        statuses = group.pop("_statuses")
-        if statuses and all(status in REVIEW_STATUS_TERMINAL for status in statuses):
-            status = REVIEW_STATUS_COMPLETED
-        elif statuses and all(status == REVIEW_STATUS_NOT_STARTED for status in statuses):
-            status = REVIEW_STATUS_NOT_STARTED
-        else:
-            status = REVIEW_STATUS_IN_PROGRESS
-        group["event_review_status"] = status
-        group["event_review_label"] = event_review_status_label(status)
-        result.append(group)
-
-    result.sort(key=lambda item: str(item["camera_slug"]))
-    return {
-        "items": result,
-        "total_cameras": len(result),
-        "total_records": sum(int(item["record_count"]) for item in result),
-    }
 
 
 def delete_record_index(record_id: str) -> None:

@@ -117,10 +117,8 @@ from api.record_service import (
     video_path_for_video_stem,
 )
 from record_index_store import (
-    count_record_summaries,
     delete_record_index,
     import_event_reviews_to_index,
-    list_record_camera_summaries,
     list_record_summaries,
     refresh_record_summary,
     maybe_sync_record_summaries,
@@ -552,14 +550,11 @@ def list_records(
     offset: int = 0,
     limit: int = 0,
     pose_tier: str = "",
-    camera_slug: str = "",
-    q: str = "",
     tags: str = "",
     review_status: str = "",
     has_verified: str = "",
     sync: str = "",
-    page_meta: bool = False,
-) -> list[dict[str, Any]] | dict[str, Any]:
+) -> list[dict[str, Any]]:
     """列出采集记录。pose_tier 过滤 rtmpose-t/s/m；tags 逗号分隔多标签（需全部匹配）。
 
     summary=1 时默认只读 data.db 索引；sync=1 且 offset=0 时强制与磁盘对齐（删除/迁移后刷新用）。
@@ -568,8 +563,6 @@ def list_records(
     paths = resolve_app_paths()
     paths.json_dir.mkdir(parents=True, exist_ok=True)
     tier_filter = str(pose_tier or "").strip().lower() or None
-    camera_filter = str(camera_slug or "").strip() or None
-    search_filter = str(q or "").strip() or None
     tag_filter = _parse_tags_query(tags)
     review_filter = str(review_status or "").strip().lower() or None
     verified_filter = _parse_has_verified_query(has_verified)
@@ -586,8 +579,6 @@ def list_records(
         allowed_ids = record_ids_with_all_tags(tag_filter) if tag_filter else None
         items = list_record_summaries(
             pose_tier=tier_filter,
-            camera_slug=camera_filter,
-            search_query=search_filter,
             offset=off,
             limit=lim,
             allowed_ids=allowed_ids,
@@ -595,22 +586,6 @@ def list_records(
             has_verified=verified_filter,
         )
         attach_tags_to_summaries(items)
-        if page_meta:
-            total = count_record_summaries(
-                pose_tier=tier_filter,
-                camera_slug=camera_filter,
-                search_query=search_filter,
-                allowed_ids=allowed_ids,
-                review_status=review_filter,
-                has_verified=verified_filter,
-            )
-            next_offset = off + len(items)
-            return {
-                "items": items,
-                "total": total,
-                "has_more": next_offset < total,
-                "next_offset": next_offset,
-            }
         return items
 
     locators = list(iter_active_records(paths.json_dir, pose_tier=tier_filter))
@@ -624,38 +599,6 @@ def list_records(
     items = [record_meta_for_list(loc) for loc in locators]
     attach_tags_to_summaries(items)
     return items
-
-
-@router.get("/api/record-cameras")
-def list_record_cameras(
-    pose_tier: str = "",
-    q: str = "",
-    tags: str = "",
-    review_status: str = "",
-    has_verified: str = "",
-    sync: str = "",
-) -> dict[str, Any]:
-    """返回当前筛选下的全量机位摘要，供回放一级滚动列表使用。"""
-    paths = resolve_app_paths()
-    paths.json_dir.mkdir(parents=True, exist_ok=True)
-    tier_filter = str(pose_tier or "").strip().lower() or None
-    tag_filter = _parse_tags_query(tags)
-    review_filter = str(review_status or "").strip().lower() or None
-    verified_filter = _parse_has_verified_query(has_verified)
-    maybe_sync_record_summaries(
-        paths,
-        tier_filter,
-        force=_parse_sync_query(sync),
-        offset=0,
-    )
-    allowed_ids = record_ids_with_all_tags(tag_filter) if tag_filter else None
-    return list_record_camera_summaries(
-        pose_tier=tier_filter,
-        search_query=str(q or "").strip() or None,
-        allowed_ids=allowed_ids,
-        review_status=review_filter,
-        has_verified=verified_filter,
-    )
 
 
 @router.post("/api/annotate/extract-frame")
