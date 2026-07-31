@@ -836,6 +836,8 @@ main:has(#panel-playback.active) {
   max-height: min(320px, 38vh);
   overflow-y: auto;
   overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   padding-right: 0.25rem;
   border: 1px solid #2a3441;
   border-radius: 8px;

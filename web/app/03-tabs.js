@@ -18,7 +18,12 @@ tabs.forEach((btn) => {
       if (typeof window.initAccuracyPanel === "function") window.initAccuracyPanel();
     }
     if (btn.dataset.tab === "playback") {
-      void loadRecords({ quiet: playbackRecordsByTier.has(playbackPoseTier || "rtmpose-t") });
+      const hasCache = playbackSelectedCameraSlug
+        ? playbackRecordsByTier.has(
+            cameraRecordCacheKey(playbackPoseTier, playbackSelectedCameraSlug)
+          )
+        : playbackCameraSummariesCache.has(cameraSummaryCacheKey(playbackPoseTier));
+      void loadRecords({ quiet: hasCache });
       restorePlaybackPanelUi();
     }
   });
