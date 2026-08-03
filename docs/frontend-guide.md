@@ -406,8 +406,10 @@ flowchart LR
 | `07-playback-stage.js` | 视频/Canvas DOM、尺寸监听 |
 | `08-event-review.js` | 标真、货框确认、PATCH 串行保存 |
 | `09-playback-events.js` | 事件列表、seek、与播放联动 |
-| `10-render-collision.js` | 骨架与货框绘制 |
+| `10-render-collision.js` | 骨架与货框绘制、进度条 UI、准确率标记 |
 | `11-playback-controls.js` | 播放按钮、快捷键、页面 init |
+| `12-event-review-workspace.js` | 复核模式、撤销/重试、身份导航、专注模式（全屏）、时间轴游标 |
+| `13-playback-skeleton-features.js` | 暂停时的骨骼特征参数面板 |
 
 ---
 

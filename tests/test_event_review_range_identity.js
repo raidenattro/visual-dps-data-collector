@@ -390,4 +390,95 @@ assert.deepEqual(
 );
 assert.equal(context.rangeAnnotTemplateSnapshot.personId, 1);
 
+// A multi-person first-frame template must remain two independent bindings
+// throughout the interval, including when raw P0/P1 swap between frames.
+context.normalizeReviewBindings = (bindings) =>
+  Array.from(bindings || [], (binding) => ({
+    ...binding,
+    confirmed_box_tokens: Array.from(binding.confirmed_box_tokens || []),
+  }));
+context.frameCache = new Map([
+  [
+    1,
+    {
+      frame_idx: 1,
+      persons: [
+        person(0, 10, [100, 100, 200, 300]),
+        person(1, 20, [400, 100, 500, 300]),
+      ],
+    },
+  ],
+  [
+    2,
+    {
+      frame_idx: 2,
+      persons: [
+        person(0, 20, [398, 100, 498, 300]),
+        person(1, 10, [102, 100, 202, 300]),
+      ],
+    },
+  ],
+]);
+context.resetStablePersonIdentityCache();
+const multiEvent = {
+  event_type: "collision",
+  frame_idx: 1,
+  source_frame_idx: 1,
+  box_tokens: ["Box_1012", "Box_2011"],
+  bindings: [
+    { person_id: 0, confirmed_box_tokens: ["Box_2011"] },
+    { person_id: 1, confirmed_box_tokens: ["Box_1012"] },
+  ],
+};
+context.getEventEffectiveBindings = (ev) => ev.bindings || [];
+context.getEventPersonId = () => null;
+context.getEventConfirmedBoxes = () => [];
+context.getFramePersonIds = (frameIdx) =>
+  Array.from(context.frameCache.get(frameIdx)?.persons || [], (item) => item.person_id);
+const multiTemplate = {
+  ev: multiEvent,
+  confirmed: [],
+  personId: null,
+  bindings: context.getRangeAnnotBindingsFromEvent(multiEvent, 1),
+};
+const multiCheck = context.validateRangeAnnotTemplate(multiTemplate, 1);
+assert.equal(multiCheck.ok, true);
+assert.equal(multiCheck.bindings.length, 2);
+const multiResolutions = Array.from(multiCheck.bindings, (binding) =>
+  context.resolveRangePersonAssignments(1, 2, binding.personId, new Map())
+);
+assert.deepEqual(
+  Array.from(multiResolutions[0].assignments, (item) => Number(item.personId)),
+  [0, 1]
+);
+assert.deepEqual(
+  Array.from(multiResolutions[1].assignments, (item) => Number(item.personId)),
+  [1, 0]
+);
+const multiPayload = context.buildRangeAnnotEventPayload(
+  { ...multiEvent, frame_idx: 2, source_frame_idx: 2 },
+  multiCheck,
+  multiResolutions.map((resolution) => resolution.assignments[1])
+);
+assert.equal(multiPayload.bindings.length, 2);
+assert.deepEqual(
+  Array.from(multiPayload.bindings, (binding) => [
+    Number(binding.person_id),
+    Array.from(binding.confirmed_box_tokens),
+  ]),
+  [
+    [1, ["Box_2011"]],
+    [0, ["Box_1012"]],
+  ]
+);
+assert.deepEqual(
+  Array.from(
+    context.savedRangePayloadMatches(
+      { verified_true: [{ frame_idx: 2, bindings: multiPayload.bindings }] },
+      [multiPayload]
+    )
+  ),
+  []
+);
+
 console.log("event review range identity tests passed");

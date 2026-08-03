@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>骨架采集与回放</title>
-  <link rel="stylesheet" href="style.css?v=68" />
+  <link rel="stylesheet" href="style.css?v=74" />
 </head>
 <body>
   <header>
@@ -559,11 +559,20 @@
               <a id="playback-export-xlsx" class="btn-link hidden" href="#" download>导出 Excel</a>
               <span id="time-label">0:00</span>
             </div>
-            <div class="seek-stack">
-              <div id="seek-event-markers" class="seek-event-markers" aria-hidden="true"></div>
-              <div class="seek-bar-wrap">
+            <div class="review-timeline" aria-label="复核时间轴">
+              <div class="review-timeline-track">
+                <div id="seek-event-markers" class="seek-event-markers" aria-label="算法事件标记"></div>
+                <div id="seek-review-markers" class="seek-review-markers" aria-label="人工复核标记"></div>
                 <div id="seek-accuracy-markers" class="seek-accuracy-markers" aria-hidden="true"></div>
-                <input type="range" id="seek-bar" min="0" max="1000" value="0" />
+                <div id="seek-current-frame-indicator" class="seek-current-frame-indicator" aria-hidden="true"></div>
+                <input type="range" id="seek-bar" min="0" max="1000" value="0" aria-label="播放进度" />
+              </div>
+              <div class="review-timeline-legend">
+                <span class="review-timeline-legend-item is-alarm">告警</span>
+                <span class="review-timeline-legend-item is-collision">碰撞</span>
+                <span class="review-timeline-legend-item is-verified">已标真</span>
+                <span class="review-timeline-legend-item is-attention">待确认</span>
+                <span id="review-timeline-summary" class="review-timeline-summary"></span>
               </div>
             </div>
           </div>
@@ -581,6 +590,10 @@
           <div id="playback-events-panel" class="playback-events-panel hidden">
             <div class="playback-events-head">
               <h2 class="playback-events-heading">事件复核</h2>
+              <div class="playback-events-head-actions">
+                <button type="button" id="event-review-focus-btn" class="btn-review-head btn-review-focus" aria-pressed="false" title="专注模式：全屏铺满，隐藏浏览器与站点导航（F）"><span class="btn-review-focus-icon" aria-hidden="true">⛶</span><span id="event-review-focus-label">专注模式</span></button>
+                <button type="button" id="event-review-shortcuts-btn" class="btn-review-head" title="快捷键帮助（F1）">? 快捷键</button>
+              </div>
               <div class="playback-events-toolbar">
                 <label class="event-filter-label">
                   队列
@@ -601,11 +614,39 @@
             <div id="event-review-dock" class="event-review-dock">
               <div class="event-review-dock-top">
                 <span id="event-review-position" class="event-review-position">—</span>
-                <span id="event-save-status" class="event-save-status hint" aria-live="polite"></span>
+                <div class="event-save-status-row">
+                  <span id="event-save-status" class="event-save-status hint" aria-live="polite"></span>
+                  <button type="button" id="event-save-retry-btn" class="event-save-retry-btn hidden">重试</button>
+                  <button type="button" id="event-review-undo-btn" class="event-review-undo-btn" title="撤销上一步（Ctrl+Z）" disabled>撤销</button>
+                </div>
               </div>
-              <div class="event-review-complete-bar">
-                <button type="button" id="event-review-complete-btn" class="btn-review-complete">标记复核完成</button>
+              <div class="event-review-mode-switch" role="tablist" aria-label="标注模式">
+                <button type="button" id="event-review-mode-frame-btn" class="event-review-mode-btn is-active" role="tab" aria-selected="true" data-review-mode="frame">单帧标注</button>
+                <button type="button" id="event-review-mode-range-btn" class="event-review-mode-btn" role="tab" aria-selected="false" data-review-mode="range">区间标注 <kbd>Tab</kbd></button>
               </div>
+              <details class="event-review-range-details event-review-range-details--prominent review-mode-range-only" open>
+                <summary>
+                  <span>区间标真</span>
+                  <span class="event-review-range-shortcuts" aria-label="区间标真快捷键">A 首帧 · D 尾帧 · R 执行</span>
+                </summary>
+                <div class="event-review-range-panel">
+                  <div class="event-review-range-bounds">
+                    <span id="event-range-start-label" class="event-range-bound">首帧：—</span>
+                    <span id="event-range-end-label" class="event-range-bound">尾帧：—</span>
+                  </div>
+                  <div class="event-review-range-actions">
+                    <button type="button" id="event-range-set-start-btn" class="btn-review-range-set" title="快捷键 A">当前帧 → 首帧 <kbd>A</kbd></button>
+                    <button type="button" id="event-range-set-end-btn" class="btn-review-range-set" title="快捷键 D">当前帧 → 尾帧 <kbd>D</kbd></button>
+                    <button type="button" id="event-range-clear-btn" class="btn-review-range-clear" title="快捷键 Shift+R">清除区间 <kbd>Shift+R</kbd></button>
+                  </div>
+                  <p id="event-range-hint" class="event-review-range-hint hint" aria-live="polite">
+                    按 A 设首帧、D 设尾帧，最后按 R 标真整个区间
+                  </p>
+                  <button type="button" id="event-range-apply-btn" class="btn-review-range-apply" title="快捷键 R" disabled>
+                    区间标真 <kbd>R</kbd>
+                  </button>
+                </div>
+              </details>
               <div class="event-review-dock-scroll">
               <div class="event-review-dock-block event-review-dock-block--summary">
               <div id="event-review-current" class="event-review-current">
@@ -619,15 +660,32 @@
                 </div>
 
                 <section class="event-review-section event-review-section--person">
+                  <div id="event-review-anomaly-toolbar" class="event-review-identity-bar hidden" role="status">
+                    <span class="event-review-identity-state">
+                      <span class="event-review-identity-dot" aria-hidden="true"></span>
+                      <span id="event-review-identity-title" class="event-review-identity-title">身份待确认</span>
+                    </span>
+                    <span class="event-review-identity-note">区间跟踪遇到身份切换，请选择人物后继续</span>
+                    <button type="button" id="event-review-anomaly-jump-btn" title="跳转到待确认的那一帧">跳转</button>
+                  </div>
                   <div id="event-review-person-select" class="event-review-person-select hidden">
-                    <span class="event-review-section-title">人员 person_id</span>
-                    <div id="event-review-person-options" class="event-review-person-options" role="radiogroup" aria-label="选择碰撞人员 person_id"></div>
+                    <div class="event-review-person-toolbar">
+                      <span class="event-review-section-title">人员 — 货框配对</span>
+                      <span id="event-review-person-progress" class="event-review-person-progress"></span>
+                      <button type="button" id="event-review-person-cycle-btn" class="event-review-person-cycle-btn hidden" title="快捷键 Alt">切换 <kbd>Alt</kbd></button>
+                    </div>
+                    <div id="event-review-person-options" class="event-review-person-options" role="radiogroup" aria-label="选择当前要分配货框的人员"></div>
+                    <ol class="event-review-person-steps" aria-hidden="true">
+                      <li>选人物</li>
+                      <li>点画面货框</li>
+                      <li>按 Y 保存</li>
+                    </ol>
                   </div>
                   <p id="event-review-person-hint" class="event-review-person-hint hint" aria-live="polite"></p>
                 </section>
               </div>
               </div>
-              <div class="event-review-dock-block event-review-dock-block--transport">
+              <div class="event-review-dock-block event-review-dock-block--transport review-mode-frame-only">
               <div class="event-review-actions event-review-actions--primary">
                 <button type="button" id="event-prev-btn" class="btn-review-nav" title="快捷键 ↑">‹ 上一条</button>
                 <button type="button" id="event-skip-next-btn" class="btn-review-skip" title="快捷键 N">下一条 ›</button>
@@ -636,26 +694,9 @@
               </div>
               </div>
               <div class="event-review-dock-block event-review-dock-block--extras">
-              <details class="event-review-range-details">
-                <summary>区间增强标真</summary>
-                <div class="event-review-range-panel">
-                  <div class="event-review-range-bounds">
-                    <span id="event-range-start-label" class="event-range-bound">首帧：—</span>
-                    <span id="event-range-end-label" class="event-range-bound">尾帧：—</span>
-                  </div>
-                  <div class="event-review-range-actions">
-                    <button type="button" id="event-range-set-start-btn" class="btn-review-range-set">当前帧 → 首帧</button>
-                    <button type="button" id="event-range-set-end-btn" class="btn-review-range-set">当前帧 → 尾帧</button>
-                    <button type="button" id="event-range-clear-btn" class="btn-review-range-clear">清除区间</button>
-                  </div>
-                  <p id="event-range-hint" class="event-review-range-hint hint" aria-live="polite">
-                    在首帧选择 person_id 与货框，设置尾帧后一键标真区间内全部帧
-                  </p>
-                  <button type="button" id="event-range-apply-btn" class="btn-review-range-apply" disabled>
-                    区间标真
-                  </button>
-                </div>
-              </details>
+              <div class="event-review-complete-bar">
+                <button type="button" id="event-review-complete-btn" class="btn-review-complete">标记复核完成</button>
+              </div>
               <details class="event-review-bulk-details">
                 <summary>批量操作</summary>
                 <div class="event-review-actions event-review-actions--bulk">
@@ -663,12 +704,16 @@
                   <button type="button" id="event-unmark-all-btn" class="btn-review-bulk-unmark">全部取消标真</button>
                 </div>
               </details>
-              <p class="event-review-kbd-hint">Y 标真 · ←→ 逐帧 · ↑↓ 切换事件 · 点击骨架选 person_id</p>
               </div>
               </div>
             </div>
             <details id="event-review-list-details" class="event-review-list-details">
               <summary id="event-review-list-summary">逐帧复核列表</summary>
+              <div class="event-review-window-toolbar">
+                <button type="button" id="event-review-window-prev-btn">上一批</button>
+                <span id="event-review-window-status" class="hint">—</span>
+                <button type="button" id="event-review-window-next-btn">下一批</button>
+              </div>
               <div class="event-review-table-wrap" id="event-review-list-scroll">
                 <table class="event-review-table">
                   <thead>
@@ -690,6 +735,42 @@
     </section>
   </main>
 
+  <dialog id="event-review-shortcuts-dialog" class="event-review-shortcuts-dialog">
+    <form method="dialog" class="event-review-shortcuts-card">
+      <div class="event-review-shortcuts-head">
+        <div><h2>复核快捷键</h2><p>输入框聚焦时不会触发页面快捷键</p></div>
+        <button value="close" aria-label="关闭快捷键帮助">×</button>
+      </div>
+      <div class="event-review-shortcuts-grid">
+        <span>切换单帧 / 区间模式</span><kbd>Tab</kbd>
+        <span>切换人物</span><kbd>Alt</kbd>
+        <span>标真 / 取消当前帧</span><kbd>Y / U</kbd>
+        <span>区间首帧 / 尾帧</span><kbd>A / D</kbd>
+        <span>执行 / 清除区间</span><kbd>R / Shift+R</kbd>
+        <span>播放 / 暂停</span><kbd>Space</kbd>
+        <span>前后 1 帧</span><kbd>← / →</kbd>
+        <span>前后 10 帧</span><kbd>Ctrl+← / Ctrl+→</kbd>
+        <span>首帧 / 尾帧</span><kbd>Home / End</kbd>
+        <span>跳转到帧</span><kbd>G</kbd>
+        <span>专注模式（全屏）</span><kbd>F</kbd>
+        <span>撤销</span><kbd>Ctrl+Z</kbd>
+        <span>打开帮助</span><kbd>F1</kbd>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="review-confirm-dialog" class="review-confirm-dialog">
+    <form method="dialog" class="review-confirm-card">
+      <h2 id="review-confirm-title">确认操作</h2>
+      <div id="review-confirm-body" class="review-confirm-body"></div>
+      <!-- 确认按钮排在最前，Enter 的隐式提交才会落到它上面；视觉顺序由 CSS row-reverse 还原 -->
+      <div class="review-confirm-actions">
+        <button value="ok" class="review-confirm-ok" autofocus>确认执行 <kbd>Enter</kbd></button>
+        <button value="cancel" class="review-confirm-cancel">取消 <kbd>Esc</kbd></button>
+      </div>
+    </form>
+  </dialog>
+
   <script src="fieldTips.js"></script>
   <script src="previewLayout.js"></script>
   <script src="collectVideoPreview.js"></script>
@@ -697,19 +778,20 @@
   <script src="annotateGeometry.js"></script>
   <script src="annotateVisualMode.js?v=2"></script>
   <!-- 回放/采集主逻辑（由 app.monolith.js 拆分，按依赖顺序加载） -->
-  <script src="app/00-core.js?v=73"></script>
+  <script src="app/00-core.js?v=74"></script>
   <script src="app/01-layout-frames.js?v=54"></script>
   <script src="app/02-playback-selection.js?v=35"></script>
   <script src="app/03-tabs.js?v=37"></script>
   <script src="app/04-collision-config.js?v=35"></script>
   <script src="app/05-collect.js?v=42"></script>
   <script src="app/06-records.js?v=57"></script>
-  <script src="app/07-playback-stage.js?v=71"></script>
-  <script src="app/08-event-review.js?v=94"></script>
-  <script src="app/08-event-review-range.js?v=12"></script>
-  <script src="app/09-playback-events.js?v=99"></script>
-  <script src="app/10-render-collision.js?v=116"></script>
-  <script src="app/11-playback-controls.js?v=98"></script>
+  <script src="app/07-playback-stage.js?v=72"></script>
+  <script src="app/08-event-review.js?v=102"></script>
+  <script src="app/08-event-review-range.js?v=18"></script>
+  <script src="app/09-playback-events.js?v=100"></script>
+  <script src="app/10-render-collision.js?v=119"></script>
+  <script src="app/11-playback-controls.js?v=102"></script>
+  <script src="app/12-event-review-workspace.js?v=4"></script>
   <script src="app/13-playback-skeleton-features.js?v=9"></script>
   <script src="annotate.js?v=17"></script>
   <script src="accuracy.js?v=14"></script>

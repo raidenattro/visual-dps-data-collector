@@ -2,8 +2,11 @@
 
 /** 仅身份变化点/低置信度点需要人工确认；稳定的多人区间自动跟踪 */
 const rangeAnnotManualPersonByFrame = new Map();
+/** 多人区间中，每个稳定人物拥有独立的人工身份锚点。 */
+const rangeAnnotManualPersonByBinding = new Map();
 let rangeAnnotAwaitingPersonFrame = null;
 let rangeAnnotSuggestedPersonId = null;
+let rangeAnnotAwaitingBindingKey = null;
 let rangeAnnotReviewResumeTimer = null;
 
 /** 所有视频共用的稳定人物身份缓存：人物 A/B 与当帧 raw P0/P1 分离。 */
@@ -38,13 +41,109 @@ function clearRangeAnnotBounds() {
   rangeAnnotEndFrame = null;
   rangeAnnotTemplateSnapshot = null;
   rangeAnnotManualPersonByFrame.clear();
+  rangeAnnotManualPersonByBinding.clear();
   rangeAnnotAwaitingPersonFrame = null;
   rangeAnnotSuggestedPersonId = null;
+  rangeAnnotAwaitingBindingKey = null;
   if (rangeAnnotReviewResumeTimer) {
     clearTimeout(rangeAnnotReviewResumeTimer);
     rangeAnnotReviewResumeTimer = null;
   }
   updateRangeAnnotUi();
+}
+
+function cloneRangeAnnotBindings(bindings) {
+  return (Array.isArray(bindings) ? bindings : [])
+    .map((binding) => {
+      const personValue = binding?.personId ?? binding?.person_id;
+      const personId =
+        personValue == null || !Number.isFinite(Number(personValue))
+          ? null
+          : Number(personValue);
+      return {
+        ...binding,
+        confirmed_box_tokens: normalizeBoxTokenList(binding?.confirmed_box_tokens || []),
+        personId,
+      };
+    })
+    .filter((binding) => binding.confirmed_box_tokens.length);
+}
+
+function rangeAnnotBindingKey(binding, index = 0) {
+  if (binding?.stableId != null && Number.isFinite(Number(binding.stableId))) {
+    return `stable:${Number(binding.stableId)}`;
+  }
+  if (binding?.person_track_id != null && String(binding.person_track_id).trim()) {
+    return `track:${String(binding.person_track_id).trim()}`;
+  }
+  if (binding?.personId != null && Number.isFinite(Number(binding.personId))) {
+    return `person:${Number(binding.personId)}`;
+  }
+  return `slot:${Number(index) || 0}`;
+}
+
+function getRangeManualPersonMap(binding, index = 0) {
+  const key = rangeAnnotBindingKey(binding, index);
+  if (!rangeAnnotManualPersonByBinding.has(key)) {
+    rangeAnnotManualPersonByBinding.set(key, new Map());
+  }
+  return rangeAnnotManualPersonByBinding.get(key);
+}
+
+function getRangeAnnotBindingsFromEvent(ev, frameIdx) {
+  if (!ev) return [];
+  const fi = parseInt(frameIdx ?? ev.frame_idx, 10) || 0;
+  let bindings =
+    typeof getEventEffectiveBindings === "function"
+      ? getEventEffectiveBindings(ev)
+      : Array.isArray(ev.bindings)
+        ? ev.bindings
+        : [];
+  if (!bindings.length) {
+    const confirmed = normalizeBoxTokenList(getEventConfirmedBoxes(ev));
+    const personId = getEventPersonId(ev);
+    if (confirmed.length) {
+      bindings = [{
+        confirmed_box_tokens: confirmed,
+        ...(personId != null ? { person_id: Number(personId) } : {}),
+      }];
+    }
+  }
+  const normalizedBindings =
+    typeof normalizeReviewBindings === "function"
+      ? normalizeReviewBindings(bindings)
+      : cloneRangeAnnotBindings(bindings);
+  return normalizedBindings.map((binding, index) => {
+    const personId =
+      binding.person_id == null || !Number.isFinite(Number(binding.person_id))
+        ? null
+        : Number(binding.person_id);
+    const stable =
+      personId != null && typeof getStablePersonDisplayInfoByRawId === "function"
+        ? getStablePersonDisplayInfoByRawId(fi, personId)
+        : null;
+    return {
+      confirmed_box_tokens: normalizeBoxTokenList(binding.confirmed_box_tokens),
+      personId,
+      person_track_id:
+        binding.person_track_id != null && String(binding.person_track_id).trim()
+          ? String(binding.person_track_id).trim()
+          : personId != null
+            ? getPersonTrackIdAtFrame(fi, personId)
+            : null,
+      stableId: stable?.stableId ?? index,
+      stableLabel: stable?.stableLabel ?? stablePersonLabel(index),
+    };
+  });
+}
+
+function rangeAnnotBindingsSummary(bindings) {
+  return cloneRangeAnnotBindings(bindings)
+    .map((binding, index) => {
+      const label = binding.stableLabel || stablePersonLabel(index);
+      return `人物 ${label} → ${formatConfirmedBoxes(binding.confirmed_box_tokens)}`;
+    })
+    .join(" · ");
 }
 
 /**
@@ -89,10 +188,12 @@ function refreshRangeAnnotTemplateSnapshot({ force = false } = {}) {
   if (personId == null && personIds.length === 1) {
     personId = personIds[0];
   }
+  const bindings = getRangeAnnotBindingsFromEvent(template.ev, fi);
   rangeAnnotTemplateSnapshot = {
     frameIdx: fi,
     confirmed,
     personId: personId != null ? Number(personId) : null,
+    bindings: cloneRangeAnnotBindings(bindings),
   };
 }
 
@@ -115,11 +216,14 @@ function updateRangeAnnotTemplateBoxesFromEvent(ev, tokens) {
     frameIdx: Number(rangeAnnotStartFrame),
     confirmed: [],
     personId: null,
+    bindings: [],
   };
+  const bindings = getRangeAnnotBindingsFromEvent(ev, rangeAnnotStartFrame);
   rangeAnnotTemplateSnapshot = {
     ...existing,
     frameIdx: Number(rangeAnnotStartFrame),
     confirmed: normalizeBoxTokenList(tokens),
+    bindings: cloneRangeAnnotBindings(bindings),
   };
 }
 
@@ -133,6 +237,7 @@ function updateRangeAnnotTemplatePersonFromEvent(ev, personId) {
     frameIdx: Number(rangeAnnotStartFrame),
     confirmed: [],
     personId: null,
+    bindings: [],
   };
   const normalized =
     personId == null || personId === "" || !Number.isFinite(Number(personId))
@@ -142,6 +247,9 @@ function updateRangeAnnotTemplatePersonFromEvent(ev, personId) {
     ...existing,
     frameIdx: Number(rangeAnnotStartFrame),
     personId: normalized,
+    bindings: cloneRangeAnnotBindings(
+      getRangeAnnotBindingsFromEvent(ev, rangeAnnotStartFrame)
+    ),
   };
 }
 
@@ -157,6 +265,7 @@ function getRangeAnnotTemplateForApply(startFrame) {
       ev: frameEvents[0] || null,
       confirmed: [...rangeAnnotTemplateSnapshot.confirmed],
       personId: rangeAnnotTemplateSnapshot.personId,
+      bindings: cloneRangeAnnotBindings(rangeAnnotTemplateSnapshot.bindings),
     };
   }
   return getRangeAnnotTemplate(fi);
@@ -797,10 +906,27 @@ function confirmRangePersonSelection(ev, personId) {
   ) {
     return false;
   }
-  rangeAnnotManualPersonByFrame.set(fi, normalized);
+  if (wasAwaitingConfirmation && rangeAnnotAwaitingBindingKey) {
+    const snapshotBindings = cloneRangeAnnotBindings(
+      rangeAnnotTemplateSnapshot?.bindings
+    );
+    const bindingIndex = snapshotBindings.findIndex(
+      (binding, index) =>
+        rangeAnnotBindingKey(binding, index) === rangeAnnotAwaitingBindingKey
+    );
+    const targetBinding = snapshotBindings[bindingIndex];
+    if (targetBinding) {
+      getRangeManualPersonMap(targetBinding, bindingIndex).set(fi, normalized);
+    } else {
+      rangeAnnotManualPersonByFrame.set(fi, normalized);
+    }
+  } else {
+    rangeAnnotManualPersonByFrame.set(fi, normalized);
+  }
   if (wasAwaitingConfirmation) {
     rangeAnnotAwaitingPersonFrame = null;
     rangeAnnotSuggestedPersonId = null;
+    rangeAnnotAwaitingBindingKey = null;
   }
   return wasAwaitingConfirmation;
 }
@@ -813,7 +939,11 @@ function continueRangeIdentityReviewAfterSelection() {
   }, 0);
 }
 
-async function focusRangePersonConfirmation(frameIdx, suggestedPersonId = null) {
+async function focusRangePersonConfirmation(
+  frameIdx,
+  suggestedPersonId = null,
+  bindingKey = null
+) {
   const fi = parseInt(frameIdx, 10) || 0;
   if (fi <= 0) return;
   rangeAnnotAwaitingPersonFrame = fi;
@@ -821,6 +951,7 @@ async function focusRangePersonConfirmation(frameIdx, suggestedPersonId = null) 
     suggestedPersonId == null || !Number.isFinite(Number(suggestedPersonId))
       ? null
       : Number(suggestedPersonId);
+  rangeAnnotAwaitingBindingKey = bindingKey || null;
 
   const ev = getEventsOnFrame(fi)[0] || null;
   if (ev && typeof seekToEvent === "function") {
@@ -844,6 +975,7 @@ function getRangeAnnotTemplate(startFrame) {
       ev: pinned,
       confirmed: getEventConfirmedBoxes(pinned),
       personId: getEventPersonId(pinned),
+      bindings: getRangeAnnotBindingsFromEvent(pinned, fi),
     };
   }
 
@@ -851,11 +983,21 @@ function getRangeAnnotTemplate(startFrame) {
     const confirmed = getEventConfirmedBoxes(ev);
     const personId = getEventPersonId(ev);
     if (confirmed.length || personId != null) {
-      return { ev, confirmed, personId };
+      return {
+        ev,
+        confirmed,
+        personId,
+        bindings: getRangeAnnotBindingsFromEvent(ev, fi),
+      };
     }
   }
 
-  return { ev: frameEvents[0], confirmed: [], personId: null };
+  return {
+    ev: frameEvents[0],
+    confirmed: [],
+    personId: null,
+    bindings: getRangeAnnotBindingsFromEvent(frameEvents[0], fi),
+  };
 }
 
 function validateRangeAnnotTemplate(template, startFrame) {
@@ -863,25 +1005,72 @@ function validateRangeAnnotTemplate(template, startFrame) {
     return { ok: false, message: `首帧 ${startFrame} 缺少帧数据，无法区间标真` };
   }
 
-  let confirmed = normalizeBoxTokenList(template.confirmed);
-  if (!confirmed.length) {
+  let bindings = cloneRangeAnnotBindings(template.bindings);
+  if (!bindings.length) {
+    const confirmed = normalizeBoxTokenList(template.confirmed);
+    if (confirmed.length) {
+      bindings = [{
+        confirmed_box_tokens: confirmed,
+        personId:
+          template.personId == null || !Number.isFinite(Number(template.personId))
+            ? null
+            : Number(template.personId),
+        stableId: 0,
+        stableLabel: "A",
+      }];
+    }
+  }
+  if (!bindings.length) {
     return { ok: false, message: "请先在首帧人工点选确认货框" };
   }
 
   const personIds = getFramePersonIds(startFrame);
-  let personId = template.personId;
-  if (personId == null && personIds.length === 1) {
-    personId = personIds[0];
+  const normalizedBindings = [];
+  for (let index = 0; index < bindings.length; index += 1) {
+    const binding = bindings[index];
+    let personId = binding.personId;
+    if (personId == null && personIds.length === 1 && bindings.length === 1) {
+      personId = personIds[0];
+    }
+    if (personIds.length >= 2 && personId == null) {
+      return {
+        ok: false,
+        message: `首帧有多人，请先为人物 ${binding.stableLabel || stablePersonLabel(index)} 选择人员并配对货框`,
+      };
+    }
+    if (personId != null && personIds.length && !personIds.includes(Number(personId))) {
+      return {
+        ok: false,
+        message: `首帧人物 ${binding.stableLabel || stablePersonLabel(index)} 的 person_id ${personId} 不在当前画面中`,
+      };
+    }
+    normalizedBindings.push({
+      ...binding,
+      personId: personId != null ? Number(personId) : null,
+      person_track_id:
+        personId != null
+          ? getPersonTrackIdAtFrame(startFrame, personId) || binding.person_track_id || null
+          : null,
+    });
   }
-  if (personIds.length >= 2 && personId == null) {
-    return { ok: false, message: "首帧有多人，请先选择 person_id（侧栏或点击骨架）" };
+  const uniquePeople = new Set(
+    normalizedBindings
+      .filter((binding) => binding.personId != null)
+      .map((binding) => Number(binding.personId))
+  );
+  if (uniquePeople.size < normalizedBindings.filter((binding) => binding.personId != null).length) {
+    return { ok: false, message: "同一个人不能同时绑定两组货框，请检查首帧人物配对" };
   }
-  if (personId != null && personIds.length && !personIds.includes(Number(personId))) {
-    return { ok: false, message: `首帧 person_id ${personId} 不在当前画面人员列表中` };
-  }
-
-  const trackId = personId != null ? getPersonTrackIdAtFrame(startFrame, personId) : null;
-  return { ok: true, confirmed, personId, trackId };
+  const first = normalizedBindings[0];
+  return {
+    ok: true,
+    bindings: normalizedBindings,
+    confirmed: normalizeBoxTokenList(
+      normalizedBindings.flatMap((binding) => binding.confirmed_box_tokens)
+    ),
+    personId: normalizedBindings.length === 1 ? first.personId : null,
+    trackId: normalizedBindings.length === 1 ? first.person_track_id : null,
+  };
 }
 
 async function ensureFrameRangeLoaded(start, end) {
@@ -902,14 +1091,19 @@ function setRangeAnnotStartFromCurrent() {
   }
   rangeAnnotStartFrame = fi;
   rangeAnnotManualPersonByFrame.clear();
+  rangeAnnotManualPersonByBinding.clear();
   rangeAnnotAwaitingPersonFrame = null;
   rangeAnnotSuggestedPersonId = null;
+  rangeAnnotAwaitingBindingKey = null;
   if (rangeAnnotEndFrame != null && rangeAnnotEndFrame < rangeAnnotStartFrame) {
     rangeAnnotEndFrame = null;
   }
   refreshRangeAnnotTemplateSnapshot({ force: true });
   updateRangeAnnotUi();
-  setEventReviewSaveStatus(`已设首帧 ${fi} · 请在本帧选择 person_id 与货框`, "");
+  setEventReviewSaveStatus(
+    `已设首帧 ${fi} · 可在本帧依次为人物 A/B 配对各自货框`,
+    ""
+  );
 }
 
 function setRangeAnnotEndFromCurrent() {
@@ -925,13 +1119,16 @@ function setRangeAnnotEndFromCurrent() {
       rangeAnnotManualPersonByFrame.delete(frameIdx);
     }
   }
+  rangeAnnotManualPersonByBinding.clear();
   rangeAnnotAwaitingPersonFrame = null;
   rangeAnnotSuggestedPersonId = null;
+  rangeAnnotAwaitingBindingKey = null;
   if (rangeAnnotStartFrame != null && rangeAnnotEndFrame < rangeAnnotStartFrame) {
     const tmp = rangeAnnotStartFrame;
     rangeAnnotStartFrame = rangeAnnotEndFrame;
     rangeAnnotEndFrame = tmp;
     rangeAnnotManualPersonByFrame.clear();
+    rangeAnnotManualPersonByBinding.clear();
     rangeAnnotTemplateSnapshot = null;
     refreshRangeAnnotTemplateSnapshot({ force: true });
   }
@@ -939,10 +1136,15 @@ function setRangeAnnotEndFromCurrent() {
   const frozenBoxes = normalizeBoxTokenList(
     rangeAnnotTemplateSnapshot?.confirmed || []
   );
+  const frozenBindings = cloneRangeAnnotBindings(
+    rangeAnnotTemplateSnapshot?.bindings
+  );
   setEventReviewSaveStatus(
     `已设尾帧 ${fi}${
-      frozenBoxes.length
-        ? ` · 首帧货框已保留 ${formatConfirmedBoxes(frozenBoxes)}，尾帧无需重复选择`
+      frozenBindings.length
+        ? ` · 首帧配对已保留：${rangeAnnotBindingsSummary(frozenBindings)}，尾帧无需重复选择`
+        : frozenBoxes.length
+          ? ` · 首帧货框已保留 ${formatConfirmedBoxes(frozenBoxes)}，尾帧无需重复选择`
         : ""
     }`,
     ""
@@ -966,7 +1168,7 @@ function updateRangeAnnotUi() {
     endEl.classList.toggle("is-set", rangeAnnotEndFrame != null);
   }
 
-  let hint = "首帧选择取货人员与货框；设置尾帧后只复核身份变化点";
+  let hint = "按 A 设首帧、D 设尾帧；首帧选择人员与货框后按 R 执行";
   let canApply = false;
   let previewN = 0;
 
@@ -991,11 +1193,8 @@ function updateRangeAnnotUi() {
       const sample = collected.missingFrames.slice(0, 5).join(", ");
       hint = `区间帧数据不完整，缺少 ${sample}${collected.missingFrames.length > 5 ? " …" : ""}`;
     } else {
-      const personNote =
-        check.personId != null
-          ? ` · 人员 P${check.personId}${check.trackId != null ? `（track ${check.trackId}）` : ""}`
-          : "";
-      hint = `帧 ${bounds.start}–${bounds.end}（含首尾）· 将逐帧标真 ${previewN} 帧 · 货框 ${formatConfirmedBoxes(check.confirmed)}${personNote}`;
+      const bindingNote = rangeAnnotBindingsSummary(check.bindings);
+      hint = `帧 ${bounds.start}–${bounds.end}（含首尾）· 将逐帧标真 ${previewN} 帧 · ${bindingNote}`;
     }
   } else if (rangeAnnotStartFrame != null || rangeAnnotEndFrame != null) {
     hint = "请同时设置首帧与尾帧";
@@ -1008,22 +1207,46 @@ function updateRangeAnnotUi() {
   }
   if (applyBtn) {
     applyBtn.disabled = !canApply;
-    applyBtn.textContent = previewN > 0 ? `区间标真（${previewN} 帧）` : "区间标真";
+    applyBtn.textContent = previewN > 0 ? `区间标真（${previewN} 帧）· R` : "区间标真 · R";
+  }
+  if (typeof updateEventReviewModeUi === "function") {
+    updateEventReviewModeUi();
   }
 }
 
-function buildRangeAnnotEventPayload(ev, check, assignment) {
+function buildRangeAnnotEventPayload(ev, check, assignments) {
   const frameIdx = parseInt(ev?.frame_idx, 10) || 0;
+  const rows = Array.isArray(assignments) ? assignments : [];
+  const bindings = check.bindings.map((templateBinding, index) => {
+    const assignment = rows[index] || null;
+    const binding = {
+      confirmed_box_tokens: normalizeBoxTokenList(
+        templateBinding.confirmed_box_tokens
+      ),
+    };
+    if (assignment?.personId != null) {
+      binding.person_id = Number(assignment.personId);
+    }
+    if (assignment?.trackId != null && String(assignment.trackId).trim()) {
+      binding.person_track_id = String(assignment.trackId).trim();
+    }
+    return binding;
+  });
   const payload = {
     event_type: String(ev?.event_type || "frame").trim() || "frame",
     frame_idx: frameIdx,
     source_frame_idx: parseInt(ev?.source_frame_idx ?? frameIdx, 10) || frameIdx,
     box_tokens: normalizeBoxTokenList(ev?.box_tokens),
-    confirmed_box_tokens: [...check.confirmed],
+    confirmed_box_tokens: normalizeBoxTokenList(
+      bindings.flatMap((binding) => binding.confirmed_box_tokens)
+    ),
+    bindings,
   };
-  if (assignment?.personId != null) payload.person_id = Number(assignment.personId);
-  if (assignment?.trackId != null && String(assignment.trackId).trim()) {
-    payload.person_track_id = String(assignment.trackId).trim();
+  if (bindings.length === 1) {
+    if (bindings[0].person_id != null) payload.person_id = bindings[0].person_id;
+    if (bindings[0].person_track_id != null) {
+      payload.person_track_id = bindings[0].person_track_id;
+    }
   }
   return payload;
 }
@@ -1037,27 +1260,30 @@ function savedRangePayloadMatches(review, payloads) {
   const missingFrames = [];
   payloads.forEach((payload) => {
     const saved = byFrame.get(payload.frame_idx);
-    const expectedBoxes = normalizeBoxTokenList(payload.confirmed_box_tokens);
-    const bindings = normalizeReviewBindings(saved?.bindings);
-    const matched = bindings.some((binding) => {
-      if (
-        payload.person_track_id != null &&
-        String(binding.person_track_id ?? "") !== String(payload.person_track_id)
-      ) {
-        return false;
-      }
-      if (
-        payload.person_track_id == null &&
-        payload.person_id != null &&
-        Number(binding.person_id) !== Number(payload.person_id)
-      ) {
-        return false;
-      }
-      const actualBoxes = normalizeBoxTokenList(binding.confirmed_box_tokens);
-      return (
-        actualBoxes.length === expectedBoxes.length &&
-        expectedBoxes.every((token) => actualBoxes.includes(token))
-      );
+    const savedBindings = normalizeReviewBindings(saved?.bindings);
+    const expectedBindings = normalizeReviewBindings(payload.bindings);
+    const matched = expectedBindings.every((expected) => {
+      return savedBindings.some((actual) => {
+        if (
+          expected.person_track_id != null &&
+          String(actual.person_track_id ?? "") !== String(expected.person_track_id)
+        ) {
+          return false;
+        }
+        if (
+          expected.person_track_id == null &&
+          expected.person_id != null &&
+          Number(actual.person_id) !== Number(expected.person_id)
+        ) {
+          return false;
+        }
+        const expectedBoxes = normalizeBoxTokenList(expected.confirmed_box_tokens);
+        const actualBoxes = normalizeBoxTokenList(actual.confirmed_box_tokens);
+        return (
+          actualBoxes.length === expectedBoxes.length &&
+          expectedBoxes.every((token) => actualBoxes.includes(token))
+        );
+      });
     });
     if (!matched) missingFrames.push(payload.frame_idx);
   });
@@ -1111,6 +1337,12 @@ async function persistEventReviewRange(payloads, bounds, statusMessage) {
     } catch (err) {
       if (seq !== eventReviewSaveSeq) return false;
       if (recordId === currentRecordId) {
+        if (typeof setEventReviewRetryAction === "function") {
+          setEventReviewRetryAction(
+            () => persistEventReviewRange(payloads, bounds, statusMessage),
+            "重试区间保存"
+          );
+        }
         setEventReviewSaveStatus(err.message || "区间保存失败", "error");
       }
       return false;
@@ -1161,79 +1393,160 @@ async function applyRangeAnnotVerified() {
     return;
   }
 
-  const personResolution = resolveRangePersonAssignments(
-    bounds.start,
-    bounds.end,
-    check.personId
-  );
-  if (personResolution.confirmationFrames.length) {
-    const frameIdx = personResolution.confirmationFrames[0];
-    const suggestion = personResolution.confirmationSuggestions.find(
-      (item) => item.frameIdx === frameIdx
+  const resolutions = [];
+  for (let bindingIndex = 0; bindingIndex < check.bindings.length; bindingIndex += 1) {
+    const binding = check.bindings[bindingIndex];
+    const manualMap = getRangeManualPersonMap(binding, bindingIndex);
+    const resolution = resolveRangePersonAssignments(
+      bounds.start,
+      bounds.end,
+      binding.personId,
+      manualMap
     );
-    await focusRangePersonConfirmation(frameIdx, suggestion?.personId ?? null);
-    const suggestionStable =
-      suggestion?.personId != null
-        ? getStablePersonDisplayInfoByRawId(frameIdx, suggestion.personId)
-        : null;
-    const reasonLabel =
-      suggestion?.reason === "reacquire"
+    const bindingKey = rangeAnnotBindingKey(binding, bindingIndex);
+    const stableLabel = binding.stableLabel || stablePersonLabel(bindingIndex);
+    if (resolution.confirmationFrames.length) {
+      const frameIdx = resolution.confirmationFrames[0];
+      const suggestion = resolution.confirmationSuggestions.find(
+        (item) => item.frameIdx === frameIdx
+      );
+      await focusRangePersonConfirmation(
+        frameIdx,
+        suggestion?.personId ?? null,
+        bindingKey
+      );
+      const suggestionStable =
+        suggestion?.personId != null
+          ? getStablePersonDisplayInfoByRawId(frameIdx, suggestion.personId)
+          : null;
+      const reasonLabel =
+        suggestion?.reason === "reacquire"
           ? "人员消失后重新出现"
           : suggestion?.reason === "invalid_anchor"
             ? "原人工锚点已不在当前画面"
             : "空间连续性置信度较低";
-    const suggestionNote =
-      suggestion?.personId != null
-        ? `；空间连续性建议人物 ${suggestionStable?.stableLabel ?? "?"}（本帧 raw P${suggestion.personId}），请以画面为准`
-        : "；空间连续性不足，不能给出可靠建议";
-    setEventReviewSaveStatus(
-      `区间身份复核：帧 ${frameIdx} 检测到${reasonLabel}。整段尚未保存，请确认本帧${suggestionNote}；可按 1/2 快选人物 A/B`,
-      "error"
-    );
-    return;
+      const suggestionNote =
+        suggestion?.personId != null
+          ? `；建议本帧 raw P${suggestion.personId}（画面人物 ${suggestionStable?.stableLabel ?? "?"}）`
+          : "；当前无法给出可靠建议";
+      setEventReviewSaveStatus(
+        `区间身份复核：正在确认人物 ${stableLabel}。帧 ${frameIdx} 检测到${reasonLabel}${suggestionNote}；请选择画面中实际的同一个人，可按 1/2 快选`,
+        "error"
+      );
+      return;
+    }
+    if (resolution.ambiguousFrames.length) {
+      const sample = resolution.ambiguousFrames.slice(0, 5).join(", ");
+      setEventReviewSaveStatus(
+        `人物 ${stableLabel} 检测到身份歧义，整段未保存。请检查帧：${sample}`,
+        "error"
+      );
+      return;
+    }
+    resolutions.push({ binding, bindingIndex, bindingKey, stableLabel, resolution });
   }
-  if (personResolution.ambiguousFrames.length) {
-    const sample = personResolution.ambiguousFrames.slice(0, 5).join(", ");
-    setEventReviewSaveStatus(
-      `检测到人员身份歧义，已停止且未保存。请人工检查帧：${sample}`,
-      "error"
-    );
-    return;
-  }
-  const assignmentByFrame = new Map(
-    personResolution.assignments.map((assignment) => [assignment.frameIdx, assignment])
+
+  const assignmentsByBinding = resolutions.map(
+    ({ resolution }) =>
+      new Map(resolution.assignments.map((assignment) => [assignment.frameIdx, assignment]))
   );
-  const payloads = events.map((ev) =>
-    buildRangeAnnotEventPayload(
+
+  // 两个稳定人物不得在同一帧落到同一个 raw person_id；发生冲突时只复核冲突人物。
+  for (let frameIdx = bounds.start; frameIdx <= bounds.end; frameIdx += 1) {
+    const usedPersonIds = new Set();
+    for (let bindingIndex = 0; bindingIndex < resolutions.length; bindingIndex += 1) {
+      const assignment = assignmentsByBinding[bindingIndex].get(frameIdx);
+      if (assignment?.personId == null) continue;
+      const rawPersonId = Number(assignment.personId);
+      if (!usedPersonIds.has(rawPersonId)) {
+        usedPersonIds.add(rawPersonId);
+        continue;
+      }
+      const target = resolutions[bindingIndex];
+      const alternative = rangePersonCandidates(frameIdx).find(
+        (candidate) => !usedPersonIds.has(Number(candidate.personId))
+      );
+      await focusRangePersonConfirmation(
+        frameIdx,
+        alternative?.personId ?? null,
+        target.bindingKey
+      );
+      setEventReviewSaveStatus(
+        `区间身份复核：人物 ${target.stableLabel} 与另一人物在帧 ${frameIdx} 被映射到同一 person_id，整段未保存。请选择人物 ${target.stableLabel} 的正确骨架`,
+        "error"
+      );
+      return;
+    }
+  }
+
+  const payloads = events.map((ev) => {
+    const frameIdx = parseInt(ev.frame_idx, 10) || 0;
+    return buildRangeAnnotEventPayload(
       ev,
       check,
-      assignmentByFrame.get(parseInt(ev.frame_idx, 10) || 0)
-    )
-  );
+      assignmentsByBinding.map((byFrame) => byFrame.get(frameIdx) || null)
+    );
+  });
 
-  const personAssignmentSummary = summarizeRangePersonAssignments(
-    personResolution.assignments
-  );
-  const personNote = personAssignmentSummary
-    ? `\nraw person_id 逐帧映射：${personAssignmentSummary}`
+  const personNotes = resolutions
+    .map(({ stableLabel, resolution }) => {
+      const summary = summarizeRangePersonAssignments(resolution.assignments);
+      return summary ? `人物 ${stableLabel}：${summary}` : "";
+    })
+    .filter(Boolean);
+  const personNote = personNotes.length
+    ? `\nraw person_id 逐帧映射：\n${personNotes.join("\n")}`
     : "";
-  const missingPersonWarning = personResolution.missingPersonFrames.length
-    ? `\n人员提示：${personResolution.missingPersonFrames.length} 帧没有人体检测，将保留逐帧货框标真但不填写 person_id。`
+  const missingPersonCount = new Set(
+    resolutions.flatMap(({ resolution }) => resolution.missingPersonFrames)
+  ).size;
+  const missingPersonWarning = missingPersonCount
+    ? `\n人员提示：有 ${missingPersonCount} 帧缺少目标人体检测；这些帧仍保留每个人对应的货框标真，但缺失人员不写 person_id。`
     : "";
-  if (
-    !window.confirm(
-      `确定区间逐帧标真？\n\n帧范围：${bounds.start} – ${bounds.end}（含首尾）\n帧数：${expectedN}\n货框：${formatConfirmedBoxes(check.confirmed)}${personNote}\n\n人物 A/B 已按相邻帧人体框连续性稳定跟踪；raw P0/P1 重排已自动映射，低置信度点已经人工确认，track 仅作弱辅助。每帧仍写入该帧真实 person_id。${missingPersonWarning}`
-    )
-  ) {
-    return;
+  const bindingSummary = rangeAnnotBindingsSummary(check.bindings);
+  const confirmRows = [
+    ["帧范围", `${bounds.start} – ${bounds.end}（含首尾）`],
+    ["帧数", `${expectedN}`],
+    ["配对", bindingSummary],
+  ];
+  personNotes.forEach((note) => {
+    const [label, detail] = note.split("：");
+    confirmRows.push([`${label} raw 映射`, detail ?? note]);
+  });
+  const confirmNotes = [
+    "每个人物与自己的货框将分别写入 bindings。",
+    "人物 A/B 按相邻帧空间连续性独立跟踪，raw P0/P1 重排会逐帧映射。",
+    missingPersonCount
+      ? `有 ${missingPersonCount} 帧缺少目标人体检测；这些帧仍保留每个人对应的货框标真，但缺失人员不写 person_id。`
+      : "",
+  ];
+  const confirmed =
+    typeof openReviewConfirm === "function"
+      ? await openReviewConfirm({
+          title: "区间逐帧标真",
+          lead: "确认后将原子写入整段，写入前可再核对以下明细。",
+          rows: confirmRows,
+          notes: confirmNotes,
+          confirmText: "区间标真",
+        })
+      : window.confirm(
+          `确定区间逐帧标真？\n\n帧范围：${bounds.start} – ${bounds.end}（含首尾）\n帧数：${expectedN}\n配对：${bindingSummary}${personNote}\n\n每个人物与自己的货框将分别写入 bindings；人物 A/B 按相邻帧空间连续性独立跟踪，raw P0/P1 重排会逐帧映射。${missingPersonWarning}`
+        );
+  if (!confirmed) return;
+
+  if (typeof recordEventReviewUndo === "function") {
+    recordEventReviewUndo(`区间标真 ${bounds.start}–${bounds.end}`);
   }
-
   const ok = await persistEventReviewRange(
     payloads,
     bounds,
     `区间逐帧标真 ${expectedN} 帧 · 原子保存中…`
   );
   if (ok) {
-    updateRangeAnnotUi();
+    // 整段落盘成功后自动清空首尾帧与首帧模板，下一段直接按 A 开始，不用先按 Shift+R。
+    // 放在 persist 之后，保存状态里的「区间标真完成」提示不会被 updateRangeAnnotUi 覆盖。
+    clearRangeAnnotBounds();
+  } else if (typeof discardLastEventReviewUndo === "function") {
+    discardLastEventReviewUndo();
   }
 }

@@ -13,9 +13,11 @@
 | `06-records.js` | 回放记录列表、复核状态展示、打开记录 |
 | `07-playback-stage.js` | 视频 / canvas DOM、`bindStageLayoutWatch` |
 | `08-event-review.js` | 事件复核（标真、取消、保存、导航） |
+| `08-event-review-range.js` | 区间标真、逐帧人物身份连续性与人工确认 |
 | `09-playback-events.js` | 事件列表加载、seek、清除 |
 | `10-render-collision.js` | 骨架绘制、货框叠加、回放碰撞追踪 |
 | `11-playback-controls.js` | 播放控件事件绑定与页面 `init` |
+| `12-event-review-workspace.js` | 单帧/区间模式、撤销重试、异常导航、专注模式与长列表窗口 |
 
 完整单文件备份：`web/app.monolith.js`（拆分前快照）。
 

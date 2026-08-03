@@ -632,7 +632,7 @@ function bindRecordListEvents(list) {
           throw new Error(err.detail || res.statusText || "删除失败");
         }
         if (currentRecordId === rid) {
-          await prepareEventReviewRecordSwitch();
+          await prepareEventReviewRecordSwitch({ force: true });
           finishPlaybackSession();
           currentRecordId = null;
         }
@@ -1404,7 +1404,7 @@ async function startVideoPlayback(hintPrefix = "") {
 }
 
 async function openRecordReplay(recordId, displayName = "", jsonFileName = "", expectVideo = false) {
-  await prepareEventReviewRecordSwitch();
+  if (!(await prepareEventReviewRecordSwitch())) return;
   if (!pendingPlaybackAccuracyNav && typeof clearExternalPlaybackAccuracyOverlay === "function") {
     clearExternalPlaybackAccuracyOverlay();
   }

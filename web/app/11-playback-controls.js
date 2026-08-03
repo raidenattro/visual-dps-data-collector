@@ -3,7 +3,10 @@
 $("#playback-json").addEventListener("change", async (e) => {
   const file = e.target.files[0];
   if (!file) return;
-  await prepareEventReviewRecordSwitch();
+  if (!(await prepareEventReviewRecordSwitch())) {
+    e.target.value = "";
+    return;
+  }
   await cleanupPlaybackVideo();
   clearVideoElement();
   poseData = JSON.parse(await file.text());
@@ -414,6 +417,9 @@ function initEventReviewControls() {
   $("#event-mark-all-true-btn")?.addEventListener("click", () => void markAllEventsVerified(true));
   $("#event-unmark-all-btn")?.addEventListener("click", () => void markAllEventsVerified(false));
   $("#event-review-complete-btn")?.addEventListener("click", () => void markEventReviewCompleted());
+  $("#event-review-person-cycle-btn")?.addEventListener("click", () => {
+    cycleEventReviewPersonSelection();
+  });
 
   $("#event-range-set-start-btn")?.addEventListener("click", () => setRangeAnnotStartFromCurrent());
   $("#event-range-set-end-btn")?.addEventListener("click", () => setRangeAnnotEndFromCurrent());
@@ -489,11 +495,18 @@ function initEventReviewControls() {
     scheduleEventReviewListScrollHeight();
   });
 
+  let altPersonCycleArmed = false;
+  let altPersonCycleCancelled = false;
   document.addEventListener("keydown", (e) => {
     if (!panels.playback?.classList.contains("active")) return;
     const tag = (e.target?.tagName || "").toLowerCase();
     if (tag === "input" || tag === "textarea" || tag === "select" || e.target?.isContentEditable) {
       return;
+    }
+    // 模态弹窗（快捷键帮助 / 二次确认）打开时让位，避免 R、Y 等键穿透到底层页面。
+    if (document.querySelector("dialog[open]")) return;
+    if (altPersonCycleArmed && e.key !== "Alt") {
+      altPersonCycleCancelled = true;
     }
     if (
       (e.key === "1" || e.key === "2") &&
@@ -520,6 +533,56 @@ function initEventReviewControls() {
           return;
         }
       }
+    }
+    if (e.key === "Alt") {
+      e.preventDefault();
+      if (!e.repeat) {
+        altPersonCycleArmed = true;
+        altPersonCycleCancelled = false;
+      }
+      return;
+    }
+    if (
+      typeof isEventReviewRangeMode === "function" &&
+      isEventReviewRangeMode() &&
+      (e.key === "a" || e.key === "A") &&
+      !e.altKey &&
+      !e.ctrlKey &&
+      !e.metaKey
+    ) {
+      e.preventDefault();
+      if (!e.repeat) setRangeAnnotStartFromCurrent();
+      return;
+    }
+    if (
+      typeof isEventReviewRangeMode === "function" &&
+      isEventReviewRangeMode() &&
+      (e.key === "d" || e.key === "D") &&
+      !e.altKey &&
+      !e.ctrlKey &&
+      !e.metaKey
+    ) {
+      e.preventDefault();
+      if (!e.repeat) setRangeAnnotEndFromCurrent();
+      return;
+    }
+    if (
+      typeof isEventReviewRangeMode === "function" &&
+      isEventReviewRangeMode() &&
+      (e.key === "r" || e.key === "R") &&
+      !e.altKey &&
+      !e.ctrlKey &&
+      !e.metaKey
+    ) {
+      e.preventDefault();
+      if (e.repeat) return;
+      if (e.shiftKey) {
+        clearRangeAnnotBounds();
+        setEventReviewSaveStatus("已清除区间标真设置", "");
+      } else {
+        void applyRangeAnnotVerified();
+      }
+      return;
     }
     if (e.key === " " || e.code === "Space") {
       e.preventDefault();
@@ -559,13 +622,19 @@ function initEventReviewControls() {
       return;
     }
     if (!playbackEvents.length) return;
-    if (e.key === "y" || e.key === "Y") {
+    if (
+      (typeof isEventReviewRangeMode !== "function" || !isEventReviewRangeMode()) &&
+      (e.key === "y" || e.key === "Y")
+    ) {
       e.preventDefault();
       void confirmTrueAndNextFrame();
     } else if (e.key === "n" || e.key === "N" || e.key === "j" || e.key === "J") {
       e.preventDefault();
       void skipToNextEvent();
-    } else if (e.key === "u" || e.key === "U") {
+    } else if (
+      (typeof isEventReviewRangeMode !== "function" || !isEventReviewRangeMode()) &&
+      (e.key === "u" || e.key === "U")
+    ) {
       e.preventDefault();
       void unmarkTrueAndNextFrame();
     } else if (e.key === "ArrowDown") {
@@ -578,12 +647,24 @@ function initEventReviewControls() {
   });
 
   document.addEventListener("keyup", (e) => {
+    if (e.key === "Alt") {
+      const shouldCycle = altPersonCycleArmed && !altPersonCycleCancelled;
+      altPersonCycleArmed = false;
+      altPersonCycleCancelled = false;
+      if (shouldCycle && panels.playback?.classList.contains("active")) {
+        e.preventDefault();
+        cycleEventReviewPersonSelection();
+      }
+      return;
+    }
     if (!heldFrameNavigation || e.key !== heldFrameNavigation.key) return;
     stopHeldFrameNavigation({ finish: true });
   });
-  window.addEventListener("blur", () =>
-    stopHeldFrameNavigation({ finish: true })
-  );
+  window.addEventListener("blur", () => {
+    altPersonCycleArmed = false;
+    altPersonCycleCancelled = false;
+    stopHeldFrameNavigation({ finish: true });
+  });
 }
 
 videoEl.addEventListener("seeked", () => {

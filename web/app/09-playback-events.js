@@ -313,6 +313,7 @@ async function loadPlaybackEvents(recordId = null) {
   playbackEventLinkExact = false;
   verifiedTrueKeys.clear();
   pendingConfirmedBoxesByKey.clear();
+  pendingReviewBindingsByKey.clear();
   boxAnnotationTouchedKeys.clear();
   pendingPersonIdByKey.clear();
   personIdTouchedKeys.clear();
@@ -321,6 +322,9 @@ async function loadPlaybackEvents(recordId = null) {
   reviewBackKey = null;
   currentEventReviewStatus = "not_started";
   setEventReviewSaveStatus("");
+  if (typeof resetEventReviewWorkspaceState === "function") {
+    resetEventReviewWorkspaceState();
+  }
 
   if (recordId) {
     try {
@@ -673,8 +677,17 @@ function syncActiveEventFromPlaybackPosition(opts = {}) {
 
 function updateEventMarkerActiveState() {
   if (!eventMarkersEl) return;
-  eventMarkersEl.querySelectorAll(".event-marker").forEach((dot) => {
-    dot.classList.toggle("active", dot.dataset.eventKey === activeEventKey);
+  const activeBucket =
+    typeof reviewTimelineBucketByKey !== "undefined"
+      ? reviewTimelineBucketByKey.get(activeEventKey) || null
+      : null;
+  [eventMarkersEl, reviewMarkersEl].forEach((container) => {
+    if (!container) return;
+    container.querySelectorAll(".active").forEach((dot) => dot.classList.remove("active"));
+    if (!activeBucket) return;
+    container
+      .querySelector(`[data-bucket="${activeBucket}"]`)
+      ?.classList.add("active");
   });
 }
 
@@ -832,9 +845,13 @@ function clearPlaybackEvents() {
   clearPlaybackAuthorityFrameIdx();
   verifiedTrueKeys.clear();
   pendingConfirmedBoxesByKey.clear();
+  pendingReviewBindingsByKey.clear();
   boxAnnotationTouchedKeys.clear();
   pendingPersonIdByKey.clear();
   personIdTouchedKeys.clear();
+  if (typeof resetEventReviewWorkspaceState === "function") {
+    resetEventReviewWorkspaceState();
+  }
   if (typeof clearRangeAnnotBounds === "function") clearRangeAnnotBounds();
   eventReviewStatusEventKey = null;
   reviewBackKey = null;
@@ -843,6 +860,7 @@ function clearPlaybackEvents() {
     eventReviewSaveTimer = null;
   }
   if (eventMarkersEl) eventMarkersEl.innerHTML = "";
+  if (reviewMarkersEl) reviewMarkersEl.innerHTML = "";
   if (accuracyMarkersEl) accuracyMarkersEl.innerHTML = "";
   if (eventJumpList) eventJumpList.innerHTML = "";
   if (eventsPanel) eventsPanel.classList.add("hidden");

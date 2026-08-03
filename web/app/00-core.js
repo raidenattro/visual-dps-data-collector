@@ -38,6 +38,8 @@ let playbackEventLinkExact = false;
 const verifiedTrueKeys = new Set();
 /** 画面上点选的货框（按 Y 标真时一并写入 event_review.json） */
 const pendingConfirmedBoxesByKey = new Map();
+/** 同帧多人货框配对草稿：event key -> [{ person_id, confirmed_box_tokens }] */
+const pendingReviewBindingsByKey = new Map();
 /** 用户已手动点选/重置过 box 的事件（重置后不再自动回填检测框） */
 const boxAnnotationTouchedKeys = new Set();
 /** 画面上点选的 person_id（按 Y 标真时一并写入 event_review.json） */

@@ -618,6 +618,89 @@ class EventReviewConcurrencyTest(unittest.TestCase):
                 "physical-person-a",
             )
 
+    def test_range_write_preserves_two_people_with_separate_boxes(self) -> None:
+        """区间标真必须逐帧保存 A/B 两组 binding，而不是只保存当前人物。"""
+        pose_store.save_event_review(
+            self.locator,
+            [],
+            status=pose_store.REVIEW_STATUS_IN_PROGRESS,
+            event_total=30,
+        )
+        events = [
+            {
+                "event_type": "frame",
+                "frame_idx": 20,
+                "source_frame_idx": 20,
+                "box_tokens": ["Box_1012", "Box_2011"],
+                "bindings": [
+                    {
+                        "confirmed_box_tokens": ["Box_2011"],
+                        "person_id": 0,
+                        "person_track_id": "physical-person-a",
+                    },
+                    {
+                        "confirmed_box_tokens": ["Box_1012"],
+                        "person_id": 1,
+                        "person_track_id": "physical-person-b",
+                    },
+                ],
+            },
+            {
+                "event_type": "frame",
+                "frame_idx": 21,
+                "source_frame_idx": 21,
+                "box_tokens": ["Box_1012", "Box_2011"],
+                "bindings": [
+                    {
+                        "confirmed_box_tokens": ["Box_2011"],
+                        "person_id": 1,
+                        "person_track_id": "physical-person-a",
+                    },
+                    {
+                        "confirmed_box_tokens": ["Box_1012"],
+                        "person_id": 0,
+                        "person_track_id": "physical-person-b",
+                    },
+                ],
+            },
+        ]
+
+        with patch("record_index_store.refresh_record_summary"):
+            response = http_routes._patch_record_event_review_locked(
+                self.locator.record_id,
+                self.locator,
+                {
+                    "action": "set_range_verified",
+                    "range_start": 20,
+                    "range_end": 21,
+                    "events": events,
+                    "event_total": 30,
+                },
+            )
+
+        body = json.loads(response.body)
+        self.assertEqual(body["range_applied_count"], 2)
+        saved = json.loads(
+            pose_store.event_review_path(self.locator).read_text(encoding="utf-8")
+        )["verified_true"]
+        by_frame = {entry["frame_idx"]: entry for entry in saved}
+        self.assertEqual(len(by_frame[20]["bindings"]), 2)
+        self.assertEqual(len(by_frame[21]["bindings"]), 2)
+        self.assertEqual(
+            {
+                (
+                    binding["person_track_id"],
+                    binding["person_id"],
+                    tuple(binding["confirmed_box_tokens"]),
+                )
+                for binding in by_frame[21]["bindings"]
+            },
+            {
+                ("physical-person-a", 1, ("Box_2011",)),
+                ("physical-person-b", 0, ("Box_1012",)),
+            },
+        )
+
     def test_range_write_rejects_missing_frame_without_changing_file(self) -> None:
         pose_store.save_event_review(
             self.locator,

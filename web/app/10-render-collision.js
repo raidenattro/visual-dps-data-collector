@@ -57,6 +57,15 @@ function tokenInTokenMap(token, map) {
   return false;
 }
 
+function tokenValueInTokenMap(token, map) {
+  if (!token || !map?.size) return null;
+  for (const key of boxTokenLookupKeys(token)) {
+    const value = map.get(key);
+    if (value) return value;
+  }
+  return null;
+}
+
 /** 帧级复核：兼容旧版同帧逐货框条目，事件类型和货框不再拆成多条。 */
 function eventMatchesReviewEntry(ev, entry) {
   if (!ev || !entry) return false;
@@ -432,31 +441,41 @@ function frameIdxToSeekPct(frameIdx) {
   return Math.min(100, Math.max(0, (idx / frameByTime.length) * 100));
 }
 
+function bindAccuracySeekMarkerDelegation() {
+  if (!accuracyMarkersEl || accuracyMarkersEl.dataset.delegated === "1") return;
+  accuracyMarkersEl.dataset.delegated = "1";
+  accuracyMarkersEl.addEventListener("click", (event) => {
+    const dot = event.target.closest("[data-frame-idx]");
+    if (!dot) return;
+    event.stopPropagation();
+    const fi = parseInt(dot.dataset.frameIdx, 10) || 0;
+    const row = frameByTime.find((r) => Number(r.frameIdx) === fi);
+    if (row && typeof seekToTimestamp === "function") {
+      void seekToTimestamp(row.t, fi, { skipEventSync: false });
+    }
+  });
+}
+
 function renderAccuracySeekMarkers() {
   if (!accuracyMarkersEl) return;
+  bindAccuracySeekMarkerDelegation();
   accuracyMarkersEl.innerHTML = "";
 
   const { missFrames, falseAlarmFrames } = collectAccuracySeekMarkerFrames();
   if (!missFrames.length && !falseAlarmFrames.length) return;
 
+  const frag = document.createDocumentFragment();
   const appendDot = (frameIdx, kind, title) => {
     const pct = frameIdxToSeekPct(frameIdx);
     if (pct == null) return;
     const dot = document.createElement("button");
     dot.type = "button";
+    dot.tabIndex = -1;
     dot.className = `accuracy-marker ${kind}`;
     dot.dataset.frameIdx = String(frameIdx);
     dot.style.left = `${pct}%`;
     dot.title = title;
-    dot.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const fi = parseInt(dot.dataset.frameIdx, 10) || 0;
-      const row = frameByTime.find((r) => Number(r.frameIdx) === fi);
-      if (row && typeof seekToTimestamp === "function") {
-        void seekToTimestamp(row.t, fi, { skipEventSync: false });
-      }
-    });
-    accuracyMarkersEl.appendChild(dot);
+    frag.appendChild(dot);
   };
 
   missFrames.forEach((fi) => {
@@ -465,6 +484,7 @@ function renderAccuracySeekMarkers() {
   falseAlarmFrames.forEach((fi) => {
     appendDot(fi, "false-alarm", `误报 · 帧 ${fi}`);
   });
+  accuracyMarkersEl.appendChild(frag);
 }
 
 /** 当前帧漏报（黑描边）/ 误报（白描边）货框 token 集合 */
@@ -1287,6 +1307,9 @@ function updatePlaybackSeekBarUi(timeSec = null, frameIdx = null) {
       ? Math.max(0, Math.min(1000, progress * 1000))
       : Math.max(0, Math.min(1000, (t / videoEl.duration) * 1000))
   );
+  if (typeof updateReviewTimelineCursor === "function") {
+    updateReviewTimelineCursor(Number(seekBar.value) / 1000);
+  }
   if (timeLabel) timeLabel.textContent = formatTime(t);
 }
 
@@ -1354,12 +1377,37 @@ function getReviewBoxHighlightContext(frameIdx = null) {
 
   const confirmedByToken = new Map();
 
-  const addTokensToHighlight = (tokens) => {
+  const addTokensToHighlight = (tokens, accent = null) => {
     normalizeBoxTokenList(tokens).forEach((token) => {
       for (const key of boxTokenLookupKeys(token)) {
-        confirmedByToken.set(key, true);
+        confirmedByToken.set(key, accent || true);
       }
     });
+  };
+
+  const addEventBindingsToHighlight = (ev) => {
+    const bindings =
+      typeof getEventEffectiveBindings === "function"
+        ? getEventEffectiveBindings(ev)
+        : [];
+    if (bindings.length) {
+      bindings.forEach((binding, index) => {
+        const accent =
+          typeof getReviewPersonAccentStyle === "function"
+            ? getReviewPersonAccentStyle(
+                ev,
+                binding.person_id,
+                index,
+                binding
+              )
+            : null;
+        addTokensToHighlight(binding.confirmed_box_tokens, accent);
+      });
+      return;
+    }
+    const boxes =
+      typeof getEventConfirmedBoxes === "function" ? getEventConfirmedBoxes(ev) : [];
+    if (boxes.length) addTokensToHighlight(boxes);
   };
 
   // 复核高亮仅落在该帧真实标真事件上，不用连续范本段范围（避免相邻帧/事件误涂紫）
@@ -1372,9 +1420,7 @@ function getReviewBoxHighlightContext(frameIdx = null) {
       ) {
         continue;
       }
-      const boxes =
-        typeof getEventConfirmedBoxes === "function" ? getEventConfirmedBoxes(ev) : [];
-      if (boxes.length) addTokensToHighlight(boxes);
+      addEventBindingsToHighlight(ev);
     }
   }
 
@@ -1397,9 +1443,7 @@ function getReviewBoxHighlightContext(frameIdx = null) {
         playbackFi != null &&
         eventMatchesPlaybackFrame(activeEv, playbackFi));
     if (includeActiveConfirmed) {
-      const boxes =
-        typeof getEventConfirmedBoxes === "function" ? getEventConfirmedBoxes(activeEv) : [];
-      addTokensToHighlight(boxes);
+      addEventBindingsToHighlight(activeEv);
     }
   }
 
@@ -1552,6 +1596,8 @@ function drawPersonIdLabels(frame, inferW, inferH, opts = {}) {
   if (mode === "lite" && (!reviewActive || framePersons.length < 2)) return;
 
   let selectedPid = null;
+  let reviewEv = null;
+  let pairedPersonIds = new Set();
   if (typeof getPinnedPlaybackEvent === "function" && typeof getEventPersonId === "function") {
     const ev = getPinnedPlaybackEvent();
     const frameIdx = parseInt(frame?.frame_idx ?? frame?.source_frame_idx, 10) || 0;
@@ -1560,10 +1606,18 @@ function drawPersonIdLabels(frame, inferW, inferH, opts = {}) {
       typeof eventMatchesPlaybackFrame === "function" &&
       eventMatchesPlaybackFrame(ev, frameIdx)
     ) {
+      reviewEv = ev;
       const forceManualRangeChoice =
         typeof isRangePersonConfirmationRequired === "function" &&
         isRangePersonConfirmationRequired(frameIdx);
       selectedPid = forceManualRangeChoice ? null : getEventPersonId(ev);
+      if (typeof getEventEffectiveBindings === "function") {
+        pairedPersonIds = new Set(
+          getEventEffectiveBindings(ev)
+            .filter((binding) => binding.person_id != null && binding.confirmed_box_tokens?.length)
+            .map((binding) => Number(binding.person_id))
+        );
+      }
     }
   }
 
@@ -1594,11 +1648,22 @@ function drawPersonIdLabels(frame, inferW, inferH, opts = {}) {
     const left = dx - boxW / 2;
     const top = dy - 36;
     const isSelected = selectedPid != null && Number(selectedPid) === Number(pid);
+    const isPaired = pairedPersonIds.has(Number(pid));
+    const accent =
+      typeof getReviewPersonAccentStyle === "function"
+        ? getReviewPersonAccentStyle(reviewEv, pid, stable?.stableId ?? idx)
+        : null;
 
-    ctx.fillStyle = isSelected ? "rgba(168, 85, 247, 0.92)" : "rgba(15, 23, 42, 0.82)";
+    ctx.fillStyle =
+      isSelected || isPaired
+        ? accent?.labelFill || "rgba(126, 34, 206, 0.94)"
+        : "rgba(15, 23, 42, 0.82)";
     ctx.fillRect(left, top, boxW, boxH);
-    ctx.strokeStyle = isSelected ? "rgba(233, 213, 255, 0.98)" : "rgba(56, 189, 248, 0.95)";
-    ctx.lineWidth = isSelected ? 2.5 : 2;
+    ctx.strokeStyle =
+      isSelected || isPaired
+        ? accent?.stroke || "rgba(233, 213, 255, 0.98)"
+        : "rgba(56, 189, 248, 0.95)";
+    ctx.lineWidth = isSelected ? 3 : isPaired ? 2.5 : 2;
     ctx.strokeRect(left, top, boxW, boxH);
     ctx.fillStyle = "#f8fafc";
     ctx.fillText(text, left + padX, top + boxH - padY - 2);
@@ -1885,7 +1950,8 @@ function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null, review
   getAnnotationDisplayCache().forEach(({ token, displayPts }) => {
     const isAlarm = tokenInCollisionSet(token, alarmSet);
     const isHit = tokenInCollisionSet(token, collisionSet);
-    const isManuallyConfirmed = tokenInTokenMap(token, reviewCtx?.confirmedByToken);
+    const manualAccent = tokenValueInTokenMap(token, reviewCtx?.confirmedByToken);
+    const isManuallyConfirmed = !!manualAccent;
     const isMiss = tokenInTokenSet(token, missTokens);
     const isFalseAlarm = tokenInTokenSet(token, falseAlarmTokens);
 
@@ -1897,8 +1963,17 @@ function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null, review
     ctx.closePath();
 
     if (isManuallyConfirmed) {
-      ctx.fillStyle = "rgba(168, 85, 247, 0.32)";
+      ctx.fillStyle =
+        typeof manualAccent === "object" && manualAccent.fill
+          ? manualAccent.fill
+          : "rgba(168, 85, 247, 0.32)";
       ctx.fill();
+      ctx.strokeStyle =
+        typeof manualAccent === "object" && manualAccent.stroke
+          ? manualAccent.stroke
+          : "rgba(192, 132, 252, 0.98)";
+      ctx.lineWidth = 5;
+      ctx.stroke();
     }
 
     ctx.setLineDash([]);
@@ -2751,6 +2826,9 @@ function startJsonOnlyPlayback(startIdx = 0) {
     seekBar.value = String(
       frameByTime.length <= 1 ? 1000 : (idx / (frameByTime.length - 1)) * 1000
     );
+    if (typeof updateReviewTimelineCursor === "function") {
+      updateReviewTimelineCursor(Number(seekBar.value) / 1000);
+    }
     timeLabel.textContent = `${idx + 1}/${frameByTime.length}`;
     syncActiveEventFromPlaybackPosition({ timeSec: entry?.t, frameIdx: entry?.frameIdx });
     idx += 1;
