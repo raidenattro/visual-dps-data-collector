@@ -105,15 +105,39 @@ function hasUnsavedEventReviewDrafts() {
   );
 }
 
+/**
+ * 草稿涉及的帧号，升序去重。只说「有未保存修改」等于让人去 13000 帧里猜，
+ * 所以把帧号点出来。按 key 在 playbackEvents 里反查，不去解析 eventRowKey 的字符串格式。
+ */
+function listUnsavedEventReviewDraftFrames() {
+  const keys = new Set([
+    ...pendingConfirmedBoxesByKey.keys(),
+    ...pendingReviewBindingsByKey.keys(),
+    ...pendingPersonIdByKey.keys(),
+  ]);
+  if (!keys.size) return [];
+  const frames = new Set();
+  playbackEvents.forEach((ev) => {
+    if (!keys.has(eventRowKey(ev))) return;
+    const frameIdx = parseInt(ev.frame_idx, 10) || 0;
+    if (frameIdx > 0) frames.add(frameIdx);
+  });
+  return [...frames].sort((a, b) => a - b);
+}
+
 function updateReviewDraftStatus() {
   const status = $("#event-save-status");
   if (!status || status.classList.contains("is-error") || status.classList.contains("is-pending")) {
     return;
   }
-  if (hasUnsavedEventReviewDrafts()) {
-    status.textContent = "有未保存修改 · 按 Y 写入";
-    status.className = "event-save-status hint is-dirty";
-  }
+  if (!hasUnsavedEventReviewDrafts()) return;
+  const frames = listUnsavedEventReviewDraftFrames();
+  const shown = frames.slice(0, 6).join("、");
+  // 草稿键在 playbackEvents 里找不到对应事件时列不出帧号，退回原文案而不是显示空列表。
+  status.textContent = frames.length
+    ? `有未保存修改：帧 ${shown}${frames.length > 6 ? ` 等 ${frames.length} 帧` : ""} · 按 Y 写入`
+    : "有未保存修改 · 按 Y 写入";
+  status.className = "event-save-status hint is-dirty";
 }
 
 function setEventReviewRetryAction(action, label = "重试保存") {

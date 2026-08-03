@@ -307,6 +307,10 @@ function buildEventReviewChecklist() {
     typeof getEventReviewPendingIdentity === "function" ? getEventReviewPendingIdentity() : null;
   const drafts =
     typeof hasUnsavedEventReviewDrafts === "function" && hasUnsavedEventReviewDrafts();
+  const draftFrames =
+    drafts && typeof listUnsavedEventReviewDraftFrames === "function"
+      ? listUnsavedEventReviewDraftFrames()
+      : [];
 
   const rows = [
     ["事件总数", `${total} 条`],
@@ -315,7 +319,16 @@ function buildEventReviewChecklist() {
     ["已标真但没有货框", missingBox ? `${missingBox} 条` : "0 条"],
     ["已标真但没有 person_id", missingPerson ? `${missingPerson} 条` : "0 条"],
     ["身份待确认", pendingIdentity ? `帧 ${pendingIdentity.frame_idx}` : "无"],
-    ["未保存草稿", drafts ? "有" : "无"],
+    [
+      "未保存草稿",
+      draftFrames.length
+        ? `帧 ${draftFrames.slice(0, 6).join("、")}${
+            draftFrames.length > 6 ? ` 等 ${draftFrames.length} 帧` : ""
+          }`
+        : drafts
+          ? "有"
+          : "无",
+    ],
   ];
   const notes = [
     unverified ? `还有 ${unverified} 条未标真，确认这些帧确实不该标真` : "",

@@ -169,6 +169,18 @@ assert.ok(setSpeed);
 assert.match(setSpeed[0], /playbackSpeedSelect\.value = String\(rate\)/);
 assert.match(setSpeed[0], /return previous/);
 
+// 保存落盘后必须对账草稿，否则区间标真留下的草稿会让「有未保存修改」永久挂着。
+const applyResponse = review.match(/function applyEventReviewResponse\([\s\S]*?\n}/);
+assert.ok(applyResponse);
+assert.match(applyResponse[0], /pruneSettledEventReviewDrafts\(\)/);
+// 提示要说清是哪几帧，只说「有未保存修改」等于让人在上万帧里猜。
+assert.match(workspace, /function listUnsavedEventReviewDraftFrames/);
+assert.match(workspace, /有未保存修改：帧 \$\{shown\}/);
+// 未落盘的草稿不能顺手清掉，否则「先选人再点货框」中途的选择会丢。
+const prune = review.match(/function pruneSettledEventReviewDrafts\([\s\S]*?\n}/);
+assert.ok(prune);
+assert.match(prune[0], /getEventPersistedPersonId\(ev\) === draft/);
+
 // 点过进度条后快捷键仍要生效：range 不算输入控件，且松手后不留焦点。
 const typingTarget = workspace.match(/function isReviewTypingTarget\([\s\S]*?\n}/);
 assert.ok(typingTarget);
