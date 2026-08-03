@@ -190,6 +190,71 @@ function bindingConfirmedBoxesForPerson(bindings, personId) {
   return binding ? [...binding.confirmed_box_tokens] : [];
 }
 
+/** 草稿与磁盘比对用的签名，顺序无关。 */
+function reviewBoxListSignature(tokens) {
+  return [...normalizeBoxTokenList(tokens)].sort().join(",");
+}
+
+function reviewBindingsSignature(bindings) {
+  return normalizeReviewBindings(bindings)
+    .map(
+      (binding) =>
+        `${binding.person_id ?? ""}|${binding.person_track_id ?? ""}|` +
+        reviewBoxListSignature(binding.confirmed_box_tokens)
+    )
+    .sort()
+    .join(";");
+}
+
+/**
+ * 丢掉已经不代表「与磁盘有差异」的草稿：值已和磁盘一致的，以及事件不在
+ * playbackEvents 里的孤儿键。
+ *
+ * 三个 pending map 原本只由 setEventVerified() 消化，而区间标真与按 Y 全量写入
+ * 都不走那条路。区间标真的既定流程恰恰是「首帧选人选货框后按 R」，于是每做一次
+ * 区间标真都留下一条永久草稿：数据其实已落盘，但「有未保存修改」再也不消失，
+ * 连按 Y 也清不掉，且指不出是哪一帧。
+ *
+ * @returns {number} 清掉的草稿条数
+ */
+function pruneSettledEventReviewDrafts() {
+  const eventByKey = new Map();
+  playbackEvents.forEach((ev) => eventByKey.set(eventRowKey(ev), ev));
+  let dropped = 0;
+
+  for (const [key, tokens] of [...pendingConfirmedBoxesByKey]) {
+    const ev = eventByKey.get(key);
+    const persisted = ev
+      ? eventPersistedBindings(ev).flatMap((binding) => binding.confirmed_box_tokens)
+      : [];
+    if (!ev || reviewBoxListSignature(tokens) === reviewBoxListSignature(persisted)) {
+      pendingConfirmedBoxesByKey.delete(key);
+      dropped += 1;
+    }
+  }
+
+  for (const [key, bindings] of [...pendingReviewBindingsByKey]) {
+    const ev = eventByKey.get(key);
+    if (
+      !ev ||
+      reviewBindingsSignature(bindings) === reviewBindingsSignature(eventPersistedBindings(ev))
+    ) {
+      pendingReviewBindingsByKey.delete(key);
+      dropped += 1;
+    }
+  }
+
+  for (const [key, personId] of [...pendingPersonIdByKey]) {
+    const ev = eventByKey.get(key);
+    const draft = personId == null ? null : Number(personId);
+    if (!ev || getEventPersistedPersonId(ev) === draft) {
+      pendingPersonIdByKey.delete(key);
+      dropped += 1;
+    }
+  }
+  return dropped;
+}
+
 function eventPersistedBindings(ev) {
   if (!ev) return [];
   const bindings = normalizeReviewBindings(ev.bindings);
@@ -976,6 +1041,10 @@ function applyEventReviewResponse(body, seq, forRecordId = currentRecordId, opti
       }
     });
   }
+
+  // 磁盘状态刚变，草稿要在这里对账：否则区间标真与按 Y 全量写入留下的草稿
+  // 永远消化不掉，「有未保存修改」会一直挂着。
+  if (applyUi) pruneSettledEventReviewDrafts();
 
   if (savedFor) {
     const st =
