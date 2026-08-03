@@ -11,6 +11,10 @@ let eventReviewRecheckEditing = false;
 let eventReviewRecheckEditFrame = null;
 /** 当前帧冲突结果，画布描边与侧栏冲突条共用一份，避免重复计算。 */
 let eventReviewFrameConflicts = null;
+/** 复核默认慢放倍速：漏标只能靠完整看过去发现，原速看不清。 */
+const EVENT_REVIEW_RECHECK_SPEED = 0.25;
+/** 进入复核模式前的倍速，退出时还原；null 表示当前不在复核模式。 */
+let eventReviewRecheckPrevSpeed = null;
 
 function isEventReviewRecheckMode() {
   return eventReviewRecheckMode;
@@ -245,11 +249,20 @@ function setEventReviewRecheckMode(enabled, options = {}) {
   if (next && typeof isEventReviewRangeMode === "function" && isEventReviewRangeMode()) {
     setEventReviewMode(EVENT_REVIEW_MODE_FRAME, { silent: true });
   }
+  // 进来压到 0.25×，退出还原进来之前的倍速；期间用户仍可自己改下拉框。
+  if (typeof setPlaybackSpeed === "function") {
+    if (next) {
+      eventReviewRecheckPrevSpeed = setPlaybackSpeed(EVENT_REVIEW_RECHECK_SPEED);
+    } else if (eventReviewRecheckPrevSpeed != null) {
+      setPlaybackSpeed(eventReviewRecheckPrevSpeed);
+      eventReviewRecheckPrevSpeed = null;
+    }
+  }
   syncEventReviewRecheckUi();
   if (options.silent) return;
   if (typeof setEventReviewSaveStatus === "function") {
     setEventReviewSaveStatus(
-      next ? "已进入复核模式 · 只读看画面，E 调出标注" : "已退出复核模式",
+      next ? "已进入复核模式 · 0.25× 只读看画面，E 调出标注" : "已退出复核模式",
       "mode"
     );
   }

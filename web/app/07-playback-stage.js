@@ -30,6 +30,30 @@ function readPlaybackSpeedFromSelect() {
   applyPlaybackSpeed();
 }
 
+/**
+ * 代码里改倍速，效果等同用户自己选一次下拉框。
+ * 必须写回 select：换记录、loadedmetadata、开始播放都会重新 readPlaybackSpeedFromSelect()，
+ * 只改 playbackSpeed 会在下一次加载时被冲掉。
+ * @returns {number} 改动前的倍速，便于调用方还原
+ */
+function setPlaybackSpeed(value) {
+  const rate = Number(value);
+  const previous = playbackSpeed;
+  if (!Number.isFinite(rate) || rate <= 0) return previous;
+  if (playbackSpeedSelect) {
+    playbackSpeedSelect.value = String(rate);
+    readPlaybackSpeedFromSelect();
+  } else {
+    playbackSpeed = rate;
+    applyPlaybackSpeed();
+  }
+  // 无视频的 JSON 逐帧播放靠定时器控速，改完要重启才生效。
+  if (typeof restartJsonOnlyPlaybackIfActive === "function") {
+    restartJsonOnlyPlaybackIfActive();
+  }
+  return previous;
+}
+
 /** 舞台加载遮罩（别名，供 records 模块调用） */
 function showStageLoading(text) {
   showPlaybackStageLoading(text);

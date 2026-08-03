@@ -156,6 +156,27 @@ assert.match(recheck, /function buildEventReviewChecklist/);
 assert.match(recheck, /openReviewConfirm\({/);
 assert.match(controls, /confirmMarkEventReviewCompleted\(\)/);
 assert.match(html, /<span>复核模式（只读看画面）<\/span><kbd>V<\/kbd>/);
+// 进复核模式压到 0.25×，退出还原进来之前的倍速。
+const recheckToggle = recheck.match(/function setEventReviewRecheckMode\([\s\S]*?\n}/);
+assert.ok(recheckToggle);
+assert.match(recheckToggle[0], /setPlaybackSpeed\(EVENT_REVIEW_RECHECK_SPEED\)/);
+assert.match(recheckToggle[0], /setPlaybackSpeed\(eventReviewRecheckPrevSpeed\)/);
+assert.match(recheck, /EVENT_REVIEW_RECHECK_SPEED = 0\.25/);
+// 倍速必须写回 select：换记录与 loadedmetadata 都会重新从 select 读。
+const stage = read("web/app/07-playback-stage.js");
+const setSpeed = stage.match(/function setPlaybackSpeed\([\s\S]*?\n}/);
+assert.ok(setSpeed);
+assert.match(setSpeed[0], /playbackSpeedSelect\.value = String\(rate\)/);
+assert.match(setSpeed[0], /return previous/);
+
+// 点过进度条后快捷键仍要生效：range 不算输入控件，且松手后不留焦点。
+const typingTarget = workspace.match(/function isReviewTypingTarget\([\s\S]*?\n}/);
+assert.ok(typingTarget);
+assert.match(typingTarget[0], /!== "range"/);
+assert.match(controls, /seekBar\.addEventListener\("pointerup", \(\) => seekBar\.blur\(\)\)/);
+// 判定只留一份，避免两处让位规则将来走偏。
+assert.match(controls, /if \(isReviewTypingTarget\(e\.target\)\) return;/);
+assert.doesNotMatch(controls, /tag === "textarea" \|\| tag === "select"/);
 
 const personUiStart = review.indexOf("function renderEventReviewPersonUi(");
 const personUiEnd = review.indexOf("function finishUpdateReviewDock(", personUiStart);
