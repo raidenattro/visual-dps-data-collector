@@ -441,6 +441,16 @@ function frameIdxToSeekPct(frameIdx) {
   return Math.min(100, Math.max(0, (idx / frameByTime.length) * 100));
 }
 
+/**
+ * 普通复核时中间层准确率白点会把单轨时间轴糊成一团；
+ * 只在「漏报/误报」筛选，或从准确率页跳转携带 overlay 时才画。
+ */
+function shouldShowAccuracySeekMarkers() {
+  const filter = String(eventFilterSelect?.value || "all");
+  if (filter === "miss" || filter === "false_alarm") return true;
+  return !!externalPlaybackAccuracyOverlay;
+}
+
 function bindAccuracySeekMarkerDelegation() {
   if (!accuracyMarkersEl || accuracyMarkersEl.dataset.delegated === "1") return;
   accuracyMarkersEl.dataset.delegated = "1";
@@ -461,28 +471,71 @@ function renderAccuracySeekMarkers() {
   bindAccuracySeekMarkerDelegation();
   accuracyMarkersEl.innerHTML = "";
 
-  const { missFrames, falseAlarmFrames } = collectAccuracySeekMarkerFrames();
+  if (!shouldShowAccuracySeekMarkers()) return;
+
+  const filter = String(eventFilterSelect?.value || "all");
+  let { missFrames, falseAlarmFrames } = collectAccuracySeekMarkerFrames();
+  if (filter === "miss") falseAlarmFrames = [];
+  if (filter === "false_alarm") missFrames = [];
   if (!missFrames.length && !falseAlarmFrames.length) return;
 
-  const frag = document.createDocumentFragment();
-  const appendDot = (frameIdx, kind, title) => {
+  // 与事件标记共用像素桶宽度，同一位置只留一个点，不再叠成白团。
+  const bucketPx =
+    typeof REVIEW_TIMELINE_BUCKET_PX === "number" && REVIEW_TIMELINE_BUCKET_PX > 0
+      ? REVIEW_TIMELINE_BUCKET_PX
+      : 4;
+  const trackWidth =
+    accuracyMarkersEl.getBoundingClientRect().width ||
+    (typeof reviewTimelineTrackWidth === "function" ? reviewTimelineTrackWidth() : 640);
+  const bucketCount = Math.max(1, Math.ceil(Math.max(trackWidth, 1) / bucketPx));
+  const buckets = new Map();
+
+  const putFrame = (frameIdx, kind) => {
     const pct = frameIdxToSeekPct(frameIdx);
     if (pct == null) return;
+    const bucketIdx = Math.round((pct / 100) * (bucketCount - 1));
+    const key = String(bucketIdx);
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = {
+        pct: (bucketIdx / Math.max(1, bucketCount - 1)) * 100,
+        frameIdx,
+        miss: 0,
+        falseAlarm: 0,
+      };
+      buckets.set(key, bucket);
+    }
+    if (kind === "miss") {
+      bucket.miss += 1;
+      if (!bucket.preferMiss) {
+        bucket.frameIdx = frameIdx;
+        bucket.preferMiss = true;
+      }
+    } else {
+      bucket.falseAlarm += 1;
+      if (!bucket.preferMiss && bucket.falseAlarm === 1) bucket.frameIdx = frameIdx;
+    }
+  };
+
+  missFrames.forEach((fi) => putFrame(fi, "miss"));
+  falseAlarmFrames.forEach((fi) => putFrame(fi, "false-alarm"));
+
+  const frag = document.createDocumentFragment();
+  buckets.forEach((bucket) => {
+    // 混合桶优先显示漏报（黑点），否则白点误报。
+    const kind = bucket.miss ? "miss" : "false-alarm";
+    const count = bucket.miss + bucket.falseAlarm;
+    const label = bucket.miss
+      ? `漏报段 · 帧 ${bucket.frameIdx}${count > 1 ? ` · 附近 ${count} 处` : ""}`
+      : `误报 · 帧 ${bucket.frameIdx}${count > 1 ? ` · 附近 ${count} 处` : ""}`;
     const dot = document.createElement("button");
     dot.type = "button";
     dot.tabIndex = -1;
     dot.className = `accuracy-marker ${kind}`;
-    dot.dataset.frameIdx = String(frameIdx);
-    dot.style.left = `${pct}%`;
-    dot.title = title;
+    dot.dataset.frameIdx = String(bucket.frameIdx);
+    dot.style.left = `${bucket.pct}%`;
+    dot.title = label;
     frag.appendChild(dot);
-  };
-
-  missFrames.forEach((fi) => {
-    appendDot(fi, "miss", `漏报段 · 帧 ${fi}`);
-  });
-  falseAlarmFrames.forEach((fi) => {
-    appendDot(fi, "false-alarm", `误报 · 帧 ${fi}`);
   });
   accuracyMarkersEl.appendChild(frag);
 }

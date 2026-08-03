@@ -1322,13 +1322,14 @@ main:has(#panel-playback.active) {
   z-index: 3;
 }
 
+/* 准确率点做成细竖线，避免再出现中间一排叠圆 */
 .seek-accuracy-markers .accuracy-marker {
   position: absolute;
-  top: -2.5px;
-  width: 5px;
-  height: 5px;
-  margin-left: -2.5px;
-  border-radius: 50%;
+  top: -5px;
+  width: 2px;
+  height: 10px;
+  margin-left: -1px;
+  border-radius: 1px;
   pointer-events: auto;
   cursor: pointer;
   padding: 0;
@@ -1336,17 +1337,18 @@ main:has(#panel-playback.active) {
 }
 
 .seek-accuracy-markers .accuracy-marker.miss {
-  background: #0a0a0a;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.55);
+  background: #f8fafc;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.85);
 }
 
 .seek-accuracy-markers .accuracy-marker.false-alarm {
-  background: #f8fafc;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+  background: #94a3b8;
+  opacity: 0.9;
 }
 
 .seek-accuracy-markers .accuracy-marker:hover {
-  transform: scale(1.4);
+  width: 3px;
+  margin-left: -1.5px;
   z-index: 4;
 }
 

@@ -11,6 +11,7 @@ const workspace = read("web/app/12-event-review-workspace.js");
 const review = read("web/app/08-event-review.js");
 const controls = read("web/app/11-playback-controls.js");
 const events = read("web/app/09-playback-events.js");
+const collision = read("web/app/10-render-collision.js");
 
 // 第一批：模式隔离、明确影响范围与键盘切换。
 assert.match(html, /id="event-review-mode-frame-btn"/);
@@ -98,6 +99,17 @@ assert.match(records, /function observeRecordsAutoLoad/);
 assert.match(records, /new IntersectionObserver/);
 assert.match(records, /playback-records-sentinel/);
 assert.match(records, /observeRecordsAutoLoad\(list\);/);
+
+// 时间轴中间准确率层：默认不画，显示时按像素桶聚合，避免白点叠团。
+assert.match(collision, /function shouldShowAccuracySeekMarkers/);
+assert.match(collision, /externalPlaybackAccuracyOverlay/);
+assert.match(collision, /filter === "miss" \|\| filter === "false_alarm"/);
+const renderAccuracy = collision.match(
+  /function renderAccuracySeekMarkers\([\s\S]*?\n}/
+);
+assert.ok(renderAccuracy);
+assert.match(renderAccuracy[0], /shouldShowAccuracySeekMarkers\(\)/);
+assert.match(renderAccuracy[0], /bucketCount/);
 
 const personUiStart = review.indexOf("function renderEventReviewPersonUi(");
 const personUiEnd = review.indexOf("function finishUpdateReviewDock(", personUiStart);
