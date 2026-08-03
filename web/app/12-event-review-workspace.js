@@ -11,14 +11,17 @@ let eventReviewRetryAction = null;
 let eventReviewWindowStart = 0;
 const eventReviewUndoStack = [];
 
+/**
+ * 焦点是否落在会吃字符的控件上，用来给输入让位。
+ * range 不算：进度条点过之后会一直握着焦点，若把它也当输入，空格与左右键
+ * 就全被原生滑块吞了（原生步进是 1/1000，对逐帧复核没有意义）。
+ */
 function isReviewTypingTarget(target) {
   const tag = String(target?.tagName || "").toLowerCase();
-  return (
-    tag === "input" ||
-    tag === "textarea" ||
-    tag === "select" ||
-    !!target?.isContentEditable
-  );
+  if (tag === "input") {
+    return String(target?.type || "").toLowerCase() !== "range";
+  }
+  return tag === "textarea" || tag === "select" || !!target?.isContentEditable;
 }
 
 function isEventReviewRangeMode() {

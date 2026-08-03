@@ -507,10 +507,7 @@ function initEventReviewControls() {
   let altPersonCycleCancelled = false;
   document.addEventListener("keydown", (e) => {
     if (!panels.playback?.classList.contains("active")) return;
-    const tag = (e.target?.tagName || "").toLowerCase();
-    if (tag === "input" || tag === "textarea" || tag === "select" || e.target?.isContentEditable) {
-      return;
-    }
+    if (isReviewTypingTarget(e.target)) return;
     // 模态弹窗（快捷键帮助 / 二次确认）打开时让位，避免 R、Y 等键穿透到底层页面。
     if (document.querySelector("dialog[open]")) return;
     if (altPersonCycleArmed && e.key !== "Alt") {
@@ -724,6 +721,10 @@ window.addEventListener("resize", () => {
 window.addEventListener("beforeunload", () => {
   cleanupPlaybackVideo();
 });
+
+// 拖完不把焦点留在进度条上：焦点环看着像「选中了这一块」，容易让人以为页面卡住。
+// 键盘 Tab 过来仍能用，上面的 keydown 已经放行 range。
+seekBar.addEventListener("pointerup", () => seekBar.blur());
 
 seekBar.addEventListener("input", async () => {
   if (typeof clearPlaybackAuthorityFrameIdx === "function") clearPlaybackAuthorityFrameIdx();
