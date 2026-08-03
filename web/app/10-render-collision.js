@@ -940,6 +940,7 @@ let playbackCollisionTracker = null;
 
 function resetPlaybackCollisionTracker() {
   playbackCollisionTracker = null;
+  invalidateTrackedCollisionMemo();
   invalidatePlaybackAccuracyOverlay();
 }
 
@@ -966,6 +967,19 @@ function getEvalCollisionSetsForFrame(frameIdx) {
   };
 }
 
+/**
+ * 追踪器是有状态的（连续命中数 + 冷却），同一帧喂两次会把计数刷高、告警提前触发。
+ * 播放每帧都会走到这里，而一帧常被重复渲染（rAF 快于帧推进、暂停后又重绘），
+ * 所以按帧号记住上一次结果。
+ */
+let lastTrackedCollisionFrameIdx = 0;
+let lastTrackedCollisionSets = null;
+
+function invalidateTrackedCollisionMemo() {
+  lastTrackedCollisionFrameIdx = 0;
+  lastTrackedCollisionSets = null;
+}
+
 function getFrameCollisionSets(frame, inferW, inferH) {
   const fi = Number(frame?.frame_idx) || Number(frame?.source_frame_idx) || 0;
   const evalSets = getEvalCollisionSetsForFrame(fi);
@@ -980,11 +994,19 @@ function getFrameCollisionSets(frame, inferW, inferH) {
   if (!annotationBoxes.length) {
     return { collisionSet: new Set(), alarmSet: new Set() };
   }
+  if (fi > 0 && fi === lastTrackedCollisionFrameIdx && lastTrackedCollisionSets) {
+    return lastTrackedCollisionSets;
+  }
   const computed = getPlaybackCollisionTracker().update(frame, inferW, inferH);
-  return {
+  const sets = {
     collisionSet: new Set(computed.collisions),
     alarmSet: new Set(computed.alarm_collisions),
   };
+  if (fi > 0) {
+    lastTrackedCollisionFrameIdx = fi;
+    lastTrackedCollisionSets = sets;
+  }
+  return sets;
 }
 
 function getEffectiveAnnotationSize() {
@@ -1595,10 +1617,14 @@ function personDetBbox(person) {
 }
 
 /** RTMDet 人体检测框（虚线矩形，与货框/骨架区分） */
-function drawDetBboxes(frame, inferW, inferH) {
+/**
+ * 人形检测框。layout 必须与骨架用的是同一个：播放时是 frozenPlaybackLayout，
+ * 自己去取 getDisplayLayout() 会让框和骨架错位。
+ */
+function drawDetBboxes(frame, inferW, inferH, layoutOverride = null) {
   if (!showDetBbox || !frame?.persons?.length) return;
 
-  const layout = getDisplayLayout();
+  const layout = layoutOverride || getDisplayLayout();
   ctx.save();
   ctx.lineWidth = 2;
   ctx.strokeStyle = "rgba(251, 146, 60, 0.92)";
@@ -1924,21 +1950,6 @@ function drawPersonFeatureTrackLabels(frame, inferW, inferH) {
   });
 
   ctx.restore();
-}
-
-function collisionSetsForPlaybackFrame(frame, inferW, inferH) {
-  const fi = Number(frame?.frame_idx) || Number(frame?.source_frame_idx) || 0;
-  const evalSets = getEvalCollisionSetsForFrame(fi);
-  if (evalSets) return evalSets;
-
-  if (frameUsesStoredCollisions(frame)) {
-    return {
-      collisionSet: new Set(frame.collisions || []),
-      alarmSet: new Set(frame.alarm_collisions || []),
-    };
-  }
-  // 播放热路径不实时算碰撞（避免每帧跑 CollisionProcessor）
-  return { collisionSet: new Set(), alarmSet: new Set() };
 }
 
 /** 播放轻量模式：仅绘制当前帧碰撞/告警货框 */
@@ -2326,15 +2337,16 @@ function drawSkeletonFrame(frame, inferW, inferH, opts = {}) {
     }
     if (frame && annotationBoxes.length) {
       const collisionSets =
-        opts.collisionSets || collisionSetsForPlaybackFrame(frame, inferW, inferH);
+        opts.collisionSets || getFrameCollisionSets(frame, inferW, inferH);
       drawAnnotationBoxesCollisionOnly(frame, inferW, inferH, collisionSets);
     }
   } else {
     const collisionSets = opts.collisionSets ?? getFrameCollisionSets(frame, inferW, inferH);
     drawAnnotationBoxes(frame, inferW, inferH, collisionSets);
-    drawDetBboxes(frame, inferW, inferH);
   }
 
+  // 人形框两种模式都要画：只在 full 模式画等于播放时整片消失。
+  drawDetBboxes(frame, inferW, inferH, layout);
   drawSkeletonConnections(frame, inferW, inferH, layout);
   if (mode === "full") {
     drawSkeletonKeypoints(frame, inferW, inferH, layout);
