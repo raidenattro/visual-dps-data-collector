@@ -2059,6 +2059,11 @@ function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null, review
       ctx.stroke();
     }
   });
+
+  // 复核模式的冲突描边压在最上层：只在暂停/seek 的完整绘制路径上做。
+  if (typeof drawReviewConflictOutlines === "function") {
+    drawReviewConflictOutlines(frameIdx, collisionSet, alarmSet, reviewCtx);
+  }
 }
 
 /** 由视频时间解析骨架帧号；优先 timeline，duration 线性映射作兜底 */

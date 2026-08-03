@@ -3456,6 +3456,133 @@ button.danger-btn {
   color: #f0f9ff;
 }
 
+/* 复核模式：只读优先的镜头，按钮沿用 head 按钮外形，激活态用琥珀色区分于专注模式的蓝 */
+.btn-review-recheck {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  white-space: nowrap;
+}
+
+.btn-review-recheck-icon {
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.btn-review-recheck.is-active,
+.btn-review-recheck[aria-pressed="true"] {
+  border-color: #f59e0b;
+  background: rgba(180, 83, 9, 0.42);
+  color: #fef3c7;
+}
+
+.event-review-recheck-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  border-radius: 8px;
+  background: rgba(120, 53, 15, 0.22);
+  color: #fde68a;
+  font-size: 0.7rem;
+}
+
+.event-review-recheck-state {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.event-review-recheck-edit-btn {
+  flex: 0 0 auto;
+  padding: 0.22rem 0.5rem;
+  border: 1px solid rgba(245, 158, 11, 0.6);
+  border-radius: 6px;
+  background: rgba(120, 53, 15, 0.5);
+  color: #fef3c7;
+  font-size: 0.68rem;
+  cursor: pointer;
+}
+
+.event-review-recheck-edit-btn:hover {
+  border-color: #fbbf24;
+  background: rgba(180, 83, 9, 0.6);
+}
+
+.playback-events-panel.is-recheck-editing .event-review-recheck-bar {
+  border-color: rgba(56, 189, 248, 0.5);
+  background: rgba(12, 74, 110, 0.28);
+  color: #bae6fd;
+}
+
+.playback-events-panel.is-recheck-editing .event-review-recheck-edit-btn {
+  border-color: rgba(56, 189, 248, 0.6);
+  background: rgba(12, 74, 110, 0.55);
+  color: #e0f2fe;
+}
+
+/* 只读复核：收起全部标注控件，只留位置、摘要、冲突条与推进按钮 */
+.playback-events-panel.is-recheck-mode:not(.is-recheck-editing) .event-review-mode-switch,
+.playback-events-panel.is-recheck-mode:not(.is-recheck-editing) .event-review-range-details,
+.playback-events-panel.is-recheck-mode:not(.is-recheck-editing) #event-review-person-select,
+.playback-events-panel.is-recheck-mode:not(.is-recheck-editing) #event-review-person-hint,
+.playback-events-panel.is-recheck-mode:not(.is-recheck-editing) .event-review-bulk-details,
+.playback-events-panel.is-recheck-mode:not(.is-recheck-editing) #event-review-list-details {
+  display: none;
+}
+
+/* 冲突条：三类嫌疑与画布描边同色，扫一眼就知道该看哪个框 */
+.event-review-conflict-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.6);
+  font-size: 0.68rem;
+}
+
+.event-review-conflict-bar.is-clean {
+  border-color: rgba(34, 197, 94, 0.35);
+  background: rgba(20, 83, 45, 0.18);
+}
+
+.event-review-conflict-title {
+  color: #94a3b8;
+  letter-spacing: 0.02em;
+}
+
+.event-review-conflict-chip {
+  padding: 0.12rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-variant-numeric: tabular-nums;
+}
+
+.event-review-conflict-chip.is-missing {
+  border-color: rgba(255, 159, 28, 0.8);
+  background: rgba(180, 83, 9, 0.3);
+  color: #fed7aa;
+}
+
+.event-review-conflict-chip.is-mismatch {
+  border-color: rgba(236, 72, 153, 0.8);
+  background: rgba(157, 23, 77, 0.3);
+  color: #fbcfe8;
+}
+
+.event-review-conflict-chip.is-orphan {
+  border-color: rgba(248, 113, 113, 0.8);
+  background: rgba(153, 27, 27, 0.3);
+  color: #fecaca;
+}
+
+.event-review-conflict-clean {
+  color: #86efac;
+}
+
 .event-save-status-row {
   width: 100%;
   display: grid;

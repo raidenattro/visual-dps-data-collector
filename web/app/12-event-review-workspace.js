@@ -396,6 +396,8 @@ function resetEventReviewWorkspaceState() {
   eventReviewMode = EVENT_REVIEW_MODE_FRAME;
   updateEventReviewUndoUi();
   updateEventReviewModeUi();
+  // 复核模式本身是用户偏好，跨记录保留；只把编辑态与冲突结果清空。
+  if (typeof resetEventReviewRecheckState === "function") resetEventReviewRecheckState();
 }
 
 function eventReviewWindowForRows(rows) {

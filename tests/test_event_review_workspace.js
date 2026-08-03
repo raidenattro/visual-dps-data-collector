@@ -13,6 +13,10 @@ const controls = read("web/app/11-playback-controls.js");
 const events = read("web/app/09-playback-events.js");
 const collision = read("web/app/10-render-collision.js");
 
+// 复核慢放：保留原速默认值，并提供 0.25× 最低档。
+assert.match(html, /<option value="0\.25">0\.25×<\/option>/);
+assert.match(html, /<option value="1" selected>1×<\/option>/);
+
 // 第一批：模式隔离、明确影响范围与键盘切换。
 assert.match(html, /id="event-review-mode-frame-btn"/);
 assert.match(html, /id="event-review-mode-range-btn"/);
@@ -110,6 +114,48 @@ const renderAccuracy = collision.match(
 assert.ok(renderAccuracy);
 assert.match(renderAccuracy[0], /shouldShowAccuracySeekMarkers\(\)/);
 assert.match(renderAccuracy[0], /bucketCount/);
+
+// 复核模式：只读优先的镜头 + 画面冲突提示 + 收尾自检清单。
+const recheck = read("web/app/14-event-review-recheck.js");
+assert.match(html, /app\/14-event-review-recheck\.js\?v=/);
+assert.match(html, /id="event-review-recheck-btn"/);
+assert.match(html, /id="event-review-recheck-edit-btn"/);
+assert.match(html, /id="event-review-conflict-bar"/);
+// 复核模式是叠在单帧/区间之上的镜头，不能新增第四种标注模式按钮。
+assert.match(recheck, /setEventReviewMode\(EVENT_REVIEW_MODE_FRAME, { silent: true }\)/);
+assert.doesNotMatch(html, /data-review-mode="recheck"/);
+// 只读态靠 CSS 收起标注控件，不动 DOM 结构。
+const styleCss = read("web/style.css");
+assert.match(styleCss, /is-recheck-mode:not\(\.is-recheck-editing\)/);
+assert.match(styleCss, /#event-review-person-select/);
+// 出问题的两条召出编辑态的路径：点画面与按 E。
+assert.match(recheck, /function interceptRecheckCanvasClick/);
+assert.match(controls, /interceptRecheckCanvasClick\(\)/);
+assert.match(recheck, /key === "e" && eventReviewRecheckMode/);
+assert.match(recheck, /key === "v"/);
+// 翻帧自动收回编辑态，避免一直挂着标注控件。
+assert.match(recheck, /eventReviewRecheckEditFrame/);
+assert.match(recheck, /setEventReviewRecheckEditing\(false, { auto: true }\)/);
+// 三类冲突全部由现有数据推导，不新增存盘字段。
+const conflicts = recheck.match(/function computeReviewFrameConflicts\([\s\S]*?\n}/);
+assert.ok(conflicts);
+assert.match(conflicts[0], /getVerifiedEventsOnFrame\(fi\)/);
+assert.match(conflicts[0], /getFramePersonIds\(fi\)/);
+assert.doesNotMatch(recheck, /verified_true:|confirmed_box_tokens:/);
+// 未标真的帧不算漏标嫌疑，否则整条队列都会被染成冲突。
+assert.match(conflicts[0], /isAlarm && verifiedOnFrame\.length/);
+// 描边只挂在暂停/seek 的完整绘制路径上，播放中的轻量路径不做全量比对。
+const drawBoxes = collision.match(/function drawAnnotationBoxes\([\s\S]*?\n}/);
+assert.ok(drawBoxes);
+assert.match(drawBoxes[0], /drawReviewConflictOutlines\(frameIdx, collisionSet, alarmSet, reviewCtx\)/);
+const drawLite = collision.match(/function drawAnnotationBoxesCollisionOnly\([\s\S]*?\n}/);
+assert.ok(drawLite);
+assert.doesNotMatch(drawLite[0], /drawReviewConflictOutlines/);
+// 收尾清单复用页面内确认弹窗，只统计全量的事件级信息。
+assert.match(recheck, /function buildEventReviewChecklist/);
+assert.match(recheck, /openReviewConfirm\({/);
+assert.match(controls, /confirmMarkEventReviewCompleted\(\)/);
+assert.match(html, /<span>复核模式（只读看画面）<\/span><kbd>V<\/kbd>/);
 
 const personUiStart = review.indexOf("function renderEventReviewPersonUi(");
 const personUiEnd = review.indexOf("function finishUpdateReviewDock(", personUiStart);

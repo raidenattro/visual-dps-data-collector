@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>骨架采集与回放</title>
-  <link rel="stylesheet" href="style.css?v=76" />
+  <link rel="stylesheet" href="style.css?v=77" />
 </head>
 <body>
   <header>
@@ -543,6 +543,7 @@
               <label class="playback-speed-label">
                 倍速
                 <select id="playback-speed" title="播放倍速">
+                  <option value="0.25">0.25×</option>
                   <option value="0.5">0.5×</option>
                   <option value="0.75">0.75×</option>
                   <option value="1" selected>1×</option>
@@ -591,6 +592,7 @@
             <div class="playback-events-head">
               <h2 class="playback-events-heading">事件复核</h2>
               <div class="playback-events-head-actions">
+                <button type="button" id="event-review-recheck-btn" class="btn-review-head btn-review-recheck" aria-pressed="false" title="复核模式：收起标注控件只看画面，出问题按 E 调出（V）"><span class="btn-review-recheck-icon" aria-hidden="true">◎</span><span id="event-review-recheck-label">复核模式</span></button>
                 <button type="button" id="event-review-focus-btn" class="btn-review-head btn-review-focus" aria-pressed="false" title="专注模式：全屏铺满，隐藏浏览器与站点导航（F）"><span class="btn-review-focus-icon" aria-hidden="true">⛶</span><span id="event-review-focus-label">专注模式</span></button>
                 <button type="button" id="event-review-shortcuts-btn" class="btn-review-head" title="快捷键帮助（F1）">? 快捷键</button>
               </div>
@@ -619,6 +621,10 @@
                   <button type="button" id="event-save-retry-btn" class="event-save-retry-btn hidden">重试</button>
                   <button type="button" id="event-review-undo-btn" class="event-review-undo-btn" title="撤销上一步（Ctrl+Z）" disabled>撤销</button>
                 </div>
+              </div>
+              <div id="event-review-recheck-bar" class="event-review-recheck-bar hidden">
+                <span id="event-review-recheck-state" class="event-review-recheck-state">只读复核中 · 点画面或按 E 调出标注</span>
+                <button type="button" id="event-review-recheck-edit-btn" class="event-review-recheck-edit-btn">调出标注 <kbd>E</kbd></button>
               </div>
               <div class="event-review-mode-switch" role="tablist" aria-label="标注模式">
                 <button type="button" id="event-review-mode-frame-btn" class="event-review-mode-btn is-active" role="tab" aria-selected="true" data-review-mode="frame">单帧标注</button>
@@ -660,6 +666,13 @@
                 </div>
 
                 <section class="event-review-section event-review-section--person">
+                  <div id="event-review-conflict-bar" class="event-review-conflict-bar hidden" role="status" aria-live="polite">
+                    <span class="event-review-conflict-title">画面冲突</span>
+                    <span id="event-review-conflict-missing" class="event-review-conflict-chip is-missing hidden">漏标嫌疑 0</span>
+                    <span id="event-review-conflict-mismatch" class="event-review-conflict-chip is-mismatch hidden">标错嫌疑 0</span>
+                    <span id="event-review-conflict-orphan" class="event-review-conflict-chip is-orphan hidden">身份悬空 0</span>
+                    <span id="event-review-conflict-clean" class="event-review-conflict-clean">这一帧没有冲突</span>
+                  </div>
                   <div id="event-review-anomaly-toolbar" class="event-review-identity-bar hidden" role="status">
                     <span class="event-review-identity-state">
                       <span class="event-review-identity-dot" aria-hidden="true"></span>
@@ -753,6 +766,8 @@
         <span>首帧 / 尾帧</span><kbd>Home / End</kbd>
         <span>跳转到帧</span><kbd>G</kbd>
         <span>专注模式（全屏）</span><kbd>F</kbd>
+        <span>复核模式（只读看画面）</span><kbd>V</kbd>
+        <span>调出 / 收起标注控件</span><kbd>E</kbd>
         <span>撤销</span><kbd>Ctrl+Z</kbd>
         <span>打开帮助</span><kbd>F1</kbd>
       </div>
@@ -789,10 +804,11 @@
   <script src="app/08-event-review.js?v=102"></script>
   <script src="app/08-event-review-range.js?v=18"></script>
   <script src="app/09-playback-events.js?v=100"></script>
-  <script src="app/10-render-collision.js?v=120"></script>
-  <script src="app/11-playback-controls.js?v=102"></script>
-  <script src="app/12-event-review-workspace.js?v=5"></script>
+  <script src="app/10-render-collision.js?v=121"></script>
+  <script src="app/11-playback-controls.js?v=103"></script>
+  <script src="app/12-event-review-workspace.js?v=6"></script>
   <script src="app/13-playback-skeleton-features.js?v=9"></script>
+  <script src="app/14-event-review-recheck.js?v=1"></script>
   <script src="annotate.js?v=17"></script>
   <script src="accuracy.js?v=14"></script>
 </body>

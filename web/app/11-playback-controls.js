@@ -416,7 +416,11 @@ function initEventReviewControls() {
   $("#event-unmark-btn")?.addEventListener("click", () => void unmarkTrueAndNextFrame());
   $("#event-mark-all-true-btn")?.addEventListener("click", () => void markAllEventsVerified(true));
   $("#event-unmark-all-btn")?.addEventListener("click", () => void markAllEventsVerified(false));
-  $("#event-review-complete-btn")?.addEventListener("click", () => void markEventReviewCompleted());
+  $("#event-review-complete-btn")?.addEventListener("click", () =>
+    void (typeof confirmMarkEventReviewCompleted === "function"
+      ? confirmMarkEventReviewCompleted()
+      : markEventReviewCompleted())
+  );
   $("#event-review-person-cycle-btn")?.addEventListener("click", () => {
     cycleEventReviewPersonSelection();
   });
@@ -431,6 +435,10 @@ function initEventReviewControls() {
 
   canvas?.addEventListener("click", (e) => {
     if (!eventsPanel || eventsPanel.classList.contains("hidden")) return;
+    // 只读复核时，第一次点画面只负责把标注控件召出来，不改数据。
+    if (typeof interceptRecheckCanvasClick === "function" && interceptRecheckCanvasClick()) {
+      return;
+    }
     let ev = getActiveEvent() ?? getActiveFilteredEvent();
     const personHit =
       typeof hitTestPersonDetailAtClient === "function"
