@@ -522,7 +522,30 @@ function renderRecordsLoadMoreFooter() {
   if (state.loadingMore) {
     return `<p class="playback-records-load-more">${progress}<br><span class="hint">加载更多…</span></p>`;
   }
-  return `<p class="playback-records-load-more">${progress}<br><button type="button" class="link-btn playback-load-more-btn">加载更多记录…</button></p>`;
+  // 哨兵滚进视野就自动续拉；按钮保留给不支持 IntersectionObserver 与键盘操作的场景。
+  return `<p class="playback-records-load-more"><span class="playback-records-sentinel" aria-hidden="true"></span>${progress}<br><button type="button" class="link-btn playback-load-more-btn">加载更多记录…</button></p>`;
+}
+
+/**
+ * 记录列表滚到底部自动加载下一页，避免上百条记录要反复点「加载更多」。
+ * 列表每次重渲染都会换掉哨兵节点，因此这里先断开旧 observer 再重新挂。
+ */
+let recordsAutoLoadObserver = null;
+
+function observeRecordsAutoLoad(list) {
+  recordsAutoLoadObserver?.disconnect();
+  recordsAutoLoadObserver = null;
+  if (typeof IntersectionObserver !== "function") return;
+  const sentinel = list?.querySelector(".playback-records-sentinel");
+  if (!sentinel) return;
+  recordsAutoLoadObserver = new IntersectionObserver(
+    (entries) => {
+      // loadMoreRecords 内部已按 hasMore / loadingMore 去重，这里不必再加锁。
+      if (entries.some((entry) => entry.isIntersecting)) void loadMoreRecords();
+    },
+    { root: list, rootMargin: "240px 0px" }
+  );
+  recordsAutoLoadObserver.observe(sentinel);
 }
 
 function bindRecordListEvents(list) {
@@ -530,6 +553,7 @@ function bindRecordListEvents(list) {
     e.preventDefault();
     void loadMoreRecords();
   });
+  observeRecordsAutoLoad(list);
   list.querySelectorAll(".record-back-cameras").forEach((btn) => {
     btn.addEventListener("click", async (e) => {
       e.preventDefault();

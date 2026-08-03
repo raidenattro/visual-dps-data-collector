@@ -82,11 +82,20 @@ assert.match(range, /openReviewConfirm\({/);
 // 区间落盘成功后自动清空首尾帧，连续标注不用先按 Shift+R。
 const applyRange = range.match(/async function applyRangeAnnotVerified\([\s\S]*?\n}/);
 assert.ok(applyRange);
-assert.match(applyRange[0], /if \(ok\) \{\n(?:.*\n)*?\s*clearRangeAnnotBounds\(\);/);
+const applyRangeOkBranch = applyRange[0].slice(applyRange[0].lastIndexOf("if (ok) {"));
+assert.match(applyRangeOkBranch, /clearRangeAnnotBounds\(\);/);
+assert.doesNotMatch(applyRangeOkBranch, /updateRangeAnnotUi\(\);/);
 assert.match(controls, /dialog\[open\]/);
 // 侧栏降噪：模式横幅与底部快捷键长条已移除。
 assert.doesNotMatch(html, /event-review-mode-banner/);
 assert.doesNotMatch(html, /event-review-kbd-hint/);
+
+// 记录列表：机位内分页滚到底自动续拉，「加载更多」按钮仅作降级入口。
+const records = read("web/app/06-records.js");
+assert.match(records, /function observeRecordsAutoLoad/);
+assert.match(records, /new IntersectionObserver/);
+assert.match(records, /playback-records-sentinel/);
+assert.match(records, /observeRecordsAutoLoad\(list\);/);
 
 const personUiStart = review.indexOf("function renderEventReviewPersonUi(");
 const personUiEnd = review.indexOf("function finishUpdateReviewDock(", personUiStart);

@@ -848,6 +848,12 @@ main:has(#panel-playback.active) {
   text-align: center;
 }
 
+/* 触底自动加载的观察哨兵，不占视觉空间 */
+.playback-records-sentinel {
+  display: block;
+  height: 1px;
+}
+
 .playback-records-empty {
   margin: 0.75rem;
 }
