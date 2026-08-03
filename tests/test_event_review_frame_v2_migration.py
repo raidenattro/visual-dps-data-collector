@@ -18,7 +18,41 @@ from event_review_frame_v2 import (
     upsert_binding,
     verify_frame_v2_verified_true,
 )
-from scripts.data.migrate_event_review_to_frame_v2 import _candidate_payload
+from scripts.data.migrate_event_review_to_frame_v2 import (
+    _candidate_payload,
+    resolve_record_filter,
+)
+
+
+class MigrateRecordFilterTest(unittest.TestCase):
+    RECORD_IDS = [
+        "rtmpose-m/2-5-1-(2)/00000001088000200_seg01_24-00_to_25-45_rtmpose_m",
+        "rtmpose-m/2-5-1-(2)/00000001088000200_seg01_12-33_to_21-40_rtmpose_m",
+        "rtmpose-l/2-5-1-(2)/00000001088000200_seg01_24-00_to_25-45_rtmpose_l",
+    ]
+
+    def test_empty_filter_keeps_every_record(self) -> None:
+        self.assertEqual(resolve_record_filter(self.RECORD_IDS, ""), self.RECORD_IDS)
+
+    def test_exact_record_id_wins_over_substring(self) -> None:
+        target = self.RECORD_IDS[0]
+        self.assertEqual(resolve_record_filter(self.RECORD_IDS, target), [target])
+
+    def test_unique_substring_resolves_to_one_record(self) -> None:
+        self.assertEqual(
+            resolve_record_filter(self.RECORD_IDS, "seg01_12-33_to_21-40"),
+            [self.RECORD_IDS[1]],
+        )
+
+    def test_ambiguous_substring_refuses_to_guess(self) -> None:
+        # 同一视频段在两个 pose tier 下都有记录，必须报错而不是随便挑一条替用户改数据。
+        with self.assertRaises(ValueError) as ctx:
+            resolve_record_filter(self.RECORD_IDS, "seg01_24-00_to_25-45")
+        self.assertIn("匹配到多条记录", str(ctx.exception))
+
+    def test_unmatched_filter_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            resolve_record_filter(self.RECORD_IDS, "not-a-record")
 
 
 class EventReviewFrameV2MigrationTest(unittest.TestCase):

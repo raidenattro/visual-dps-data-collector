@@ -54,17 +54,49 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     temp.replace(path)
 
 
-def _discover(paths, camera_slug: str) -> list[tuple[Path, Any | None]]:
-    locators_by_path: dict[str, Any] = {}
+def resolve_record_filter(record_ids: list[str], record_filter: str) -> list[str]:
+    """按 record_id 定位单条记录：先精确匹配，再退化为唯一子串匹配。
+
+    record_id 很长（含 pose tier 与机位前缀），允许只写视频名这类片段；
+    但匹配到多条时必须报错，不能替调用者猜要动哪一条。
+    """
+    needle = str(record_filter or "").strip()
+    if not needle:
+        return list(record_ids)
+    exact = [rid for rid in record_ids if rid == needle]
+    if exact:
+        return exact
+    lowered = needle.lower()
+    partial = sorted(rid for rid in record_ids if lowered in rid.lower())
+    if not partial:
+        raise ValueError(f"--record {needle} 未匹配到任何记录")
+    if len(partial) > 1:
+        listed = "\n  ".join(partial[:10])
+        more = f"\n  …共 {len(partial)} 条" if len(partial) > 10 else ""
+        raise ValueError(f"--record {needle} 匹配到多条记录，请写得更具体：\n  {listed}{more}")
+    return partial
+
+
+def _discover(paths, camera_slug: str, record_filter: str = "") -> list[tuple[Path, Any | None]]:
+    locators: list[Any] = []
     for locator in iter_active_records(paths.json_dir):
         bucket = locator.record_id.split("/", 1)[0] if "/" in locator.record_id else ""
         if camera_slug and bucket != camera_slug:
             continue
+        locators.append(locator)
+
+    if record_filter:
+        keep = set(resolve_record_filter([loc.record_id for loc in locators], record_filter))
+        locators = [loc for loc in locators if loc.record_id in keep]
+
+    locators_by_path: dict[str, Any] = {}
+    for locator in locators:
         for path in event_review_read_paths(locator, paths):
             locators_by_path[str(path.resolve())] = locator
 
     targets: dict[str, tuple[Path, Any | None]] = {}
-    if paths.review_dir.is_dir():
+    # --record 时只认这条记录解析出的路径；再扫 review_dir 会把整个机位都拉进来。
+    if not record_filter and paths.review_dir.is_dir():
         for path in paths.review_dir.rglob(EVENT_REVIEW_FILE):
             try:
                 rel = path.relative_to(paths.review_dir)
@@ -144,6 +176,14 @@ def main() -> int:
     )
     parser.add_argument("camera_slug", nargs="?", default="")
     parser.add_argument(
+        "--record",
+        default="",
+        help=(
+            "只处理单条记录（record_id 全名或唯一片段，如视频名）；"
+            "匹配到多条时报错退出"
+        ),
+    )
+    parser.add_argument(
         "--source-format",
         choices=sorted(LEGACY_SOURCE_FORMATS),
         default=SOURCE_EXPLICIT_CONFIRMED,
@@ -176,10 +216,16 @@ def main() -> int:
 
     resolve_config_path(None)
     paths = resolve_app_paths()
-    targets = _discover(paths, args.camera_slug.strip())
+    try:
+        targets = _discover(paths, args.camera_slug.strip(), args.record.strip())
+    except ValueError as exc:
+        print(exc)
+        return 1
     if not targets:
         print("未找到 event_review.json")
         return 1
+    if args.record.strip():
+        print(f"--record 命中 {len(targets)} 个 event_review.json\n")
 
     report_items: list[dict[str, Any]] = []
     counts: Counter[str] = Counter()

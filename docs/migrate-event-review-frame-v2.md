@@ -71,6 +71,27 @@ python scripts/data/migrate_event_review_to_frame_v2.py 1-1-1-_2 `
 `event_review.json.bak.<timestamp>`。存在 unresolved 时默认阻止替换；即使显式
 使用 `--allow-unresolved`，原行也会完整保存在 `unresolved_legacy`。
 
+## 只迁一条记录
+
+页面报 409 时通常只有一条记录被挡住，没必要动整个机位。`--record` 接受
+record_id 全名，也接受唯一片段（比如视频名）；匹配到多条会报错并列出候选，
+不会替你猜：
+
+```powershell
+# 1. 只读审计这一条，报告里的 unresolved_frames 就是被挡住的帧号
+python scripts/data/migrate_event_review_to_frame_v2.py `
+  --record 00000001088000200_seg01_24-00_to_25-45 `
+  --report localdata/audit-one.json
+
+# 2. 原地替换这一条，先自动生成 .bak.<timestamp>
+python scripts/data/migrate_event_review_to_frame_v2.py `
+  --record 00000001088000200_seg01_24-00_to_25-45 `
+  --replace --allow-unresolved
+```
+
+`--allow-unresolved` 不会丢数据：歧义行原样搬进 `unresolved_legacy` 留在文件里，
+只是不再当人工真值使用，对应帧的标真状态需要在页面上手工重标一次。
+
 ## 运行时保护
 
 - schema v2 直接读写。
