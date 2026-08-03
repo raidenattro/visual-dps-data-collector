@@ -470,6 +470,8 @@ function initEventReviewWorkspace() {
     if (!panels.playback?.classList.contains("active") || isReviewTypingTarget(event.target)) {
       return;
     }
+    // 模态弹窗（快捷键帮助 / 二次确认）打开时让位，避免 Tab、F 穿透到底层页面。
+    if (document.querySelector("dialog[open]")) return;
     if (event.key === "Tab") {
       event.preventDefault();
       toggleEventReviewMode();

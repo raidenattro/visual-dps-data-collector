@@ -85,7 +85,9 @@ assert.ok(applyRange);
 const applyRangeOkBranch = applyRange[0].slice(applyRange[0].lastIndexOf("if (ok) {"));
 assert.match(applyRangeOkBranch, /clearRangeAnnotBounds\(\);/);
 assert.doesNotMatch(applyRangeOkBranch, /updateRangeAnnotUi\(\);/);
+// 两个键盘监听都要在模态弹窗打开时让位，否则 F / Tab / R 会穿透到底层页面。
 assert.match(controls, /dialog\[open\]/);
+assert.match(workspace, /dialog\[open\]/);
 // 侧栏降噪：模式横幅与底部快捷键长条已移除。
 assert.doesNotMatch(html, /event-review-mode-banner/);
 assert.doesNotMatch(html, /event-review-kbd-hint/);
