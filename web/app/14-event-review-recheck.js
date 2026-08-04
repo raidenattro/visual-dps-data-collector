@@ -111,8 +111,9 @@ function strokeReviewConflictOutline(displayPts, style) {
 }
 
 /**
- * 画布冲突描边，由 drawAnnotationBoxes（暂停/seek 的完整绘制路径）末尾调用。
- * 播放中的轻量路径不画，避免每帧多一遍全量货框比对。
+ * 画布冲突描边。**只算与画，不碰 DOM**，所以 lite/full 两条绘制路径都能调用。
+ * 侧栏冲突条由 syncReviewConflictUiForFrame() 单独同步：两件事混在一起时，
+ * 描边就没法进播放路径 —— 那会变成每帧写一遍 DOM。
  */
 function drawReviewConflictOutlines(frameIdx, collisionSet, alarmSet, reviewCtx) {
   if (!eventReviewRecheckMode) {
@@ -121,20 +122,17 @@ function drawReviewConflictOutlines(frameIdx, collisionSet, alarmSet, reviewCtx)
   }
   const conflicts = computeReviewFrameConflicts(frameIdx, collisionSet, alarmSet, reviewCtx);
   eventReviewFrameConflicts = conflicts;
+  if (!(conflicts.missing || conflicts.mismatch)) return;
 
-  if (conflicts.missing || conflicts.mismatch) {
-    const cache = typeof getAnnotationDisplayCache === "function" ? getAnnotationDisplayCache() : [];
-    cache.forEach(({ token, displayPts }) => {
-      if (tokenInTokenSet(token, conflicts.missingTokens)) {
-        strokeReviewConflictOutline(displayPts, REVIEW_CONFLICT_OUTLINE_STYLES.missing);
-      } else if (tokenInTokenSet(token, conflicts.mismatchTokens)) {
-        strokeReviewConflictOutline(displayPts, REVIEW_CONFLICT_OUTLINE_STYLES.mismatch);
-      }
-    });
-    ctx.setLineDash([]);
-  }
-
-  updateReviewConflictBar(frameIdx);
+  const cache = typeof getAnnotationDisplayCache === "function" ? getAnnotationDisplayCache() : [];
+  cache.forEach(({ token, displayPts }) => {
+    if (tokenInTokenSet(token, conflicts.missingTokens)) {
+      strokeReviewConflictOutline(displayPts, REVIEW_CONFLICT_OUTLINE_STYLES.missing);
+    } else if (tokenInTokenSet(token, conflicts.mismatchTokens)) {
+      strokeReviewConflictOutline(displayPts, REVIEW_CONFLICT_OUTLINE_STYLES.mismatch);
+    }
+  });
+  ctx.setLineDash([]);
 }
 
 function setReviewConflictChip(selector, count, text) {
@@ -144,20 +142,40 @@ function setReviewConflictChip(selector, count, text) {
   if (count) chip.textContent = text;
 }
 
+/** 冲突条已渲染内容的签名。不含帧号：帧号不显示在条上，含进去会每帧都判为脏。 */
+let lastReviewConflictBarSignature = null;
+
+function reviewConflictBarSignature() {
+  if (!eventReviewRecheckMode) return "off";
+  const conflicts = eventReviewFrameConflicts;
+  return [
+    conflicts?.missing || 0,
+    conflicts?.mismatch || 0,
+    (conflicts?.orphanPersons || []).join(","),
+  ].join("|");
+}
+
 /**
- * 同步侧栏冲突条。由绘制路径驱动，保证它说的始终是画面上正在显示的那一帧。
- * 顺带做「翻帧自动收回编辑态」：画面帧变了说明这一帧已经看完。
+ * 绘制路径每帧调用。播放时这里会被调到 30 次/秒，所以只做两件便宜的事：
+ * 翻帧收回编辑态（纯状态判断），以及内容真的变了才写 DOM。
  */
-function updateReviewConflictBar(frameIdx = null) {
+function syncReviewConflictUiForFrame(frameIdx = null) {
   const fi = parseInt(frameIdx, 10) || 0;
   if (eventReviewRecheckEditing && fi > 0) {
     if (eventReviewRecheckEditFrame == null) eventReviewRecheckEditFrame = fi;
     else if (fi !== eventReviewRecheckEditFrame) {
+      // 收回编辑态自己会走 syncEventReviewRecheckUi → updateReviewConflictBar。
       setEventReviewRecheckEditing(false, { auto: true });
       return;
     }
   }
+  if (reviewConflictBarSignature() === lastReviewConflictBarSignature) return;
+  updateReviewConflictBar();
+}
 
+/** 侧栏冲突条的 DOM 同步。模式切换等场景直接调用，无条件重写。 */
+function updateReviewConflictBar() {
+  lastReviewConflictBarSignature = reviewConflictBarSignature();
   const bar = $("#event-review-conflict-bar");
   if (!bar) return;
   const conflicts = eventReviewFrameConflicts;

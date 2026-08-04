@@ -2077,6 +2077,10 @@ function drawAnnotationBoxesAccentOnly(frame, inferW, inferH, collisionSets) {
     if (annotationBoxStateIsPlain(state)) return;
     paintAnnotationBox(displayPts, state);
   });
+
+  if (typeof drawReviewConflictOutlines === "function") {
+    drawReviewConflictOutlines(frameIdx, ctxSets.collisionSet, alarmSet, ctxSets.reviewCtx);
+  }
 }
 
 /** 播放时静态货框（淡绿描边，不算碰撞） */
@@ -2116,7 +2120,7 @@ function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null, review
     paintAnnotationBox(displayPts, resolveAnnotationBoxState(token, ctxSets));
   });
 
-  // 复核模式的冲突描边压在最上层：只在暂停/seek 的完整绘制路径上做。
+  // 复核模式的冲突描边压在最上层。
   if (typeof drawReviewConflictOutlines === "function") {
     drawReviewConflictOutlines(frameIdx, collisionSet, alarmSet, reviewCtx);
   }
@@ -2388,6 +2392,11 @@ function drawSkeletonFrame(frame, inferW, inferH, opts = {}) {
   } else {
     const collisionSets = opts.collisionSets ?? getFrameCollisionSets(frame, inferW, inferH);
     drawAnnotationBoxes(frame, inferW, inferH, collisionSets);
+  }
+
+  // 冲突条的 DOM 同步与画布描边分开：描边每帧都画，条只在内容变了才写。
+  if (typeof syncReviewConflictUiForFrame === "function") {
+    syncReviewConflictUiForFrame(resolveOverlayFrameIdx(frame));
   }
 
   // 人形框两种模式都要画：只在 full 模式画等于播放时整片消失。

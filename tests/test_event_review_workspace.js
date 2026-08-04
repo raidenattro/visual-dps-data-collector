@@ -144,13 +144,31 @@ assert.match(conflicts[0], /getFramePersonIds\(fi\)/);
 assert.doesNotMatch(recheck, /verified_true:|confirmed_box_tokens:/);
 // 未标真的帧不算漏标嫌疑，否则整条队列都会被染成冲突。
 assert.match(conflicts[0], /isAlarm && verifiedOnFrame\.length/);
-// 描边只挂在暂停/seek 的完整绘制路径上，播放中的轻量路径不做全量比对。
-const drawBoxes = collision.match(/function drawAnnotationBoxes\([\s\S]*?\n}/);
+// 描边两条绘制路径都要画，播放时也不能少。
+const drawBoxes = collision.match(/function drawAnnotationBoxes\(frame[\s\S]*?\n}/);
 assert.ok(drawBoxes);
 assert.match(drawBoxes[0], /drawReviewConflictOutlines\(frameIdx, collisionSet, alarmSet, reviewCtx\)/);
 const drawLite = collision.match(/function drawAnnotationBoxesAccentOnly\([\s\S]*?\n}/);
 assert.ok(drawLite);
-assert.doesNotMatch(drawLite[0], /drawReviewConflictOutlines/);
+assert.match(drawLite[0], /drawReviewConflictOutlines\(frameIdx, ctxSets\.collisionSet, alarmSet, ctxSets\.reviewCtx\)/);
+// 描边本身不许碰 DOM，否则就没法进播放路径。
+const conflictDraw = recheck.match(/function drawReviewConflictOutlines\([\s\S]*?\n}/);
+assert.ok(conflictDraw);
+assert.doesNotMatch(conflictDraw[0], /updateReviewConflictBar|classList|textContent/);
+// 侧栏同步独立出来，且内容没变时不写 DOM。
+const conflictSync = recheck.match(/function syncReviewConflictUiForFrame\([\s\S]*?\n}/);
+assert.ok(conflictSync);
+assert.match(conflictSync[0], /reviewConflictBarSignature\(\) === lastReviewConflictBarSignature\) return/);
+assert.match(conflictSync[0], /setEventReviewRecheckEditing\(false, \{ auto: true \}\)/);
+// 签名不能含帧号，否则播放时每帧都判为脏，等于没做节流。
+const conflictSig = recheck.match(/function reviewConflictBarSignature\([\s\S]*?\n}/);
+assert.ok(conflictSig);
+assert.doesNotMatch(conflictSig[0], /frameIdx/);
+// 绘制路径只调节流版；无条件写 DOM 的版本留给模式切换。
+const skeletonFrame = collision.match(/function drawSkeletonFrame\([\s\S]*?\n}/);
+assert.ok(skeletonFrame);
+assert.match(skeletonFrame[0], /syncReviewConflictUiForFrame\(resolveOverlayFrameIdx\(frame\)\)/);
+assert.match(recheck, /function updateReviewConflictBar\(\)/);
 // 收尾清单复用页面内确认弹窗，只统计全量的事件级信息。
 assert.match(recheck, /function buildEventReviewChecklist/);
 assert.match(recheck, /openReviewConfirm\({/);
