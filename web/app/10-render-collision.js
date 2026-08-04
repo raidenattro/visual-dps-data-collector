@@ -1489,6 +1489,9 @@ function syncCanvasSize(opts = {}) {
 
 /** 回放/复核时标真范本货框高亮（含连续标真片段覆盖的帧范围） */
 function getReviewBoxHighlightContext(frameIdx = null) {
+  if (typeof showEventReviewHighlights !== "undefined" && !showEventReviewHighlights) {
+    return null;
+  }
   if (!playbackEvents?.length || !annotationBoxes.length) return null;
   if (!eventsPanel || eventsPanel.classList.contains("hidden")) return null;
 
@@ -1791,7 +1794,15 @@ function drawPersonIdLabels(frame, inferW, inferH, opts = {}) {
 
   // 播放时钉住的事件几乎不会正好落在当前帧，人物标签会一路是灰的。
   // 回退到本帧自己的标真事件，让配对颜色在播放中同样显示。
-  if (!reviewEv && labelFrameIdx > 0 && typeof getEventsOnFrame === "function") {
+  // 关闭「事件标真」图层时一并关掉这对配色，只保留当前钉住事件的交互选中态。
+  const allowEventHighlight =
+    typeof showEventReviewHighlights === "undefined" || !!showEventReviewHighlights;
+  if (
+    allowEventHighlight &&
+    !reviewEv &&
+    labelFrameIdx > 0 &&
+    typeof getEventsOnFrame === "function"
+  ) {
     for (const ev of getEventsOnFrame(labelFrameIdx)) {
       if (typeof isEventVerified === "function" && !isEventVerified(ev)) continue;
       const paired = (
@@ -1802,6 +1813,9 @@ function drawPersonIdLabels(frame, inferW, inferH, opts = {}) {
       paired.forEach((binding) => pairedPersonIds.add(Number(binding.person_id)));
       break;
     }
+  }
+  if (!allowEventHighlight) {
+    pairedPersonIds = new Set();
   }
 
   // 单人帧本来没有身份歧义才在播放时省略标签，但已配对的人物要显示出颜色。

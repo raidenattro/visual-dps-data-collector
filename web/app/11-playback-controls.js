@@ -164,6 +164,40 @@ function initPlaybackAlgoCollisionToggle() {
   });
 }
 
+function readShowEventReviewFromStorage() {
+  try {
+    const raw = localStorage.getItem(EVENT_REVIEW_HIGHLIGHT_STORAGE_KEY);
+    // 未写过时默认开启，与改造前行为一致。
+    return raw == null ? true : raw === "1";
+  } catch {
+    return true;
+  }
+}
+
+function persistShowEventReview() {
+  try {
+    localStorage.setItem(
+      EVENT_REVIEW_HIGHLIGHT_STORAGE_KEY,
+      showEventReviewHighlights ? "1" : "0"
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+function initPlaybackEventReviewToggle() {
+  const cb = $("#playback-show-event-review");
+  if (!cb || cb.dataset.bound) return;
+  cb.dataset.bound = "1";
+  showEventReviewHighlights = readShowEventReviewFromStorage();
+  cb.checked = showEventReviewHighlights;
+  cb.addEventListener("change", () => {
+    showEventReviewHighlights = !!cb.checked;
+    persistShowEventReview();
+    redrawCurrentFrame();
+  });
+}
+
 function readShowReviewRiskFromStorage() {
   try {
     const raw = localStorage.getItem(REVIEW_RISK_STORAGE_KEY);
@@ -852,6 +886,7 @@ initPlaybackSpeedControl();
 initPlaybackDetBboxToggle();
 initPlaybackSkeletonToggle();
 initPlaybackAlgoCollisionToggle();
+initPlaybackEventReviewToggle();
 initPlaybackReviewRiskToggle();
 initPlaybackFrameNavigationControls();
 initEventReviewControls();

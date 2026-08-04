@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>骨架采集与回放</title>
-  <link rel="stylesheet" href="style.css?v=81" />
+  <link rel="stylesheet" href="style.css?v=83" />
 </head>
 <body>
   <header>
@@ -535,9 +535,13 @@
                   <option value="6">6×</option>
                   <option value="8">8×</option>
                 </select>
+                <span class="playback-frame-toolbar-separator playback-time-separator" aria-hidden="true"></span>
+                <span class="playback-time-readout" title="当前播放时间" aria-label="当前播放时间">
+                  <span id="time-label">0:00</span>
+                </span>
               </div>
-              <span id="time-label">0:00</span>
               <div class="playback-overlay-toggles" role="group" aria-label="叠加层选项">
+                <span class="playback-overlay-title" aria-hidden="true">画面叠加</span>
                 <label class="playback-det-bbox-label toggle-row" title="叠加显示人体骨架连线与关键点（默认关闭，避免遮挡标注）">
                   <input type="checkbox" id="playback-show-skeleton" />
                   <span>骨架</span>
@@ -554,9 +558,13 @@
                   <input type="checkbox" id="playback-show-feature-labels" />
                   <span>特征ID</span>
                 </label>
-                <label class="playback-det-bbox-label toggle-row" title="叠加算法碰撞/告警色（黄/红）。关闭后只保留货框轮廓与人工确认色，减少标注干扰">
+                <label class="playback-det-bbox-label toggle-row" title="叠加算法碰撞/告警色（黄/红）。关闭后不再绘制算法状态色">
                   <input type="checkbox" id="playback-show-algo-collision" checked />
                   <span>算法色框</span>
+                </label>
+                <label class="playback-det-bbox-label toggle-row" title="叠加事件标真产生的货框高亮与配对色。关闭后只保留货框轮廓，便于对照原画面">
+                  <input type="checkbox" id="playback-show-event-review" checked />
+                  <span>事件标真</span>
                 </label>
                 <label class="playback-det-bbox-label toggle-row" title="复核模式下的漏标/标错描边与侧栏冲突提示。默认关闭，需要时再勾选">
                   <input type="checkbox" id="playback-show-review-risk" />
@@ -807,7 +815,7 @@
   <script src="annotateGeometry.js"></script>
   <script src="annotateVisualMode.js?v=2"></script>
   <!-- 回放/采集主逻辑（由 app.monolith.js 拆分，按依赖顺序加载） -->
-  <script src="app/00-core.js?v=81"></script>
+  <script src="app/00-core.js?v=82"></script>
   <script src="app/01-layout-frames.js?v=56"></script>
   <script src="app/02-playback-selection.js?v=36"></script>
   <script src="app/03-tabs.js?v=37"></script>
@@ -818,8 +826,8 @@
   <script src="app/08-event-review.js?v=107"></script>
   <script src="app/08-event-review-range.js?v=20"></script>
   <script src="app/09-playback-events.js?v=103"></script>
-  <script src="app/10-render-collision.js?v=127"></script>
-  <script src="app/11-playback-controls.js?v=108"></script>
+  <script src="app/10-render-collision.js?v=128"></script>
+  <script src="app/11-playback-controls.js?v=109"></script>
   <script src="app/12-event-review-workspace.js?v=9"></script>
   <script src="app/13-playback-skeleton-features.js?v=9"></script>
   <script src="app/14-event-review-recheck.js?v=7"></script>

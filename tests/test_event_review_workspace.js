@@ -129,12 +129,18 @@ assert.match(html, /id="event-review-recheck-btn"/);
 assert.match(html, /id="event-review-recheck-edit-btn"/);
 assert.match(html, /id="event-review-conflict-bar"/);
 assert.match(html, /class="playback-overlay-toggles"/);
+assert.match(html, /class="playback-overlay-title"[^>]*>画面叠加</);
+assert.match(html, /class="playback-time-readout"/);
 assert.match(html, /id="playback-show-algo-collision"/);
+assert.match(html, /id="playback-show-event-review"/);
 assert.match(html, /id="playback-show-review-risk"/);
+assert.match(html, /事件标真/);
 assert.match(html, /复核风险提示/);
 assert.match(controls, /initPlaybackAlgoCollisionToggle/);
+assert.match(controls, /initPlaybackEventReviewToggle/);
 assert.match(controls, /initPlaybackReviewRiskToggle/);
 assert.match(collision, /showAlgoCollisionColors/);
+assert.match(collision, /showEventReviewHighlights/);
 assert.match(recheck, /showReviewRiskHints/);
 // 复核模式是叠在侧栏之上的镜头，不能新增第三种侧栏 Tab。
 assert.match(recheck, /setEventReviewSideTab\(/);
