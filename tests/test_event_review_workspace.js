@@ -148,7 +148,7 @@ assert.match(conflicts[0], /isAlarm && verifiedOnFrame\.length/);
 const drawBoxes = collision.match(/function drawAnnotationBoxes\([\s\S]*?\n}/);
 assert.ok(drawBoxes);
 assert.match(drawBoxes[0], /drawReviewConflictOutlines\(frameIdx, collisionSet, alarmSet, reviewCtx\)/);
-const drawLite = collision.match(/function drawAnnotationBoxesCollisionOnly\([\s\S]*?\n}/);
+const drawLite = collision.match(/function drawAnnotationBoxesAccentOnly\([\s\S]*?\n}/);
 assert.ok(drawLite);
 assert.doesNotMatch(drawLite[0], /drawReviewConflictOutlines/);
 // 收尾清单复用页面内确认弹窗，只统计全量的事件级信息。

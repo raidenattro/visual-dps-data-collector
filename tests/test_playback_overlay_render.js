@@ -31,6 +31,37 @@ assert.doesNotMatch(liteBranch[0], /drawDetBboxes/);
 assert.doesNotMatch(render, /collisionSetsForPlaybackFrame/);
 assert.doesNotMatch(render, /播放热路径不实时算碰撞/);
 
+// lite 与 full 必须共用同一份上色决定，不能各留一份。
+assert.doesNotMatch(render, /drawAnnotationBoxesCollisionOnly/);
+assert.match(liteBranch[0], /drawAnnotationBoxesAccentOnly\(frame, inferW, inferH, collisionSets\)/);
+const fullBoxes = render.match(/function drawAnnotationBoxes\(frame[\s\S]*?\n}/);
+assert.ok(fullBoxes);
+assert.match(fullBoxes[0], /paintAnnotationBox\(displayPts, resolveAnnotationBoxState\(token, ctxSets\)\)/);
+const accentOnly = render.match(/function drawAnnotationBoxesAccentOnly\([\s\S]*?\n}/);
+assert.ok(accentOnly);
+// 播放路径必须拿到人工确认色与漏报/误报色，而不只是碰撞集。
+assert.match(accentOnly[0], /getReviewBoxHighlightContext\(frameIdx\)/);
+assert.match(accentOnly[0], /getAccuracyOutlineForFrame\(frameIdx, alarmSet\)/);
+assert.match(accentOnly[0], /paintAnnotationBox\(displayPts, state\)/);
+// 淡绿底色已在烘焙静态层里，播放时不该重复描一遍。
+assert.match(accentOnly[0], /annotationBoxStateIsPlain\(state\)\) return/);
+
+// 复核高亮不能再全表扫描：播放每帧都要算。
+const highlight = render.match(/function getReviewBoxHighlightContext\([\s\S]*?\n}\n/);
+assert.ok(highlight);
+assert.match(highlight[0], /getEventsOnFrame\(segmentFi\)/);
+
+// 人物标签：播放时钉住的事件通常不在当前帧，必须回退到本帧标真事件取配对色。
+const personLabels = render.match(/function drawPersonIdLabels\([\s\S]*?\n}\n/);
+assert.ok(personLabels);
+assert.match(personLabels[0], /if \(!reviewEv && labelFrameIdx > 0/);
+assert.match(personLabels[0], /pairedPersonIds\.add\(Number\(binding\.person_id\)\)/);
+// 已配对的单人帧在播放时也要出颜色。
+assert.match(
+  personLabels[0],
+  /mode === "lite" && framePersons\.length < 2 && !pairedPersonIds\.size/
+);
+
 // drawDetBboxes 不能再自己去取 layout。
 const detBboxes = render.match(/function drawDetBboxes\([\s\S]*?\n}/);
 assert.ok(detBboxes);

@@ -40,9 +40,43 @@ function eventRowKey(ev) {
   return `${eventType}:${frameIdx}:${tokens.join(",")}`;
 }
 
+/**
+ * 帧 → 该帧事件的索引。原先按帧取事件是全表 filter，一条记录上万条事件，
+ * 放进播放热路径会直接拖垮帧率（复核高亮因此长期只在暂停时才算）。
+ *
+ * playbackEvents 只会整体替换、从不原地增删，所以用数组身份判断失效就够了；
+ * 索引只存事件引用，标真/配对状态仍每次实时读，标注完不会看到旧高亮。
+ */
+let playbackEventFrameIndex = null;
+let playbackEventFrameIndexSource = null;
+
+function getPlaybackEventFrameIndex() {
+  if (playbackEventFrameIndex && playbackEventFrameIndexSource === playbackEvents) {
+    return playbackEventFrameIndex;
+  }
+  const index = new Map();
+  const add = (fi, ev) => {
+    if (!(fi > 0)) return;
+    const list = index.get(fi);
+    if (!list) index.set(fi, [ev]);
+    else if (!list.includes(ev)) list.push(ev);
+  };
+  playbackEvents.forEach((ev) => {
+    // eventMatchesPlaybackFrame 认 frame_idx 与 source_frame_idx 两者之一，索引也要两边都挂。
+    add(eventDisplayFrameIdx(ev), ev);
+    add(eventSourceFrameIdx(ev), ev);
+  });
+  playbackEventFrameIndex = index;
+  playbackEventFrameIndexSource = playbackEvents;
+  return index;
+}
+
 function getEventsOnFrame(frameIdx) {
   const fi = parseInt(frameIdx, 10) || 0;
-  return playbackEvents.filter((e) => eventMatchesPlaybackFrame(e, fi));
+  if (!fi) return [];
+  const hit = getPlaybackEventFrameIndex().get(fi);
+  // 复制一份：调用方拿去排序/增删不能改到索引内部。
+  return hit ? [...hit] : [];
 }
 
 /**

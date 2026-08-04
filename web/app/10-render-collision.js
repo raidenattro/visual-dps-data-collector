@@ -1487,14 +1487,13 @@ function getReviewBoxHighlightContext(frameIdx = null) {
 
   // 复核高亮仅落在该帧真实标真事件上，不用连续范本段范围（避免相邻帧/事件误涂紫）
   if (segmentFi != null && segmentFi > 0) {
-    for (const ev of playbackEvents) {
+    // 走按帧索引而不是全表扫描：播放时每帧都要算，上万条事件扫不起。
+    const frameEvents =
+      typeof getEventsOnFrame === "function"
+        ? getEventsOnFrame(segmentFi)
+        : playbackEvents.filter((ev) => eventMatchesPlaybackFrame(ev, segmentFi));
+    for (const ev of frameEvents) {
       if (typeof isEventVerified !== "function" || !isEventVerified(ev)) continue;
-      if (
-        typeof eventMatchesPlaybackFrame === "function" &&
-        !eventMatchesPlaybackFrame(ev, segmentFi)
-      ) {
-        continue;
-      }
       addEventBindingsToHighlight(ev);
     }
   }
@@ -1672,14 +1671,15 @@ function drawPersonIdLabels(frame, inferW, inferH, opts = {}) {
     !eventsPanel.classList.contains("hidden") &&
     typeof playbackEvents !== "undefined" &&
     playbackEvents.length > 0;
-  if (mode === "lite" && (!reviewActive || framePersons.length < 2)) return;
+  if (mode === "lite" && !reviewActive) return;
 
+  const labelFrameIdx = parseInt(frame?.frame_idx ?? frame?.source_frame_idx, 10) || 0;
   let selectedPid = null;
   let reviewEv = null;
   let pairedPersonIds = new Set();
   if (typeof getPinnedPlaybackEvent === "function" && typeof getEventPersonId === "function") {
     const ev = getPinnedPlaybackEvent();
-    const frameIdx = parseInt(frame?.frame_idx ?? frame?.source_frame_idx, 10) || 0;
+    const frameIdx = labelFrameIdx;
     if (
       ev &&
       typeof eventMatchesPlaybackFrame === "function" &&
@@ -1699,6 +1699,24 @@ function drawPersonIdLabels(frame, inferW, inferH, opts = {}) {
       }
     }
   }
+
+  // 播放时钉住的事件几乎不会正好落在当前帧，人物标签会一路是灰的。
+  // 回退到本帧自己的标真事件，让配对颜色在播放中同样显示。
+  if (!reviewEv && labelFrameIdx > 0 && typeof getEventsOnFrame === "function") {
+    for (const ev of getEventsOnFrame(labelFrameIdx)) {
+      if (typeof isEventVerified === "function" && !isEventVerified(ev)) continue;
+      const paired = (
+        typeof getEventEffectiveBindings === "function" ? getEventEffectiveBindings(ev) : []
+      ).filter((binding) => binding.person_id != null && binding.confirmed_box_tokens?.length);
+      if (!paired.length) continue;
+      reviewEv = ev;
+      paired.forEach((binding) => pairedPersonIds.add(Number(binding.person_id)));
+      break;
+    }
+  }
+
+  // 单人帧本来没有身份歧义才在播放时省略标签，但已配对的人物要显示出颜色。
+  if (mode === "lite" && framePersons.length < 2 && !pairedPersonIds.size) return;
 
   const layout = opts.layout || getDisplayLayout();
   ctx.save();
@@ -1952,27 +1970,112 @@ function drawPersonFeatureTrackLabels(frame, inferW, inferH) {
   ctx.restore();
 }
 
-/** 播放轻量模式：仅绘制当前帧碰撞/告警货框 */
-function drawAnnotationBoxesCollisionOnly(frame, inferW, inferH, collisionSets) {
-  if (!annotationBoxes.length || !collisionSets) return;
-  const { collisionSet, alarmSet } = collisionSets;
-  if (!collisionSet.size && !alarmSet.size) return;
+/** 叠加层对应的帧号（含 source_frame_idx 兼容与 overlay 映射） */
+function resolveOverlayFrameIdx(frame) {
+  const raw =
+    lastRenderedFrameIdx >= 1
+      ? lastRenderedFrameIdx
+      : Number(frame?.frame_idx) || Number(frame?.source_frame_idx) || 0;
+  return typeof playbackOverlayFrameIdx === "function"
+    ? playbackOverlayFrameIdx(raw) ?? raw
+    : raw;
+}
+
+/** 一个货框该显示成什么状态。lite 与 full 必须用同一份判断。 */
+function resolveAnnotationBoxState(token, ctxSets) {
+  return {
+    isAlarm: tokenInCollisionSet(token, ctxSets.alarmSet),
+    isHit: tokenInCollisionSet(token, ctxSets.collisionSet),
+    manualAccent: tokenValueInTokenMap(token, ctxSets.reviewCtx?.confirmedByToken) || null,
+    isMiss: tokenInTokenSet(token, ctxSets.missTokens),
+    isFalseAlarm: tokenInTokenSet(token, ctxSets.falseAlarmTokens),
+  };
+}
+
+/** 淡绿底色：播放时已由烘焙静态层画好，无需重复描。 */
+function annotationBoxStateIsPlain(state) {
+  return (
+    !state.manualAccent &&
+    !state.isFalseAlarm &&
+    !state.isMiss &&
+    !state.isAlarm &&
+    !state.isHit
+  );
+}
+
+/**
+ * 单个货框的填充/描边。lite 与 full 共用：两条路径各留一份颜色决定，
+ * 正是播放时人工确认色与碰撞色集体消失的根源。
+ */
+function paintAnnotationBox(displayPts, state) {
+  ctx.beginPath();
+  displayPts.forEach(([dx, dy], i) => {
+    if (i === 0) ctx.moveTo(dx, dy);
+    else ctx.lineTo(dx, dy);
+  });
+  ctx.closePath();
+
+  const accent = state.manualAccent;
+  if (accent) {
+    ctx.fillStyle =
+      typeof accent === "object" && accent.fill ? accent.fill : "rgba(168, 85, 247, 0.32)";
+    ctx.fill();
+    ctx.strokeStyle =
+      typeof accent === "object" && accent.stroke ? accent.stroke : "rgba(192, 132, 252, 0.98)";
+    ctx.lineWidth = 5;
+    ctx.stroke();
+  }
+
+  ctx.setLineDash([]);
+  ctx.shadowBlur = 0;
+  ctx.shadowColor = "transparent";
+  ctx.lineWidth = 3;
+
+  if (state.isFalseAlarm) {
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.9)";
+    ctx.lineWidth = 4.5;
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.98)";
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+  } else if (state.isMiss) {
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.95)";
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  } else if (state.isAlarm) {
+    ctx.strokeStyle = "rgba(255, 71, 87, 0.95)";
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+  } else if (state.isHit) {
+    ctx.strokeStyle = "rgba(255, 209, 102, 0.95)";
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+  } else {
+    ctx.strokeStyle = "rgba(0, 255, 0, 0.35)";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+}
+
+/**
+ * 播放轻量模式：淡绿底色已在烘焙静态层里，这里只补需要上色的框
+ * —— 人工确认、漏报/误报、碰撞/告警。
+ */
+function drawAnnotationBoxesAccentOnly(frame, inferW, inferH, collisionSets) {
+  if (!annotationBoxes.length) return;
+  const frameIdx = resolveOverlayFrameIdx(frame);
+  const alarmSet = collisionSets?.alarmSet || new Set();
+  const ctxSets = {
+    collisionSet: collisionSets?.collisionSet || new Set(),
+    alarmSet,
+    reviewCtx: getReviewBoxHighlightContext(frameIdx),
+    ...getAccuracyOutlineForFrame(frameIdx, alarmSet),
+  };
 
   getAnnotationDisplayCache().forEach(({ token, displayPts }) => {
-    const isAlarm = tokenInCollisionSet(token, alarmSet);
-    const isHit = tokenInCollisionSet(token, collisionSet);
-    if (!isAlarm && !isHit) return;
-
-    ctx.beginPath();
-    displayPts.forEach(([dx, dy], i) => {
-      if (i === 0) ctx.moveTo(dx, dy);
-      else ctx.lineTo(dx, dy);
-    });
-    ctx.closePath();
-    ctx.setLineDash([]);
-    ctx.lineWidth = isAlarm ? 2.5 : 2;
-    ctx.strokeStyle = isAlarm ? "rgba(255, 71, 87, 0.95)" : "rgba(255, 209, 102, 0.95)";
-    ctx.stroke();
+    const state = resolveAnnotationBoxState(token, ctxSets);
+    if (annotationBoxStateIsPlain(state)) return;
+    paintAnnotationBox(displayPts, state);
   });
 }
 
@@ -2000,75 +2103,17 @@ function drawAnnotationBoxes(frame, inferW, inferH, collisionSets = null, review
 
   const { collisionSet, alarmSet } =
     collisionSets || getFrameCollisionSets(frame, inferW, inferH);
-  const rawFrameIdx =
-    lastRenderedFrameIdx >= 1
-      ? lastRenderedFrameIdx
-      : Number(frame?.frame_idx) || Number(frame?.source_frame_idx) || 0;
-  const frameIdx =
-    typeof playbackOverlayFrameIdx === "function"
-      ? playbackOverlayFrameIdx(rawFrameIdx) ?? rawFrameIdx
-      : rawFrameIdx;
+  const frameIdx = resolveOverlayFrameIdx(frame);
   reviewCtx = reviewCtx ?? getReviewBoxHighlightContext(frameIdx);
-  const { missTokens, falseAlarmTokens } = getAccuracyOutlineForFrame(frameIdx, alarmSet);
+  const ctxSets = {
+    collisionSet,
+    alarmSet,
+    reviewCtx,
+    ...getAccuracyOutlineForFrame(frameIdx, alarmSet),
+  };
 
   getAnnotationDisplayCache().forEach(({ token, displayPts }) => {
-    const isAlarm = tokenInCollisionSet(token, alarmSet);
-    const isHit = tokenInCollisionSet(token, collisionSet);
-    const manualAccent = tokenValueInTokenMap(token, reviewCtx?.confirmedByToken);
-    const isManuallyConfirmed = !!manualAccent;
-    const isMiss = tokenInTokenSet(token, missTokens);
-    const isFalseAlarm = tokenInTokenSet(token, falseAlarmTokens);
-
-    ctx.beginPath();
-    displayPts.forEach(([dx, dy], i) => {
-      if (i === 0) ctx.moveTo(dx, dy);
-      else ctx.lineTo(dx, dy);
-    });
-    ctx.closePath();
-
-    if (isManuallyConfirmed) {
-      ctx.fillStyle =
-        typeof manualAccent === "object" && manualAccent.fill
-          ? manualAccent.fill
-          : "rgba(168, 85, 247, 0.32)";
-      ctx.fill();
-      ctx.strokeStyle =
-        typeof manualAccent === "object" && manualAccent.stroke
-          ? manualAccent.stroke
-          : "rgba(192, 132, 252, 0.98)";
-      ctx.lineWidth = 5;
-      ctx.stroke();
-    }
-
-    ctx.setLineDash([]);
-    ctx.shadowBlur = 0;
-    ctx.shadowColor = "transparent";
-    ctx.lineWidth = 3;
-
-    if (isFalseAlarm) {
-      ctx.strokeStyle = "rgba(0, 0, 0, 0.9)";
-      ctx.lineWidth = 4.5;
-      ctx.stroke();
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.98)";
-      ctx.lineWidth = 2.5;
-      ctx.stroke();
-    } else if (isMiss) {
-      ctx.strokeStyle = "rgba(0, 0, 0, 0.95)";
-      ctx.lineWidth = 3;
-      ctx.stroke();
-    } else if (isAlarm) {
-      ctx.strokeStyle = "rgba(255, 71, 87, 0.95)";
-      ctx.lineWidth = 2.5;
-      ctx.stroke();
-    } else if (isHit) {
-      ctx.strokeStyle = "rgba(255, 209, 102, 0.95)";
-      ctx.lineWidth = 2.5;
-      ctx.stroke();
-    } else {
-      ctx.strokeStyle = "rgba(0, 255, 0, 0.35)";
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-    }
+    paintAnnotationBox(displayPts, resolveAnnotationBoxState(token, ctxSets));
   });
 
   // 复核模式的冲突描边压在最上层：只在暂停/seek 的完整绘制路径上做。
@@ -2338,7 +2383,7 @@ function drawSkeletonFrame(frame, inferW, inferH, opts = {}) {
     if (frame && annotationBoxes.length) {
       const collisionSets =
         opts.collisionSets || getFrameCollisionSets(frame, inferW, inferH);
-      drawAnnotationBoxesCollisionOnly(frame, inferW, inferH, collisionSets);
+      drawAnnotationBoxesAccentOnly(frame, inferW, inferH, collisionSets);
     }
   } else {
     const collisionSets = opts.collisionSets ?? getFrameCollisionSets(frame, inferW, inferH);
