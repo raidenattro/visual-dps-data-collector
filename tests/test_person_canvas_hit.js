@@ -11,6 +11,13 @@ const start = source.indexOf("function hitTestPersonDetailAtClient");
 const end = source.indexOf("/** 骨骼特征", start);
 assert.ok(start >= 0 && end > start);
 
+// 命中测试靠 measureLabelWidth 算标签宽度，用真实实现而不是替身，
+// 才能保证命中框和画出来的标签量的是同一个宽度。
+const labelWidthHelper = source.match(
+  /const PERSON_LABEL_FONT =[\s\S]*?\nfunction measureLabelWidth\([\s\S]*?\n}/
+);
+assert.ok(labelWidthHelper, "未找到 measureLabelWidth 实现");
+
 const persons = [
   {
     person_id: 0,
@@ -60,7 +67,7 @@ const context = vm.createContext({
     font: "",
   },
 });
-vm.runInContext(source.slice(start, end), context);
+vm.runInContext(`${labelWidthHelper[0]}\n${source.slice(start, end)}`, context);
 
 // 点击完整标签区域（不只是旧版中心 22px）可以选人。
 assert.equal(context.hitTestPersonAtClient(188, 74), 0);

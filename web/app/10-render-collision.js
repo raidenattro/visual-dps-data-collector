@@ -17,9 +17,7 @@ function boxCollisionToken(box) {
 }
 
 /** 同一货位的多种 token 写法（Box_id 与 shelf:id）用于复核高亮查找 */
-function boxTokenLookupKeys(token) {
-  const t = String(token || "").trim();
-  if (!t) return [];
+function computeBoxTokenLookupKeys(t) {
   const keys = new Set([t]);
   let boxId = "";
   if (t.startsWith("Box_")) {
@@ -37,7 +35,41 @@ function boxTokenLookupKeys(token) {
       }
     }
   }
-  return [...keys];
+  // 冻结：返回的是共享数组，调用方只该遍历。真有人去改会立刻抛错而不是静默污染缓存。
+  return Object.freeze([...keys]);
+}
+
+const EMPTY_BOX_TOKEN_KEYS = Object.freeze([]);
+const boxTokenLookupKeysCache = new Map();
+let boxTokenLookupKeysCacheSource = null;
+let boxTokenLookupKeysCacheLength = -1;
+
+/**
+ * token → 等价查找键，带缓存。
+ *
+ * 未缓存时这里要遍历全部货框做字符串比对，而绘制路径上每个货框每帧要调五次
+ * （告警/碰撞/人工确认/漏报/误报），冲突判定还要再三次 —— 30 个货框就是每帧数千次
+ * trim 加上百次临时 Set/数组分配，播放时这是货框与人员高亮的主要开销。
+ *
+ * 结果只取决于 token 与 annotationBoxes；后者只会整体替换，用数组身份 + 长度判断失效，
+ * 不依赖各处赋值点记得手动清缓存。
+ */
+function boxTokenLookupKeys(token) {
+  const t = String(token || "").trim();
+  if (!t) return EMPTY_BOX_TOKEN_KEYS;
+  if (
+    boxTokenLookupKeysCacheSource !== annotationBoxes ||
+    boxTokenLookupKeysCacheLength !== annotationBoxes.length
+  ) {
+    boxTokenLookupKeysCache.clear();
+    boxTokenLookupKeysCacheSource = annotationBoxes;
+    boxTokenLookupKeysCacheLength = annotationBoxes.length;
+  }
+  const cached = boxTokenLookupKeysCache.get(t);
+  if (cached) return cached;
+  const keys = computeBoxTokenLookupKeys(t);
+  boxTokenLookupKeysCache.set(t, keys);
+  return keys;
 }
 
 /** 采集落盘碰撞 token 与当前货框 token 可能格式不同（Box_id vs shelf:id） */
@@ -1659,6 +1691,29 @@ function drawDetBboxes(frame, inferW, inferH, layoutOverride = null) {
   ctx.restore();
 }
 
+const PERSON_LABEL_FONT = "bold 14px system-ui, sans-serif";
+
+/**
+ * 标签宽度缓存。measureText 是真实的 canvas 调用，人物标签每人每帧都要量一次，
+ * 而文本只有「人物1」「P0」这种极少数取值。measureText 不受 ctx 变换影响，
+ * 只取决于字体与文本，按二者做键即可。
+ */
+const measuredLabelWidths = new Map();
+
+function measureLabelWidth(text, font) {
+  const key = `${font}|${text}`;
+  let width = measuredLabelWidths.get(key);
+  if (width === undefined) {
+    // 只在未命中时碰 ctx.font，并且原样还原，免得给调用方留下时有时无的字体状态。
+    const prevFont = ctx.font;
+    ctx.font = font;
+    width = ctx.measureText(text).width;
+    ctx.font = prevFont;
+    measuredLabelWidths.set(key, width);
+  }
+  return width;
+}
+
 /** 骨架旁 person_id 标签（复核时区分多人；选中项高亮） */
 function drawPersonIdLabels(frame, inferW, inferH, opts = {}) {
   const framePersons = frame?.persons || [];
@@ -1720,7 +1775,7 @@ function drawPersonIdLabels(frame, inferW, inferH, opts = {}) {
 
   const layout = opts.layout || getDisplayLayout();
   ctx.save();
-  ctx.font = "bold 14px system-ui, sans-serif";
+  ctx.font = PERSON_LABEL_FONT;
 
   framePersons.forEach((person, idx) => {
     const pid = person.person_id != null ? person.person_id : idx;
@@ -1739,8 +1794,7 @@ function drawPersonIdLabels(frame, inferW, inferH, opts = {}) {
     const text = stable ? `人物${stable.stableLabel}` : `P${pid}`;
     const padX = 6;
     const padY = 3;
-    const metrics = ctx.measureText(text);
-    const boxW = metrics.width + padX * 2;
+    const boxW = measureLabelWidth(text, PERSON_LABEL_FONT) + padX * 2;
     const boxH = 20;
     const left = dx - boxW / 2;
     const top = dy - 36;
@@ -1800,11 +1854,9 @@ function hitTestPersonDetailAtClient(clientX, clientY) {
       typeof getStablePersonDisplayInfo === "function"
         ? getStablePersonDisplayInfo(fi, person, idx)
         : null;
-    ctx.save();
-    ctx.font = "bold 14px system-ui, sans-serif";
     const labelText = stable ? `人物${stable.stableLabel}` : `P${pid}`;
-    const labelW = ctx.measureText(labelText).width + 12;
-    ctx.restore();
+    // 与 drawPersonIdLabels 共用宽度来源，命中框和画出来的标签才不会错位。
+    const labelW = measureLabelWidth(labelText, PERSON_LABEL_FONT) + 12;
     const labelLeft = dx - labelW / 2;
     const labelTop = dy - 36;
     const insideLabel =

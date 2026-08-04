@@ -385,6 +385,15 @@ function reviewPersonAccentIndex(stableId) {
   return Number.isFinite(value) ? Math.abs(Math.trunc(value)) % 4 : 0;
 }
 
+// 提到模块级：取色在绘制热路径上（每人每帧、每个配对每帧各一次），
+// 原先每次调用都要新建整个调色板。冻结以防调用方就地改坏共享对象。
+const REVIEW_PERSON_ACCENT_PALETTE = Object.freeze([
+  Object.freeze({ index: 0, name: "purple", fill: "rgba(168, 85, 247, 0.36)", labelFill: "rgba(126, 34, 206, 0.94)", stroke: "rgba(192, 132, 252, 0.98)" }),
+  Object.freeze({ index: 1, name: "orange", fill: "rgba(249, 115, 22, 0.36)", labelFill: "rgba(194, 65, 12, 0.94)", stroke: "rgba(251, 146, 60, 0.98)" }),
+  Object.freeze({ index: 2, name: "cyan", fill: "rgba(6, 182, 212, 0.34)", labelFill: "rgba(14, 116, 144, 0.94)", stroke: "rgba(34, 211, 238, 0.98)" }),
+  Object.freeze({ index: 3, name: "green", fill: "rgba(34, 197, 94, 0.32)", labelFill: "rgba(21, 128, 61, 0.94)", stroke: "rgba(74, 222, 128, 0.98)" }),
+]);
+
 function getReviewPersonAccentStyle(
   ev,
   personId,
@@ -411,13 +420,7 @@ function getReviewPersonAccentStyle(
   const index = reviewPersonAccentIndex(
     info?.stableId ?? hintedStableId ?? fallbackIndex
   );
-  const palette = [
-    { index: 0, name: "purple", fill: "rgba(168, 85, 247, 0.36)", labelFill: "rgba(126, 34, 206, 0.94)", stroke: "rgba(192, 132, 252, 0.98)" },
-    { index: 1, name: "orange", fill: "rgba(249, 115, 22, 0.36)", labelFill: "rgba(194, 65, 12, 0.94)", stroke: "rgba(251, 146, 60, 0.98)" },
-    { index: 2, name: "cyan", fill: "rgba(6, 182, 212, 0.34)", labelFill: "rgba(14, 116, 144, 0.94)", stroke: "rgba(34, 211, 238, 0.98)" },
-    { index: 3, name: "green", fill: "rgba(34, 197, 94, 0.32)", labelFill: "rgba(21, 128, 61, 0.94)", stroke: "rgba(74, 222, 128, 0.98)" },
-  ];
-  return palette[index];
+  return REVIEW_PERSON_ACCENT_PALETTE[index];
 }
 
 function getStableReviewPersonOptions(ev) {
