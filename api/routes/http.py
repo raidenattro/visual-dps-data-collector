@@ -50,6 +50,8 @@ from pose_store import (
     load_pose_header,
     load_timeline_index,
     load_timeline,
+    playback_cache_is_warm,
+    REVIEW_STATUS_NO_COLLISION,
     ensure_no_collision_review_completed,
     event_review_status_label,
     record_has_skeleton_data,
@@ -101,6 +103,7 @@ from api.record_service import (
     persist_annotation_for_video,
     record_id_from_pose_path,
     record_meta_for_list,
+    record_playback_frame_contract,
     record_summary_for_list,
     resolve_annotation_path_for_record,
     resolve_annotation_path_for_source,
@@ -738,10 +741,12 @@ def get_record_video_preview_status(record_id: str) -> dict[str, Any]:
 
 @router.get("/api/records/{record_id:path}/video")
 def get_record_video(record_id: str, original: bool = False) -> FileResponse:
-    if original:
-        path = video_path_for_record(record_id)
-    else:
-        path = playback_video_path_for_record(record_id)
+    source = video_path_for_record(record_id)
+    if source and source.is_file():
+        contract = record_playback_frame_contract(record_id, source)
+        if not contract.get("ok"):
+            raise HTTPException(status_code=409, detail=contract)
+    path = source if original else playback_video_path_for_record(record_id)
     if not path or not path.is_file():
         raise HTTPException(404, "配套视频不存在")
     media = VIDEO_MIME.get(path.suffix.lower(), "application/octet-stream")
@@ -1125,19 +1130,22 @@ def get_record_events(record_id: str) -> JSONResponse:
     locator = locate_record_by_id(record_id)
     if not locator:
         raise HTTPException(404, "记录不存在")
+    cache_hit = playback_cache_is_warm(locator, "events")
+    started = time.perf_counter()
     try:
         events = load_events(locator)
         if not record_has_skeleton_data(locator):
             review = ensure_no_collision_review_completed(locator, event_count=0)
         else:
             review = ensure_no_collision_review_completed(locator, event_count=len(events))
-        events = enrich_events_with_review(events, locator)
+        events = enrich_events_with_review(events, locator, review=review)
     except RuntimeError as exc:
         raise HTTPException(500, str(exc)) from exc
     alarm_n = sum(1 for e in events if e.get("event_type") == "alarm")
     collision_n = sum(1 for e in events if e.get("event_type") == "collision")
     verified_n = sum(1 for e in events if e.get("verified_true"))
     review_status = resolve_event_review_status(review, event_count=len(events))
+    elapsed_ms = (time.perf_counter() - started) * 1000.0
     return JSONResponse(
         {
             "record_id": record_id,
@@ -1149,7 +1157,11 @@ def get_record_events(record_id: str) -> JSONResponse:
             "event_review_label": event_review_status_label(review_status),
             "events": events,
             "event_review": review,
-        }
+        },
+        headers={
+            "Server-Timing": f'events;dur={elapsed_ms:.2f}',
+            "X-Playback-Cache": "hit" if cache_hit else "miss",
+        },
     )
 
 
@@ -1190,6 +1202,8 @@ def get_record_timeline(record_id: str, light: bool = False) -> JSONResponse:
     locator = locate_record_by_id(record_id)
     if not locator:
         raise HTTPException(404, "记录不存在")
+    cache_hit = playback_cache_is_warm(locator, "timeline" if light else "tables")
+    started = time.perf_counter()
     try:
         if light:
             timeline = load_timeline_index(locator)
@@ -1209,7 +1223,14 @@ def get_record_timeline(record_id: str, light: bool = False) -> JSONResponse:
             timeline = load_timeline(locator)
     except RuntimeError as exc:
         raise HTTPException(500, str(exc)) from exc
-    return JSONResponse({"record_id": record_id, "count": len(timeline), "timeline": timeline})
+    elapsed_ms = (time.perf_counter() - started) * 1000.0
+    return JSONResponse(
+        {"record_id": record_id, "count": len(timeline), "timeline": timeline},
+        headers={
+            "Server-Timing": f'timeline;dur={elapsed_ms:.2f}',
+            "X-Playback-Cache": "hit" if cache_hit else "miss",
+        },
+    )
 
 
 @router.get("/api/records/{record_id:path}/wrist-features")
@@ -1299,10 +1320,13 @@ def get_record_frames(
     hi = int(to_frame) if to_frame is not None else lo + 119
     if hi < lo:
         hi = lo
+    cache_hit = playback_cache_is_warm(locator, "tables")
+    started = time.perf_counter()
     try:
         frames = load_frames_range(locator, from_frame_idx=lo, to_frame_idx=hi)
     except RuntimeError as exc:
         raise HTTPException(500, str(exc)) from exc
+    elapsed_ms = (time.perf_counter() - started) * 1000.0
     return JSONResponse(
         {
             "record_id": record_id,
@@ -1310,7 +1334,11 @@ def get_record_frames(
             "to_frame": hi,
             "count": len(frames),
             "frames": frames,
-        }
+        },
+        headers={
+            "Server-Timing": f'frames;dur={elapsed_ms:.2f}',
+            "X-Playback-Cache": "hit" if cache_hit else "miss",
+        },
     )
 
 

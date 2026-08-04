@@ -23,12 +23,18 @@ let frameCache = new Map();
 /** 已拉取的 Parquet 分块 "from-to"，避免播放时重复请求 */
 const loadedChunkKeys = new Set();
 const prefetchPromises = new Map();
+/** 已加载分块的帧键与 LRU 顺序；限制长记录的浏览器内存占用。 */
+const loadedFrameChunks = new Map();
+let frameFetchController = null;
+let frameFetchGeneration = 0;
+let frameCacheEvictionSuspended = false;
 let renderGeneration = 0;
 let lastRenderedFrameIdx = -1;
 /** 播放循环中已绘制的骨架帧号，避免 RAF 在相邻帧边界来回切换 */
 let tickPoseFrameIdx = -1;
 let currentRecordId = null;
 let playbackEvents = [];
+let playbackEventsLoading = false;
 /** 事件列表来自回放实时重算（非采集落盘） */
 let playbackEventsFromRealtime = false;
 let activeEventKey = null;
@@ -58,7 +64,9 @@ let reviewBackKey = null;
 let currentEventReviewStatus = "not_started";
 const FRAME_CHUNK_SIZE = 200;
 /** 打开记录时并行预取的分块数 */
-const FRAME_CHUNK_PREFETCH_INITIAL = 8;
+const FRAME_CHUNK_PREFETCH_INITIAL = 2;
+/** 浏览器最多保留的骨架分块数。 */
+const FRAME_CHUNK_CACHE_MAX = 16;
 /** 播放中提前预取的下一块数量 */
 const FRAME_CHUNK_PREFETCH_AHEAD = 3;
 /** 块内进度超过该比例时触发下一块预取 */
@@ -77,6 +85,21 @@ let cachedDisplayLayout = null;
 let cachedDisplayLayoutKey = "";
 /** frame_idx → events[]，加速播放时事件定位 */
 let playbackEventsFrameIndex = new Map();
+let playbackEventsTimeIndex = [];
+let playbackEventsByKey = new Map();
+let playbackEventPositionByKey = new Map();
+let verifiedPlaybackEventsFrameIndex = new Map();
+let playbackEventStats = { alarm: 0, collision: 0, verified: 0 };
+let playbackEventsIndexVersion = 0;
+/** 仅事件集合或顺序变化时递增；标真状态变化不触发时间轴结构重建。 */
+let playbackEventsStructureVersion = 0;
+let filteredPlaybackEventsCache = {
+  mode: "",
+  version: -1,
+  list: [],
+  set: new Set(),
+  positions: new Map(),
+};
 /** renderAtTime 合并：避免慢绘制时叠多个 in-flight 请求 */
 let renderAtTimeInflight = false;
 let renderAtTimePendingTime = null;
@@ -99,6 +122,8 @@ let pausedPlaybackCanvasCss = null;
 let lastPlaybackMediaTimeSec = null;
 /** 逐帧/事件 seek 后 video.currentTime 是否为 timeline+PTS（与连续播放 timeline 轴不同） */
 let playbackVideoClockUsesPtsSeek = false;
+/** 派生预览由 ffmpeg 显式归零 PTS，不能再套用原片 video_start_pts_sec。 */
+let playbackVideoUsesDerivedPreview = false;
 /** 播放 UI 节流时间戳 */
 let lastPlaybackUiSyncMs = 0;
 /** 播放循环当前视频帧号（与 tickPoseFrameIdx 区分） */
@@ -133,3 +158,20 @@ function canonicalizeBoxTokenList(tokens) {
   return out;
 }
 
+const PLAYBACK_DEBUG_STORAGE_KEY = "visual-dps-playback-debug";
+
+function playbackDebugEnabled() {
+  try {
+    return (
+      typeof localStorage !== "undefined" &&
+      localStorage.getItem(PLAYBACK_DEBUG_STORAGE_KEY) === "1"
+    );
+  } catch {
+    return false;
+  }
+}
+
+function playbackDebugLog(event, detail = {}) {
+  if (!playbackDebugEnabled()) return;
+  console.debug(`[playback] ${event}`, detail);
+}

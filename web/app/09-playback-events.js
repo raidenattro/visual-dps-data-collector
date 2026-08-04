@@ -213,21 +213,155 @@ async function renderExplicitPlaybackFrame(frameIdx) {
 /** 重建 frame_idx → events[] 索引，加速播放时同帧查找 */
 function rebuildPlaybackEventsFrameIndex() {
   playbackEventsFrameIndex = new Map();
-  (playbackEvents || []).forEach((ev) => {
+  playbackEventsByKey = new Map();
+  playbackEventPositionByKey = new Map();
+  verifiedPlaybackEventsFrameIndex = new Map();
+  playbackEventStats = { alarm: 0, collision: 0, verified: 0 };
+  (playbackEvents || []).forEach((ev, position) => {
     const fi = parseInt(ev.frame_idx, 10) || 0;
     if (!fi) return;
     if (!playbackEventsFrameIndex.has(fi)) playbackEventsFrameIndex.set(fi, []);
     playbackEventsFrameIndex.get(fi).push(ev);
+    playbackEventsByKey.set(eventRowKey(ev), ev);
+    playbackEventPositionByKey.set(eventRowKey(ev), position);
+    if (ev.event_type === "alarm") playbackEventStats.alarm++;
+    else if (ev.event_type === "collision") playbackEventStats.collision++;
+    if (typeof isEventVerified === "function" && isEventVerified(ev)) {
+      playbackEventStats.verified++;
+      if (!verifiedPlaybackEventsFrameIndex.has(fi)) verifiedPlaybackEventsFrameIndex.set(fi, []);
+      verifiedPlaybackEventsFrameIndex.get(fi).push(ev);
+    }
   });
+  playbackEventsTimeIndex = [...(playbackEvents || [])].sort(
+    (a, b) =>
+      (Number(a.timestamp_sec) || 0) - (Number(b.timestamp_sec) || 0) ||
+      (Number(a.frame_idx) || 0) - (Number(b.frame_idx) || 0)
+  );
+  playbackEventsIndexVersion++;
+  playbackEventsStructureVersion++;
+  filteredPlaybackEventsCache = {
+    mode: "",
+    version: -1,
+    list: [],
+    set: new Set(),
+    positions: new Map(),
+  };
+}
+
+function yieldPlaybackEventWork() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+async function primePlaybackEventKeys(events, chunkSize = 400) {
+  const rows = events || [];
+  for (let start = 0; start < rows.length; start += chunkSize) {
+    const end = Math.min(rows.length, start + chunkSize);
+    for (let index = start; index < end; index += 1) eventRowKey(rows[index]);
+    if (end < rows.length) await yieldPlaybackEventWork();
+  }
+}
+
+async function rebuildPlaybackEventsFrameIndexAsync(chunkSize = 400) {
+  playbackEventsFrameIndex = new Map();
+  playbackEventsByKey = new Map();
+  playbackEventPositionByKey = new Map();
+  verifiedPlaybackEventsFrameIndex = new Map();
+  playbackEventStats = { alarm: 0, collision: 0, verified: 0 };
+  const rows = playbackEvents || [];
+  for (let start = 0; start < rows.length; start += chunkSize) {
+    const end = Math.min(rows.length, start + chunkSize);
+    for (let position = start; position < end; position += 1) {
+      const ev = rows[position];
+      const fi = parseInt(ev.frame_idx, 10) || 0;
+      if (!fi) continue;
+      const key = eventRowKey(ev);
+      if (!playbackEventsFrameIndex.has(fi)) playbackEventsFrameIndex.set(fi, []);
+      playbackEventsFrameIndex.get(fi).push(ev);
+      playbackEventsByKey.set(key, ev);
+      playbackEventPositionByKey.set(key, position);
+      if (ev.event_type === "alarm") playbackEventStats.alarm++;
+      else if (ev.event_type === "collision") playbackEventStats.collision++;
+      if (typeof isEventVerified === "function" && isEventVerified(ev)) {
+        playbackEventStats.verified++;
+        if (!verifiedPlaybackEventsFrameIndex.has(fi)) verifiedPlaybackEventsFrameIndex.set(fi, []);
+        verifiedPlaybackEventsFrameIndex.get(fi).push(ev);
+      }
+    }
+    if (end < rows.length) await yieldPlaybackEventWork();
+  }
+  playbackEventsTimeIndex = [...rows].sort(
+    (a, b) =>
+      (Number(a.timestamp_sec) || 0) - (Number(b.timestamp_sec) || 0) ||
+      (Number(a.frame_idx) || 0) - (Number(b.frame_idx) || 0)
+  );
+  playbackEventsIndexVersion++;
+  playbackEventsStructureVersion++;
+  filteredPlaybackEventsCache = {
+    mode: "",
+    version: -1,
+    list: [],
+    set: new Set(),
+    positions: new Map(),
+  };
 }
 
 function eventsAtFrameIndexed(frameIdx, pool = null) {
   const fi = parseInt(frameIdx, 10) || 0;
   if (!fi) return [];
   const atFrame = playbackEventsFrameIndex.get(fi) || [];
-  if (!pool) return atFrame;
-  const poolSet = new Set(pool);
+  if (!pool || pool === playbackEvents) return atFrame;
+  const poolSet =
+    pool === filteredPlaybackEventsCache.list
+      ? filteredPlaybackEventsCache.set
+      : new Set(pool);
   return atFrame.filter((e) => poolSet.has(e));
+}
+
+function verifiedEventsAtFrameIndexed(frameIdx) {
+  const fi = parseInt(frameIdx, 10) || 0;
+  return fi ? verifiedPlaybackEventsFrameIndex.get(fi) || [] : [];
+}
+
+function refreshPlaybackEventVerificationIndex(ev) {
+  const fi = parseInt(ev?.frame_idx, 10) || 0;
+  if (fi) {
+    const current = verifiedPlaybackEventsFrameIndex.get(fi) || [];
+    const wasVerified = current.includes(ev);
+    const next = current.filter((item) => item !== ev);
+    const nowVerified = typeof isEventVerified === "function" && isEventVerified(ev);
+    if (nowVerified) next.push(ev);
+    if (next.length) verifiedPlaybackEventsFrameIndex.set(fi, next);
+    else verifiedPlaybackEventsFrameIndex.delete(fi);
+    if (wasVerified !== nowVerified) playbackEventStats.verified += nowVerified ? 1 : -1;
+  }
+  playbackEventsIndexVersion++;
+  filteredPlaybackEventsCache = {
+    mode: "",
+    version: -1,
+    list: [],
+    set: new Set(),
+    positions: new Map(),
+  };
+}
+
+function findNearestEventByTimestamp(events, timeSec) {
+  if (!events?.length) return null;
+  const t = Math.max(0, Number(timeSec) || 0);
+  let lo = 0;
+  let hi = events.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if ((Number(events[mid].timestamp_sec) || 0) < t) lo = mid + 1;
+    else hi = mid;
+  }
+  const right = events[Math.min(events.length - 1, lo)];
+  const left = events[Math.max(0, lo - 1)];
+  if (!left) return right;
+  if (!right) return left;
+  return Math.abs((Number(left.timestamp_sec) || 0) - t) <=
+    Math.abs((Number(right.timestamp_sec) || 0) - t)
+    ? left
+    : right;
 }
 
 /** 采集时是否已启用碰撞并落盘（有则信任存储字段，含空数组） */
@@ -270,7 +404,13 @@ async function buildPlaybackEventsFromRealtime(recordId) {
   if (!annotationBoxes.length || collisionPersistedAtCollect()) return [];
   resetPlaybackCollisionTracker();
   const tracker = getPlaybackCollisionTracker();
-  const frames = await collectAllFramesForPlayback(recordId);
+  frameCacheEvictionSuspended = true;
+  let frames;
+  try {
+    frames = await collectAllFramesForPlayback(recordId);
+  } finally {
+    frameCacheEvictionSuspended = false;
+  }
   const events = [];
   for (const fr of frames) {
     const inferW = Number(fr.infer_width) || Number(poseData?.infer_width) || 640;
@@ -302,12 +442,29 @@ async function buildPlaybackEventsFromRealtime(recordId) {
       });
     }
   }
+  evictOldFrameChunks();
   events.sort((a, b) => a.timestamp_sec - b.timestamp_sec || a.frame_idx - b.frame_idx);
   return events;
 }
 
+function setPlaybackEventsLoadingState(loading) {
+  playbackEventsLoading = !!loading;
+  if (!eventsPanel) return;
+  eventsPanel.classList.toggle("events-loading", playbackEventsLoading);
+  eventsPanel.setAttribute("aria-busy", playbackEventsLoading ? "true" : "false");
+  if (playbackEventsLoading) {
+    eventsPanel.classList.remove("hidden");
+    if (eventCountLabel) eventCountLabel.textContent = "事件与复核状态加载中…";
+    const summary = $("#event-review-list-summary");
+    if (summary) summary.textContent = "全部事件列表（加载中…）";
+  }
+}
+
 async function loadPlaybackEvents(recordId = null) {
+  const loadGeneration = frameFetchGeneration;
+  const requestedRecordId = recordId;
   playbackEvents = [];
+  setPlaybackEventsLoadingState(true);
   playbackEventsFromRealtime = false;
   activeEventKey = null;
   playbackEventLinkExact = false;
@@ -328,10 +485,25 @@ async function loadPlaybackEvents(recordId = null) {
 
   if (recordId) {
     try {
-      const res = await fetch(recordApiUrl(recordId, "/events"));
+      const res = await fetch(recordApiUrl(recordId, "/events"), {
+        signal: frameFetchController?.signal,
+      });
       if (res.ok) {
         const body = await res.json();
+        if (
+          loadGeneration !== frameFetchGeneration ||
+          requestedRecordId !== currentRecordId
+        ) {
+          return;
+        }
         playbackEvents = Array.isArray(body.events) ? body.events : [];
+        await primePlaybackEventKeys(playbackEvents);
+        if (
+          loadGeneration !== frameFetchGeneration ||
+          requestedRecordId !== currentRecordId
+        ) {
+          return;
+        }
         syncVerifiedKeysFromEvents(playbackEvents, body.event_review);
         currentEventReviewStatus =
           body.event_review_status ||
@@ -350,7 +522,8 @@ async function loadPlaybackEvents(recordId = null) {
           );
         }
       }
-    } catch {
+    } catch (err) {
+      if (err?.name === "AbortError" || loadGeneration !== frameFetchGeneration) return;
       /* 忽略 */
     }
   } else if (poseData?.frames?.length) {
@@ -369,7 +542,14 @@ async function loadPlaybackEvents(recordId = null) {
   playbackEvents.forEach((ev) => {
     if (isEventVerified(ev)) applyAutoConfirmedBoxOnVerify(ev);
   });
-  rebuildPlaybackEventsFrameIndex();
+  await rebuildPlaybackEventsFrameIndexAsync();
+  if (
+    loadGeneration !== frameFetchGeneration ||
+    requestedRecordId !== currentRecordId
+  ) {
+    return;
+  }
+  setPlaybackEventsLoadingState(false);
   renderEventReviewList();
   invalidatePlaybackAccuracyOverlay();
 }
@@ -568,24 +748,16 @@ function findEventForPlaybackPosition(timeSec, frameIdx = null) {
       return atFrame.find((e) => e.event_type === "alarm") || atFrame[0];
     }
   }
-  const t = Math.max(0, Number(timeSec) || 0);
-  let best = pool[0];
-  let bestDist = Math.abs((Number(best.timestamp_sec) || 0) - t);
-  for (const ev of pool) {
-    const d = Math.abs((Number(ev.timestamp_sec) || 0) - t);
-    if (
-      d < bestDist ||
-      (d === bestDist && (Number(ev.timestamp_sec) || 0) < (Number(best.timestamp_sec) || 0))
-    ) {
-      best = ev;
-      bestDist = d;
-    }
-  }
-  return best;
+  const timeIndex = pool === playbackEvents ? playbackEventsTimeIndex : pool;
+  return findNearestEventByTimestamp(timeIndex, timeSec);
 }
 
 /** 播放中刷新右侧帧号/事件 meta（同事件时也需更新画面帧） */
 function refreshPlaybackReviewUiDuringPlay(frameIdx, timeSec) {
+  if (typeof updatePlaybackReviewUiDuringPlay === "function") {
+    updatePlaybackReviewUiDuringPlay(frameIdx, timeSec);
+    return;
+  }
   if (typeof updateEventReviewFrameNavUi === "function") updateEventReviewFrameNavUi();
   if (typeof updatePlaybackReviewFrameMeta === "function") {
     updatePlaybackReviewFrameMeta(frameIdx);
@@ -665,11 +837,13 @@ function syncActiveEventFromPlaybackPosition(opts = {}) {
   if (!opts.keepReviewBack && reviewBackKey && key !== reviewBackKey) {
     reviewBackKey = null;
   }
+  if (duringPlayback) {
+    refreshPlaybackReviewUiDuringPlay(frameIdx, timeSec);
+    updateEventMarkerActiveState();
+    return;
+  }
   updateReviewDock({ skipRedraw: opts.skipRedraw });
-  if (followPlayback) {
-    if (typeof patchEventReviewTableActiveState === "function") patchEventReviewTableActiveState();
-    if (typeof scrollActiveEventRowIntoView === "function") scrollActiveEventRowIntoView();
-  } else if ($("#event-review-list-details")?.open) renderEventReviewTable();
+  if ($("#event-review-list-details")?.open) renderEventReviewTable();
   updateEventMarkerActiveState();
   if (typeof updateStageBoxPickMode === "function") updateStageBoxPickMode();
   if (!opts.skipRedraw && typeof redrawCurrentFrame === "function") redrawCurrentFrame();
@@ -685,10 +859,9 @@ function updateEventMarkerActiveState() {
     if (!container) return;
     container.querySelectorAll(".active").forEach((dot) => dot.classList.remove("active"));
     if (!activeBucket) return;
-    container
-      .querySelector(`[data-bucket="${activeBucket}"]`)
-      ?.classList.add("active");
+    container.querySelector(`[data-bucket="${activeBucket}"]`)?.classList.add("active");
   });
+  if (typeof renderEventMarkerCursor === "function") renderEventMarkerCursor();
 }
 
 async function seekToTimestamp(timeSec, frameIdx = null, opts = {}) {
@@ -711,7 +884,12 @@ async function seekToTimestamp(timeSec, frameIdx = null, opts = {}) {
     const prevTime = videoEl.currentTime;
     if (hitByIdx && typeof videoSeekTimeForFrameIdx === "function") {
       if (typeof clearPlaybackVideoPtsSeekClock === "function") clearPlaybackVideoPtsSeekClock();
-      if (timelineUsesZeroBase() && containerPtsOffsetSec() > 0) {
+      if (
+        (typeof playbackVideoUsesDerivedPreview === "undefined" ||
+          !playbackVideoUsesDerivedPreview) &&
+        timelineUsesZeroBase() &&
+        containerPtsOffsetSec() > 0
+      ) {
         playbackVideoClockUsesPtsSeek = true;
       }
     } else if (typeof clearPlaybackVideoPtsSeekClock === "function") {
@@ -840,6 +1018,19 @@ function clearPlaybackEvents() {
   playbackEvents = [];
   playbackEventsFromRealtime = false;
   playbackEventsFrameIndex = new Map();
+  playbackEventsTimeIndex = [];
+  playbackEventsByKey = new Map();
+  playbackEventPositionByKey = new Map();
+  verifiedPlaybackEventsFrameIndex = new Map();
+  playbackEventStats = { alarm: 0, collision: 0, verified: 0 };
+  playbackEventsIndexVersion++;
+  filteredPlaybackEventsCache = {
+    mode: "",
+    version: -1,
+    list: [],
+    set: new Set(),
+    positions: new Map(),
+  };
   activeEventKey = null;
   playbackEventLinkExact = false;
   clearPlaybackAuthorityFrameIdx();
@@ -859,8 +1050,16 @@ function clearPlaybackEvents() {
     clearTimeout(eventReviewSaveTimer);
     eventReviewSaveTimer = null;
   }
-  if (eventMarkersEl) eventMarkersEl.innerHTML = "";
-  if (reviewMarkersEl) reviewMarkersEl.innerHTML = "";
+  if (eventMarkersEl) {
+    eventMarkersEl._eventMarkerResizeObserver?.disconnect();
+    delete eventMarkersEl._eventMarkerResizeObserver;
+    eventMarkersEl.innerHTML = "";
+  }
+  if (reviewMarkersEl) {
+    reviewMarkersEl._eventMarkerResizeObserver?.disconnect();
+    delete reviewMarkersEl._eventMarkerResizeObserver;
+    reviewMarkersEl.innerHTML = "";
+  }
   if (accuracyMarkersEl) accuracyMarkersEl.innerHTML = "";
   if (eventJumpList) eventJumpList.innerHTML = "";
   if (eventsPanel) eventsPanel.classList.add("hidden");

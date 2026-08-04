@@ -3,6 +3,7 @@
 function clearVideoElement() {
   stopPlayback();
   clearPlaybackEvents();
+  playbackVideoUsesDerivedPreview = false;
   videoEl.pause();
   videoEl.removeAttribute("src");
   videoEl.load();
@@ -1119,18 +1120,27 @@ async function loadAnnotationBoxesFromFile(file) {
 }
 
 /** 将 timeline 行写入 frameByTime（v2 分包回放索引用，帧号与 export 一致） */
-function applyTimelineRowsToFrameIndex(rows, inferW, inferH) {
+async function applyTimelineRowsToFrameIndex(rows, inferW, inferH) {
   frameByTime = [];
-  (rows || []).forEach((row) => {
-    const fi = Number(row.source_frame_idx) || Number(row.frame_idx) || 0;
-    if (!fi) return;
-    frameByTime.push({
-      t: Number(row.timestamp_sec) || 0,
-      frameIdx: fi,
-      w: Number(row.infer_width) || inferW,
-      h: Number(row.infer_height) || inferH,
-    });
-  });
+  const timelineRows = rows || [];
+  const chunkSize = 500;
+  for (let start = 0; start < timelineRows.length; start += chunkSize) {
+    const end = Math.min(timelineRows.length, start + chunkSize);
+    for (let index = start; index < end; index += 1) {
+      const row = timelineRows[index];
+      const fi = Number(row.source_frame_idx) || Number(row.frame_idx) || 0;
+      if (!fi) continue;
+      frameByTime.push({
+        t: Number(row.timestamp_sec) || 0,
+        frameIdx: fi,
+        w: Number(row.infer_width) || inferW,
+        h: Number(row.infer_height) || inferH,
+      });
+    }
+    if (end < timelineRows.length) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  }
   frameByTime.sort((a, b) => a.t - b.t);
 }
 
@@ -1152,9 +1162,11 @@ function ensureFrameIndexEntry(frameIdx) {
   return hit;
 }
 
-function buildFrameIndex(recordId = null) {
+function buildFrameIndex(recordId = null, options = {}) {
   frameByTime = [];
-  resetFrameFetchState();
+  if (options.reset !== false) resetFrameFetchState();
+  const loadGeneration = frameFetchGeneration;
+  const signal = frameFetchController?.signal;
   resetPlaybackCollisionTracker();
   syncAnnotationBoxesFromPose();
   if (!poseData) return Promise.resolve();
@@ -1163,11 +1175,24 @@ function buildFrameIndex(recordId = null) {
     const inferW = poseData.infer_width || 640;
     const inferH = poseData.infer_height || 480;
 
-    return fetch(`${recordApiUrl(recordId, "/timeline")}?light=1`)
+    return fetch(`${recordApiUrl(recordId, "/timeline")}?light=1`, { signal })
       .then((res) => (res.ok ? res.json() : { timeline: [] }))
-      .then((body) => {
-        applyTimelineRowsToFrameIndex(body.timeline || [], inferW, inferH);
-        if (typeof renderAccuracySeekMarkers === "function") renderAccuracySeekMarkers();
+      .then(async (body) => {
+        if (
+          signal?.aborted ||
+          loadGeneration !== frameFetchGeneration ||
+          recordId !== currentRecordId
+        ) {
+          return;
+        }
+        await applyTimelineRowsToFrameIndex(body.timeline || [], inferW, inferH);
+        if (typeof renderAccuracySeekMarkers === "function") {
+          setTimeout(() => renderAccuracySeekMarkers(), 0);
+        }
+      })
+      .catch((err) => {
+        if (err?.name === "AbortError") return;
+        throw err;
       });
   }
 
@@ -1251,7 +1276,7 @@ function containerPtsOffsetSec() {
 function resolveRvfcMediaTime(mediaTime) {
   if (mediaTime == null || !Number.isFinite(Number(mediaTime))) return null;
   let t = Math.max(0, Number(mediaTime));
-  if (timelineUsesZeroBase()) {
+  if (!playbackVideoUsesDerivedPreview && timelineUsesZeroBase()) {
     const pts = containerPtsOffsetSec();
     if (pts > 0) t = Math.max(0, t - pts);
   }
@@ -1337,6 +1362,7 @@ function videoTimeForFrameIdx(frameIdx, opts = {}) {
  */
 function videoSeekTimeForFrameIdx(frameIdx) {
   const timelineT = videoTimeForFrameIdx(frameIdx);
+  if (playbackVideoUsesDerivedPreview) return timelineT;
   if (!timelineUsesZeroBase()) return timelineT;
   const pts = containerPtsOffsetSec();
   if (!(pts > 0)) return timelineT;
@@ -1349,7 +1375,11 @@ function videoSeekTimeForFrameIdx(frameIdx) {
 /** 将 video.currentTime 映射回 timeline（逐帧 seek 后需减 PTS） */
 function timelineSecFromVideoClock() {
   const cur = Math.max(0, Number(videoEl?.currentTime) || 0);
-  if (playbackVideoClockUsesPtsSeek && timelineUsesZeroBase()) {
+  if (
+    !playbackVideoUsesDerivedPreview &&
+    playbackVideoClockUsesPtsSeek &&
+    timelineUsesZeroBase()
+  ) {
     const pts = containerPtsOffsetSec();
     if (pts > 0) return Math.max(0, cur - pts);
   }
@@ -1366,7 +1396,11 @@ function playbackTimelineSecFromVideo() {
     if (fromRvfc != null) return fromRvfc;
   }
   const fromClock = timelineSecFromVideoClock();
-  if (!playbackVideoClockUsesPtsSeek && timelineUsesZeroBase()) {
+  if (
+    !playbackVideoUsesDerivedPreview &&
+    !playbackVideoClockUsesPtsSeek &&
+    timelineUsesZeroBase()
+  ) {
     const pts = containerPtsOffsetSec();
     if (pts > 0) return Math.max(0, fromClock - pts);
   }
@@ -2420,6 +2454,7 @@ function drawSkeletonKeypoints(frame, inferW, inferH, layout) {
  * 统一骨架绘制：mode=lite 播放轻量，mode=full 暂停/seek 完整
  */
 function drawSkeletonFrame(frame, inferW, inferH, opts = {}) {
+  stageWrap?.classList.remove("skeleton-pending");
   const mode = opts.mode === "full" ? "full" : "lite";
   const playbackAlignedLayout = pausedPlaybackLayout || frozenPlaybackLayout;
   const layout =
@@ -2474,6 +2509,7 @@ function clearPausedPlaybackLayout() {
 
 /** 暂停/seek 绘制后更新碰撞提示与特征侧栏 */
 function updatePlaybackFrameUi(frame, collisionSets) {
+  stageWrap?.classList.remove("skeleton-pending");
   const { collisionSet, alarmSet } = collisionSets;
   if (collisionSet.size || alarmSet.size) {
     const c = [...collisionSet].join(", ") || "—";
@@ -2488,6 +2524,17 @@ function updatePlaybackFrameUi(frame, collisionSets) {
     updatePlaybackSkeletonFeaturesUi(fi);
   }
   if (typeof updateEventReviewFrameNavUi === "function") updateEventReviewFrameNavUi();
+}
+
+function clearPlaybackOverlayForMissingFrame(frameIdx = null) {
+  const { cw, ch } = syncCanvasSize();
+  ctx.clearRect(0, 0, cw, ch);
+  lastRenderedFrameIdx = -1;
+  tickPoseFrameIdx = -1;
+  stageWrap?.classList.add("skeleton-pending");
+  if (frameIdx && typeof ensureFrameChunkLoaded === "function") {
+    void ensureFrameChunkLoaded(frameIdx);
+  }
 }
 
 /** 由视频时间解析并取帧（播放/暂停共用） */
@@ -2558,9 +2605,12 @@ function resolvePlaybackFrameByIdx(frameIdx, opts = {}) {
 function renderPlaybackFrameByIdx(frameIdx, opts = {}) {
   const mode = opts.mode || "full";
   const resolved = resolvePlaybackFrameByIdx(frameIdx, {
-    allowNearestFallback: mode === "lite",
+    allowNearestFallback: false,
   });
-  if (!resolved) return 0;
+  if (!resolved) {
+    clearPlaybackOverlayForMissingFrame(frameIdx);
+    return 0;
+  }
 
   const { frameIdx: fi, frame, w, h } = resolved;
   if (opts.skipIfSame !== false && fi === lastRenderedFrameIdx) return fi;
@@ -2592,9 +2642,9 @@ async function ensureRenderPlaybackFrameByIdx(frameIdx, opts = {}) {
     }
   }
   if (!resolved?.frame) {
-    resolved = resolvePlaybackFrameByIdx(fi, { allowNearestFallback: true });
+    clearPlaybackOverlayForMissingFrame(fi);
+    return 0;
   }
-  if (!resolved?.frame) return 0;
   return renderPlaybackFrameByIdx(resolved.frameIdx, opts);
 }
 
@@ -2603,9 +2653,14 @@ function renderPlaybackFrameAtTime(timeSec, opts = {}) {
   const mode = opts.mode || "lite";
   const resolved = resolvePlaybackFrameAtTime(timeSec, {
     playback: opts.playback !== false,
-    allowNearestFallback: mode === "lite",
+    allowNearestFallback: false,
   });
-  if (!resolved) return 0;
+  if (!resolved) {
+    clearPlaybackOverlayForMissingFrame(
+      frameIdxAtVideoTime(timeSec, { playback: opts.playback !== false })
+    );
+    return 0;
+  }
 
   const { frameIdx, frame, w, h } = resolved;
   if (opts.skipIfSame !== false && frameIdx === lastRenderedFrameIdx) return frameIdx;
@@ -2636,9 +2691,11 @@ function renderPausedPlaybackFrame(opts = {}) {
     skipIfSame: false,
     layout,
   };
-  // 逐帧/事件跳转：frame_idx 优先，不走 mediaTime 二次映射
-  if (opts.preferFrameIdx && opts.frameIdx >= 1) {
-    return renderPlaybackFrameByIdx(opts.frameIdx, drawOpts);
+  // Explicit frame navigation is authoritative. Never let a stale mediaTime
+  // remap an event/frame click to a different pose frame.
+  const requestedFrameIdx = parseInt(opts.frameIdx, 10) || 0;
+  if (requestedFrameIdx >= 1) {
+    return renderPlaybackFrameByIdx(requestedFrameIdx, drawOpts);
   }
   if (opts.mediaTime != null && Number.isFinite(Number(opts.mediaTime))) {
     const timeSec = resolveRvfcMediaTime(opts.mediaTime);
@@ -2648,9 +2705,6 @@ function renderPausedPlaybackFrame(opts = {}) {
         ...drawOpts,
       });
     }
-  }
-  if (opts.frameIdx >= 1) {
-    return renderPlaybackFrameByIdx(opts.frameIdx, drawOpts);
   }
   return renderPlaybackFrameAtTime(resolvePlaybackMediaTime(null), {
     playback: true,
@@ -2683,9 +2737,11 @@ function redrawCurrentFrame() {
   const heldFi = lastRenderedFrameIdx >= 1 ? lastRenderedFrameIdx : null;
   const currentFi =
     typeof getCurrentPlaybackFrameIdx === "function" ? getCurrentPlaybackFrameIdx() : null;
-  const targetFi = heldFi ?? currentFi;
+  const authorityFi =
+    typeof getPlaybackAuthorityFrameIdx === "function" ? getPlaybackAuthorityFrameIdx() : null;
+  const targetFi = authorityFi ?? heldFi ?? currentFi;
   if (videoEl?.src && videoEl.paused && videoEl.readyState >= 2) {
-    // 标注/复核 UI 刷新：保持当前暂停画面，不因钉住事件跳回事件帧
+    // UI refreshes must preserve the exact frame selected by event/frame navigation.
     renderPausedPlaybackFrame({ mediaTime: lastPlaybackMediaTimeSec, frameIdx: targetFi });
     return;
   }
@@ -2720,6 +2776,9 @@ function redrawCurrentFrame() {
 
 async function renderFrameEntry(hit, renderGen) {
   if (!hit) return;
+  if (typeof touchFrameChunkForFrame === "function" && hit.frameIdx != null) {
+    touchFrameChunkForFrame(hit.frameIdx);
+  }
   const authorityFi =
     typeof getPlaybackAuthorityFrameIdx === "function" ? getPlaybackAuthorityFrameIdx() : null;
   // 丢弃/纠正落后于权威帧的异步渲染，避免 pause/seeked 竞态把画面拉回
@@ -2735,14 +2794,11 @@ async function renderFrameEntry(hit, renderGen) {
   }
   const requestedFi = hit.frameIdx;
   let frame = hit.frame || (await ensureFrame(requestedFi));
-  if (!frame && typeof findNearestCachedFrameEntry === "function") {
-    const nearest = findNearestCachedFrameEntry(requestedFi);
-    if (nearest) {
-      frame = nearest.frame || (await ensureFrame(nearest.frameIdx));
-    }
-  }
   if (renderGen != null && renderGen !== renderGeneration) return;
-  if (!frame) return;
+  if (!frame) {
+    clearPlaybackOverlayForMissingFrame(requestedFi);
+    return;
+  }
   if (requestedFi === lastRenderedFrameIdx) return;
   lastRenderedFrameIdx = requestedFi;
   tickPoseFrameIdx = requestedFi;
@@ -2808,10 +2864,7 @@ async function renderAtTimeCore(timeSec, opts = {}) {
     prefetchLookaheadFromFrame(hit.frameIdx);
 
     if (!frameCache.has(hit.frameIdx)) {
-      const nearest = findNearestCachedFrameEntry(hit.frameIdx);
-      if (nearest && nearest.frameIdx !== lastRenderedFrameIdx) {
-        await renderFrameEntry(nearest);
-      }
+      clearPlaybackOverlayForMissingFrame(hit.frameIdx);
       const { from, to } = chunkRangeForFrame(hit.frameIdx);
       await prefetchFrameChunk(from, to);
     }
@@ -2857,6 +2910,14 @@ function syncRenderPlaybackFrame(timeSec, opts = {}) {
 
 let videoFrameCallbackHandle = null;
 let playbackRenderLoopActive = false;
+const PLAYBACK_OVERLAY_INTERVAL_MS = 1000 / 15;
+const PLAYBACK_REVIEW_INTERVAL_MS = 250;
+let lastPlaybackOverlayRenderMs = 0;
+let lastPlaybackReviewSyncMs = 0;
+let playbackOverlayIntervalMs = PLAYBACK_OVERLAY_INTERVAL_MS;
+let lastPlaybackQualityCheckMs = 0;
+let lastPlaybackQualityTotal = 0;
+let lastPlaybackQualityDropped = 0;
 
 function cancelPlaybackRenderLoop(opts = {}) {
   playbackRenderLoopActive = false;
@@ -2892,6 +2953,10 @@ function ensurePlaybackRenderLoop() {
   tickVideoFrameIdx = -1;
   lastEventSyncFrameIdx = -1;
   lastPlaybackUiSyncMs = 0;
+  lastPlaybackOverlayRenderMs = 0;
+  lastPlaybackReviewSyncMs = 0;
+  playbackOverlayIntervalMs = PLAYBACK_OVERLAY_INTERVAL_MS;
+  lastPlaybackQualityCheckMs = 0;
   resetPlaybackCollisionTracker();
   playbackRenderLoop();
 }
@@ -2910,6 +2975,22 @@ function playbackRenderLoop(now, metadata) {
 
   let playbackUiFrameIdx = null;
   let playbackUiTimeSec = null;
+  const perfNow = typeof now === "number" && Number.isFinite(now) ? now : performance.now();
+  if (
+    perfNow - lastPlaybackQualityCheckMs >= 1000 &&
+    typeof videoEl.getVideoPlaybackQuality === "function"
+  ) {
+    const quality = videoEl.getVideoPlaybackQuality();
+    const totalDelta = Math.max(0, quality.totalVideoFrames - lastPlaybackQualityTotal);
+    const droppedDelta = Math.max(0, quality.droppedVideoFrames - lastPlaybackQualityDropped);
+    playbackOverlayIntervalMs =
+      totalDelta > 0 && droppedDelta / totalDelta > 0.02
+        ? 100
+        : PLAYBACK_OVERLAY_INTERVAL_MS;
+    lastPlaybackQualityTotal = quality.totalVideoFrames;
+    lastPlaybackQualityDropped = quality.droppedVideoFrames;
+    lastPlaybackQualityCheckMs = perfNow;
+  }
   if (videoEl.readyState >= 2) {
     if (metadata?.mediaTime != null && Number.isFinite(Number(metadata.mediaTime))) {
       lastPlaybackMediaTimeSec = Number(metadata.mediaTime);
@@ -2921,8 +3002,16 @@ function playbackRenderLoop(now, metadata) {
     playbackUiTimeSec = timeSec;
     if (nextIdx > 0 && nextIdx !== tickVideoFrameIdx) {
       tickVideoFrameIdx = nextIdx;
-      syncRenderPlaybackFrame(timeSec, { playback: true });
-      if (nextIdx !== lastEventSyncFrameIdx && typeof syncActiveEventFromPlaybackPosition === "function") {
+      if (perfNow - lastPlaybackOverlayRenderMs >= playbackOverlayIntervalMs) {
+        lastPlaybackOverlayRenderMs = perfNow;
+        syncRenderPlaybackFrame(timeSec, { playback: true });
+      }
+      if (
+        nextIdx !== lastEventSyncFrameIdx &&
+        perfNow - lastPlaybackReviewSyncMs >= PLAYBACK_REVIEW_INTERVAL_MS &&
+        typeof syncActiveEventFromPlaybackPosition === "function"
+      ) {
+        lastPlaybackReviewSyncMs = perfNow;
         lastEventSyncFrameIdx = nextIdx;
         syncActiveEventFromPlaybackPosition({
           timeSec,
@@ -2934,7 +3023,6 @@ function playbackRenderLoop(now, metadata) {
     }
   }
 
-  const perfNow = typeof now === "number" && Number.isFinite(now) ? now : performance.now();
   if (perfNow - lastPlaybackUiSyncMs >= 120) {
     lastPlaybackUiSyncMs = perfNow;
     updatePlaybackSeekBarUi(playbackUiTimeSec, playbackUiFrameIdx);

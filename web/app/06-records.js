@@ -1308,6 +1308,7 @@ async function onPlaybackAnnotationSourceChanged() {
 
 async function loadSavedRecordVideo(recordId, opts = {}) {
   const useOriginal = opts.original === true;
+  playbackVideoUsesDerivedPreview = opts.derivedPreview === true && !useOriginal;
   const base = recordApiUrl(recordId, "/video");
   const url = useOriginal ? `${base}?original=1` : base;
 
@@ -1339,7 +1340,7 @@ async function loadSavedRecordVideo(recordId, opts = {}) {
   });
 }
 
-/** 等待预览视频转码完成后再加载（带进度与遮罩） */
+/** 查询/启动派生预览；缓存未就绪时立即回退原片，不阻塞首次打开。 */
 async function prepareAndLoadRecordVideo(recordId, displayName = "") {
   const label = displayName || recordId;
   const statusUrl = recordApiUrl(recordId, "/video/preview/status");
@@ -1359,19 +1360,20 @@ async function prepareAndLoadRecordVideo(recordId, displayName = "") {
     return result(false);
   }
 
-  while (body.status === "transcoding") {
+  if (body.status === "transcoding") {
+    usedOriginal = true;
     const pct = Number(body.progress) || 0;
     const srcH = Number(body.source_height) || 0;
     const prevH = Number(body.preview_height) || 480;
-    const waitSec = formatWaitSec();
     const msg =
       srcH > prevH
-        ? `【${label}】正在生成 ${prevH}p 预览视频（原片 ${srcH}p）${pct}%… 已等待 ${waitSec}s`
-        : `【${label}】正在准备视频 ${pct}%… 已等待 ${waitSec}s`;
+        ? `【${label}】后台生成 ${prevH}p 预览（原片 ${srcH}p）${pct}%… 本次直接加载原片`
+        : `【${label}】后台准备预览 ${pct}%… 本次直接加载原片`;
     updateStageLoading(msg);
     setPlaybackInfo(msg);
-    await new Promise((r) => setTimeout(r, 600));
-    body = await fetch(statusUrl).then((r) => (r.ok ? r.json() : body));
+    const loadedOriginal = await loadSavedRecordVideo(recordId, { original: true });
+    hideStageLoading();
+    return result(loadedOriginal);
   }
 
   if (body.status === "missing") {
@@ -1380,6 +1382,14 @@ async function prepareAndLoadRecordVideo(recordId, displayName = "") {
   }
 
   if (body.status === "error") {
+    if (body.frame_contract && body.frame_contract.ok === false) {
+      const c = body.frame_contract;
+      const detail = `视频 ${c.video_frames || 0} 帧 / 数据 ${c.expected_frames || 0} 帧 / 碰撞时间轴 ${c.timeline_frames || 0} 帧`;
+      hideStageLoading();
+      clearVideoElement();
+      setPlaybackInfo(`【${label}】帧数校验失败（${detail}），已阻止回放。`);
+      return result(false);
+    }
     const errMsg = body.error || body.message || "预览转码失败";
     updateStageLoading(`【${label}】${errMsg}，正在加载原视频…`);
     setPlaybackInfo(`【${label}】${errMsg}，正在加载原视频…`);
@@ -1397,7 +1407,8 @@ async function prepareAndLoadRecordVideo(recordId, displayName = "") {
   updateStageLoading(waitSec > 2 ? `${readyMsg}（总耗时 ${waitSec}s）` : readyMsg);
   setPlaybackInfo(readyMsg);
 
-  let loaded = await loadSavedRecordVideo(recordId);
+  const derivedPreview = body.cache_path_type === "local_preview" && !body.use_original;
+  let loaded = await loadSavedRecordVideo(recordId, { derivedPreview });
   if (!loaded) {
     updateStageLoading(`【${label}】预览视频无法播放，正在加载原视频…`);
     setPlaybackInfo(`【${label}】预览视频无法播放，正在加载原视频…`);
@@ -1470,6 +1481,10 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
   renderPlaybackRecordsList(playbackRecordsCache);
   highlightPlaybackRecordInList(recordId);
   resetFrameFetchState();
+  if (typeof setPlaybackEventsLoadingState === "function") {
+    setPlaybackEventsLoadingState(true);
+  }
+  const openGeneration = frameFetchGeneration;
   const manifestUrl = recordApiUrl(recordId, "/manifest.json");
   const poseRes = await fetch(manifestUrl);
   if (!poseRes.ok) {
@@ -1488,17 +1503,23 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
     }
     poseData = await poseRes.json();
   }
-  await buildFrameIndex(recordId);
+  const timelinePromise = buildFrameIndex(recordId, { reset: false });
   showPlaybackStageLoading(`【${displayName || recordId}】加载骨架…`);
-  // 首次打开只阻塞首个骨架分块；其余分块在视频就绪后后台预取。
-  // 这样左侧记录单击一次即可很快看到首屏，不必等待整段 Parquet 全量加载。
-  await prefetchFrameChunksParallel(1, 1);
-  updatePlaybackStageLoading(`【${displayName || recordId}】首屏骨架已就绪，正在加载标注…`);
-  const annResult = await applyPlaybackRecordAnnotation(recordId);
-  const eventsPromise = loadPlaybackEvents(recordId);
+  const initialFramesPromise = prefetchFrameChunksParallel(1, FRAME_CHUNK_PREFETCH_INITIAL);
+  const annotationPromise = applyPlaybackRecordAnnotation(recordId);
+  const videoPromise = prepareAndLoadRecordVideo(recordId, displayName || recordId);
+  const eventsPromise = annotationPromise.then(() => loadPlaybackEvents(recordId));
   if (typeof loadPlaybackSkeletonFeatures === "function") {
     void loadPlaybackSkeletonFeatures(recordId);
   }
+  const [annResult, videoResult] = await Promise.all([
+    annotationPromise,
+    videoPromise,
+    timelinePromise,
+    initialFramesPromise,
+  ]).then(([annotation, video]) => [annotation, video]);
+  if (openGeneration !== frameFetchGeneration || recordId !== currentRecordId) return;
+  hidePlaybackStageLoading();
   const annHint = annResult.ok
     ? ` · 标注：${annResult.label}`
     : annResult.fromPose
@@ -1514,17 +1535,24 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
   const storageHint = (poseData?.schema || 1) >= 2 ? " · Parquet" : "";
   const baseHint = `【${label}】${jsonFile}（${poseData.frame_count ?? 0} 帧${storageHint}）`;
 
-  const videoResult = await prepareAndLoadRecordVideo(recordId, displayName || recordId);
   const videoLoaded = !!videoResult.loaded;
   const usedOriginalVideo = !!videoResult.usedOriginal;
-  void prefetchAllPlaybackChunksInBackground(recordId).catch((err) => {
-    console.warn("后台预取骨架失败", err);
-  });
-  await eventsPromise;
-  const hadPendingAccuracyNav = !!pendingPlaybackAccuracyNav;
-  if (playbackEvents.length && !hadPendingAccuracyNav) {
-    await beginEventReview();
-  }
+  void eventsPromise.then(async () => {
+    if (openGeneration !== frameFetchGeneration || recordId !== currentRecordId) return;
+    const hadPendingAccuracyNav = !!pendingPlaybackAccuracyNav;
+    if (playbackEvents.length && !hadPendingAccuracyNav && videoEl.paused) {
+      await beginEventReview();
+    } else if (playbackEvents.length && !videoEl.paused) {
+      syncActiveEventFromPlaybackPosition({
+        timeSec: videoEl.currentTime,
+        frameIdx: getCurrentPlaybackFrameIdx(),
+        duringPlayback: true,
+        force: true,
+        skipRedraw: true,
+      });
+    }
+    await applyPendingPlaybackAccuracyNav();
+  }).catch((err) => console.warn("事件与复核状态加载失败", err));
   if (videoLoaded) {
     const { frameW, frameH } = getVideoFrameSize();
     const f0 = frameByTime[0];
@@ -1544,10 +1572,7 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
     if (typeof enablePlaybackSkeletonFeatureFetch === "function") {
       enablePlaybackSkeletonFeatureFetch({ delayMs: 700 });
     }
-    if (!playbackEvents.length) {
-      await startVideoPlayback("");
-    }
-    await applyPendingPlaybackAccuracyNav();
+    await startVideoPlayback("");
     return;
   }
 

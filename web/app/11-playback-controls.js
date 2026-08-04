@@ -338,11 +338,23 @@ videoEl.addEventListener("pause", () => {
       cancelPlaybackRenderLoop({ preserveLayout: true });
     }
     const resumeMediaTime = lastPlaybackMediaTimeSec;
-    const resumeFrameIdx = lastRenderedFrameIdx >= 1 ? lastRenderedFrameIdx : null;
+    const pinnedFi =
+      playbackEventLinkExact && typeof pinnedEventFrameIdx === "function"
+        ? pinnedEventFrameIdx()
+        : null;
+    const resumeFrameIdx =
+      authorityFi ??
+      explicitFi ??
+      pinnedFi ??
+      (lastRenderedFrameIdx >= 1 ? lastRenderedFrameIdx : null);
     if (typeof renderPausedPlaybackFrame === "function") {
       renderPausedPlaybackFrame({ mediaTime: resumeMediaTime, frameIdx: resumeFrameIdx });
     }
     if (typeof updateEventReviewFrameNavUi === "function") updateEventReviewFrameNavUi();
+    if (typeof updateReviewDock === "function") updateReviewDock({ skipRedraw: true });
+    if (typeof patchEventReviewTableActiveState === "function") patchEventReviewTableActiveState();
+    if (typeof scrollActiveEventRowIntoView === "function") scrollActiveEventRowIntoView();
+    if (typeof updateEventMarkerActiveState === "function") updateEventMarkerActiveState();
     if (typeof updatePlaybackSeekBarUi === "function") updatePlaybackSeekBarUi();
     else if (videoEl.duration && Number.isFinite(videoEl.duration)) {
       seekBar.value = String((videoEl.currentTime / videoEl.duration) * 1000);
@@ -726,7 +738,10 @@ window.addEventListener("beforeunload", () => {
 // 键盘 Tab 过来仍能用，上面的 keydown 已经放行 range。
 seekBar.addEventListener("pointerup", () => seekBar.blur());
 
-seekBar.addEventListener("input", async () => {
+let playbackSeekInputTimer = 0;
+let playbackSeekInputSeq = 0;
+
+seekBar.addEventListener("input", () => {
   if (typeof clearPlaybackAuthorityFrameIdx === "function") clearPlaybackAuthorityFrameIdx();
   else if (typeof clearExplicitSeekFrameIdx === "function") clearExplicitSeekFrameIdx();
   if (typeof clearPlaybackVideoPtsSeekClock === "function") clearPlaybackVideoPtsSeekClock();
@@ -749,19 +764,40 @@ seekBar.addEventListener("input", async () => {
             )
           ]
         : null;
-  if (frameEntry) {
-    if (!videoEl.paused) videoEl.pause();
-    await seekToTimestamp(frameEntry.t, frameEntry.frameIdx, {
-      skipEventSync: false,
-    });
-    return;
+  const seekValue = Number(seekBar.value) || 0;
+  const duration = Number(videoEl.duration);
+  if (duration > 0 && Number.isFinite(duration)) {
+    timeLabel.textContent = formatTime((seekValue / 1000) * duration);
   }
-  if (!videoEl.duration || !Number.isFinite(videoEl.duration)) {
-    return;
-  }
-  videoEl.currentTime = (seekBar.value / 1000) * videoEl.duration;
-  await renderAtTime(videoEl.currentTime);
-  syncActiveEventFromPlaybackPosition({ timeSec: videoEl.currentTime });
+  const seq = ++playbackSeekInputSeq;
+  if (playbackSeekInputTimer) clearTimeout(playbackSeekInputTimer);
+  playbackSeekInputTimer = setTimeout(() => {
+    playbackSeekInputTimer = 0;
+    void (async () => {
+      if (seq !== playbackSeekInputSeq) return;
+      if (frameEntry) {
+        if (!videoEl.paused) videoEl.pause();
+        await seekToTimestamp(frameEntry.t, frameEntry.frameIdx, {
+          skipEventSync: false,
+        });
+        return;
+      }
+      if (!videoEl.duration || !Number.isFinite(videoEl.duration)) {
+        const idx = Math.floor((seekValue / 1000) * frameByTime.length);
+        const item = frameByTime[Math.min(idx, frameByTime.length - 1)];
+        if (item) await renderFrameEntry(item);
+        if (seq === playbackSeekInputSeq) {
+          syncActiveEventFromPlaybackPosition({ timeSec: item?.t, frameIdx: item?.frameIdx });
+        }
+        return;
+      }
+      videoEl.currentTime = (seekValue / 1000) * videoEl.duration;
+      await renderAtTime(videoEl.currentTime);
+      if (seq === playbackSeekInputSeq) {
+        syncActiveEventFromPlaybackPosition({ timeSec: videoEl.currentTime });
+      }
+    })();
+  }, 60);
 });
 
 bindStageLayoutWatch();

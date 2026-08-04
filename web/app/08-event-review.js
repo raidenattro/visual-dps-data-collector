@@ -34,10 +34,25 @@ async function prepareEventReviewRecordSwitch(options = {}) {
 
 /** 与后端 event_signature 一致 */
 function eventRowKey(ev) {
+  if (ev && typeof ev === "object" && typeof ev.__playbackEventRowKey === "string") {
+    return ev.__playbackEventRowKey;
+  }
   const tokens = canonicalizeBoxTokenList(ev?.box_tokens);
   const frameIdx = parseInt(ev.frame_idx, 10) || 0;
   const eventType = String(ev.event_type || "").trim();
-  return `${eventType}:${frameIdx}:${tokens.join(",")}`;
+  const key = `${eventType}:${frameIdx}:${tokens.join(",")}`;
+  if (ev && typeof ev === "object") {
+    try {
+      Object.defineProperty(ev, "__playbackEventRowKey", {
+        value: key,
+        configurable: true,
+        enumerable: false,
+      });
+    } catch {
+      /* frozen/imported objects can still use the computed key */
+    }
+  }
+  return key;
 }
 
 /**
@@ -925,7 +940,7 @@ function isEventVerified(ev) {
 }
 
 function countVerifiedEvents() {
-  return playbackEvents.filter((e) => isEventVerified(e)).length;
+  return playbackEventStats.verified;
 }
 
 function eventTypeLabel(ev) {
@@ -937,14 +952,14 @@ function eventTypeLabel(ev) {
 /** 按 activeEventKey 在完整事件列表中定位（不受筛选影响） */
 function getActiveEvent() {
   if (!activeEventKey || !playbackEvents.length) return null;
-  return playbackEvents.find((e) => eventRowKey(e) === activeEventKey) ?? null;
+  return playbackEventsByKey.get(activeEventKey) ?? null;
 }
 
 function refreshEventCountLabel() {
   if (!eventCountLabel) return;
   if (!playbackEvents.length) return;
-  let alarmN = playbackEvents.filter((e) => e.event_type === "alarm").length;
-  let collN = playbackEvents.filter((e) => e.event_type === "collision").length;
+  let alarmN = playbackEventStats.alarm;
+  let collN = playbackEventStats.collision;
   let verifiedN = countVerifiedEvents();
   const list = filteredPlaybackEvents();
   const rtHint = playbackEventsFromRealtime ? " · 回放实时计算" : "";
@@ -1054,6 +1069,9 @@ function setEventVerified(ev, verified) {
     personIdTouchedKeys.delete(key);
   }
   ev.verified_true = !!verified;
+  if (typeof refreshPlaybackEventVerificationIndex === "function") {
+    refreshPlaybackEventVerificationIndex(ev);
+  }
   if (!verified && isReviewTerminalStatus(currentEventReviewStatus)) {
     currentEventReviewStatus = "in_progress";
     patchPlaybackRecordReviewStatus(currentRecordId, "in_progress", "复核中");
@@ -1597,15 +1615,37 @@ async function markEventReviewCompleted() {
 function filteredPlaybackEvents() {
   const mode = eventFilterSelect?.value || "all";
   if (mode === "all") return playbackEvents;
-  if (mode === "verified") return playbackEvents.filter((e) => isEventVerified(e));
-  if (mode === "unreviewed") return playbackEvents.filter((e) => !isEventVerified(e));
-  if (mode === "needs_box") {
-    return playbackEvents.filter(
-      (e) => isEventVerified(e) && !getEventConfirmedBoxes(e).length
-    );
+  if (
+    ["verified", "unreviewed", "needs_box", "alarm", "collision"].includes(mode) &&
+    filteredPlaybackEventsCache.mode === mode &&
+    filteredPlaybackEventsCache.version === playbackEventsIndexVersion
+  ) {
+    return filteredPlaybackEventsCache.list;
   }
-  if (mode === "alarm" || mode === "collision") {
-    return playbackEvents.filter((e) => e.event_type === mode);
+  if (["verified", "unreviewed", "needs_box", "alarm", "collision"].includes(mode)) {
+    let list = [];
+    if (mode === "verified") list = playbackEvents.filter((e) => isEventVerified(e));
+    else if (mode === "unreviewed") list = playbackEvents.filter((e) => !isEventVerified(e));
+    else if (mode === "needs_box") {
+      list = playbackEvents.filter(
+        (e) => isEventVerified(e) && !getEventConfirmedBoxes(e).length
+      );
+    } else {
+      list = playbackEvents.filter((e) => e.event_type === mode);
+    }
+    list.sort(
+      (a, b) =>
+        (Number(a.timestamp_sec) || 0) - (Number(b.timestamp_sec) || 0) ||
+        (Number(a.frame_idx) || 0) - (Number(b.frame_idx) || 0)
+    );
+    filteredPlaybackEventsCache = {
+      mode,
+      version: playbackEventsIndexVersion,
+      list,
+      set: new Set(list),
+      positions: new Map(list.map((ev, idx) => [eventRowKey(ev), idx])),
+    };
+    return list;
   }
   if (mode === "miss") {
     if (
@@ -1666,6 +1706,11 @@ function getActiveFilteredEvent() {
   const list = filteredPlaybackEvents();
   if (!list.length) return null;
   if (!activeEventKey) return list[0];
+  if (list === playbackEvents) return playbackEventsByKey.get(activeEventKey) ?? null;
+  if (list === filteredPlaybackEventsCache.list) {
+    const idx = filteredPlaybackEventsCache.positions.get(activeEventKey);
+    return idx == null ? null : list[idx] ?? null;
+  }
   return list.find((e) => eventRowKey(e) === activeEventKey) ?? null;
 }
 
@@ -1679,19 +1724,24 @@ function getActiveFilteredIndex() {
   if (!list.length) return -1;
   const ev = getActiveFilteredEvent();
   if (!ev) return -1;
-  return list.findIndex((e) => eventRowKey(e) === eventRowKey(ev));
+  const key = eventRowKey(ev);
+  if (list === playbackEvents) return playbackEventPositionByKey.get(key) ?? -1;
+  if (list === filteredPlaybackEventsCache.list) {
+    return filteredPlaybackEventsCache.positions.get(key) ?? -1;
+  }
+  return list.findIndex((e) => eventRowKey(e) === key);
 }
 
 function getActiveGlobalIndex() {
   if (!playbackEvents.length) return -1;
   if (!activeEventKey) return 0;
-  const idx = playbackEvents.findIndex((e) => eventRowKey(e) === activeEventKey);
+  const idx = playbackEventPositionByKey.get(activeEventKey) ?? -1;
   return idx >= 0 ? idx : 0;
 }
 
 function globalIndexForEventKey(key) {
   if (!key || !playbackEvents.length) return -1;
-  return playbackEvents.findIndex((e) => eventRowKey(e) === key);
+  return playbackEventPositionByKey.get(key) ?? -1;
 }
 
 /** 按时间线全局顺序切换事件（不受筛选队列影响） */
@@ -1769,7 +1819,16 @@ function navigateReviewEvent(delta) {
 function scrollActiveEventRowIntoView() {
   if (!eventJumpList || !activeEventKey) return;
   const row = eventJumpList.querySelector(`tr[data-event-key="${CSS.escape(activeEventKey)}"]`);
-  row?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  if (row) {
+    row.scrollIntoView({ block: "nearest" });
+    return;
+  }
+  const idx = eventReviewVirtualList.findIndex((ev) => eventRowKey(ev) === activeEventKey);
+  const wrap = $("#event-review-list-scroll");
+  if (idx >= 0 && wrap) {
+    wrap.scrollTop = idx * EVENT_REVIEW_VIRTUAL_ROW_HEIGHT;
+    renderEventReviewTable(eventReviewVirtualList, { fromScroll: true });
+  }
 }
 
 /** 播放中轻量更新事件表高亮行，避免整表重绘 */
@@ -1816,14 +1875,20 @@ function updatePlaybackReviewPositionUi({ linkNearest = false } = {}) {
   const ev = getPinnedPlaybackEvent();
   if (!posEl || !ev || !playbackEvents.length) return;
   const list = filteredPlaybackEvents();
-  const evInFilter = list.some((item) => eventRowKey(item) === eventRowKey(ev));
-  const globalIdx = playbackEvents.findIndex((item) => eventRowKey(item) === eventRowKey(ev));
+  const key = eventRowKey(ev);
+  const globalIdx = playbackEventPositionByKey.get(key) ?? -1;
+  const filteredIdx =
+    list === playbackEvents
+      ? globalIdx
+      : list === filteredPlaybackEventsCache.list
+        ? filteredPlaybackEventsCache.positions.get(key) ?? -1
+        : list.findIndex((item) => eventRowKey(item) === key);
+  const evInFilter = filteredIdx >= 0;
   const globalNote =
     globalIdx >= 0 ? ` · 总序 ${globalIdx + 1}/${playbackEvents.length}` : "";
   const linkNote = linkNearest || !playbackEventLinkExact ? " · 最近" : "";
   if (evInFilter) {
-    const idx = list.findIndex((item) => eventRowKey(item) === eventRowKey(ev));
-    posEl.textContent = `第 ${idx + 1} / ${list.length} 条${linkNote}${list.length !== playbackEvents.length ? `（队列）${globalNote}` : globalNote}`;
+    posEl.textContent = `第 ${filteredIdx + 1} / ${list.length} 条${linkNote}${list.length !== playbackEvents.length ? `（队列）${globalNote}` : globalNote}`;
   } else {
     posEl.textContent = `已标真 / 不在当前队列${linkNote}${globalNote}`;
   }
@@ -1884,7 +1949,17 @@ function updateReviewDock(options = {}) {
   clearEventReviewPickStatusOnEventChange();
   const list = filteredPlaybackEvents();
   const ev = getPinnedPlaybackEvent();
-  const evInFilter = ev ? list.some((item) => eventRowKey(item) === eventRowKey(ev)) : false;
+  const evKey = ev ? eventRowKey(ev) : "";
+  const globalIdx = evKey ? playbackEventPositionByKey.get(evKey) ?? -1 : -1;
+  const filteredIdx =
+    !evKey
+      ? -1
+      : list === playbackEvents
+        ? globalIdx
+        : list === filteredPlaybackEventsCache.list
+          ? filteredPlaybackEventsCache.positions.get(evKey) ?? -1
+          : list.findIndex((item) => eventRowKey(item) === evKey);
+  const evInFilter = filteredIdx >= 0;
   const posEl = $("#event-review-position");
   const badgeEl = $("#event-review-badge");
   const metaEl = $("#event-review-meta");
@@ -1968,13 +2043,11 @@ function updateReviewDock(options = {}) {
   }
 
   if (posEl) {
-    const globalIdx = playbackEvents.findIndex((item) => eventRowKey(item) === eventRowKey(ev));
     const globalNote =
       globalIdx >= 0 ? ` · 总序 ${globalIdx + 1}/${playbackEvents.length}` : "";
     const linkNote = playbackEventLinkExact ? "" : " · 最近";
     if (evInFilter) {
-      const idx = list.findIndex((item) => eventRowKey(item) === eventRowKey(ev));
-      posEl.textContent = `第 ${idx + 1} / ${list.length} 条${linkNote}${list.length !== playbackEvents.length ? `（队列）${globalNote}` : globalNote}`;
+      posEl.textContent = `第 ${filteredIdx + 1} / ${list.length} 条${linkNote}${list.length !== playbackEvents.length ? `（队列）${globalNote}` : globalNote}`;
     } else {
       posEl.textContent = `已标真 / 不在当前队列${linkNote}${globalNote}`;
     }
@@ -2214,17 +2287,28 @@ function patchEventReviewTableVerifiedStates() {
 }
 
 function patchEventMarkersVerifiedStates() {
-  if (!eventMarkersEl) return;
-  eventMarkersEl.querySelectorAll(".event-marker").forEach((dot) => {
-    const key = dot.dataset.eventKey;
-    if (!key) return;
-    const ev = playbackEvents.find((item) => eventRowKey(item) === key);
-    if (!ev) return;
-    const isVerified = isEventVerified(ev);
-    dot.classList.toggle("verified", isVerified);
-    const verifiedNote = isVerified ? " · 已标真" : "";
-    dot.title = `${eventTypeLabel(ev)} ${formatTime(ev.timestamp_sec)} · ${formatEventTokens(ev.box_tokens)}${verifiedNote}`;
-  });
+  renderEventMarkers();
+}
+
+/** During playback update only cheap text/badge state; defer person controls and list scrolling. */
+function updatePlaybackReviewUiDuringPlay(frameIdx = null, timeSec = null) {
+  const ev = getPinnedPlaybackEvent();
+  if (!ev) return;
+  const badgeEl = $("#event-review-badge");
+  const tokensEl = $("#event-review-tokens");
+  const verifiedTag = $("#event-review-verified-tag");
+  if (badgeEl) {
+    badgeEl.textContent = ev.event_type === "alarm" ? "告警" : "碰撞";
+    badgeEl.className = `event-badge ${ev.event_type}`;
+  }
+  if (tokensEl) {
+    const text = formatEventTokens(ev.box_tokens);
+    if (tokensEl.textContent !== text) tokensEl.textContent = text || "\u00a0";
+  }
+  verifiedTag?.classList.toggle("hidden", !isEventVerified(ev));
+  updatePlaybackReviewFrameMeta(frameIdx);
+  updatePlaybackReviewPositionUi({ linkNearest: true });
+  updateEventReviewFrameNavUi();
 }
 
 function patchEventReviewVerifiedUi() {
@@ -2233,7 +2317,14 @@ function patchEventReviewVerifiedUi() {
   if (typeof redrawCurrentFrame === "function") redrawCurrentFrame();
 }
 
-function renderEventReviewTable(list = null) {
+const EVENT_REVIEW_VIRTUAL_ROW_HEIGHT = 36;
+const EVENT_REVIEW_VIRTUAL_WINDOW = 80;
+const EVENT_REVIEW_VIRTUAL_OVERSCAN = 12;
+let eventReviewVirtualList = [];
+let eventReviewVirtualScrollRaf = 0;
+let eventReviewVirtualLoggedSize = -1;
+
+function renderEventReviewTable(list = null, options = {}) {
   if (!eventJumpList) return;
   const allRows = list ?? filteredPlaybackEvents();
   if (list != null && typeof resetEventReviewWindow === "function") {
@@ -2244,8 +2335,41 @@ function renderEventReviewTable(list = null) {
       ? eventReviewWindowForRows(allRows)
       : allRows;
   const canSave = !!currentRecordId;
+  eventReviewVirtualList = rows;
+  const wrap = $("#event-review-list-scroll");
+  let start = 0;
+  if (options.fromScroll && wrap) {
+    start = Math.max(
+      0,
+      Math.floor(wrap.scrollTop / EVENT_REVIEW_VIRTUAL_ROW_HEIGHT) -
+        EVENT_REVIEW_VIRTUAL_OVERSCAN
+    );
+  } else if (activeEventKey) {
+    const activeIdx = rows.findIndex((ev) => eventRowKey(ev) === activeEventKey);
+    if (activeIdx >= 0) start = Math.max(0, activeIdx - Math.floor(EVENT_REVIEW_VIRTUAL_WINDOW / 2));
+  }
+  start = Math.min(start, Math.max(0, rows.length - EVENT_REVIEW_VIRTUAL_WINDOW));
+  const end = Math.min(rows.length, start + EVENT_REVIEW_VIRTUAL_WINDOW);
+  const visibleRows = rows.slice(start, end);
+  if (!options.fromScroll && eventReviewVirtualLoggedSize !== rows.length) {
+    eventReviewVirtualLoggedSize = rows.length;
+    if (typeof playbackDebugLog === "function") {
+      playbackDebugLog("review-list-virtualized", {
+        totalRows: rows.length,
+        renderedRows: visibleRows.length,
+        windowSize: EVENT_REVIEW_VIRTUAL_WINDOW,
+        overscan: EVENT_REVIEW_VIRTUAL_OVERSCAN,
+      });
+    }
+  }
+  const spacer = (height) =>
+    height > 0
+      ? `<tr class="event-review-virtual-spacer" aria-hidden="true"><td colspan="5" style="height:${height}px"></td></tr>`
+      : "";
 
-  eventJumpList.innerHTML = rows
+  eventJumpList.innerHTML =
+    spacer(start * EVENT_REVIEW_VIRTUAL_ROW_HEIGHT) +
+    visibleRows
     .map((ev) => {
       const key = eventRowKey(ev);
       const typeLabel = eventTypeLabel(ev);
@@ -2271,7 +2395,19 @@ function renderEventReviewTable(list = null) {
         <td class="col-tokens" title="${formatEventTokens(ev.box_tokens)}">${formatEventTokens(ev.box_tokens)}${getEventConfirmedBoxes(ev).length ? ` → ${formatConfirmedBoxes(getEventConfirmedBoxes(ev))}` : ""}</td>
       </tr>`;
     })
-    .join("");
+    .join("") +
+    spacer((rows.length - end) * EVENT_REVIEW_VIRTUAL_ROW_HEIGHT);
+
+  if (wrap && !wrap.dataset.virtualScrollBound) {
+    wrap.dataset.virtualScrollBound = "1";
+    wrap.addEventListener("scroll", () => {
+      if (eventReviewVirtualScrollRaf) return;
+      eventReviewVirtualScrollRaf = requestAnimationFrame(() => {
+        eventReviewVirtualScrollRaf = 0;
+        renderEventReviewTable(eventReviewVirtualList, { fromScroll: true });
+      });
+    });
+  }
 
   eventJumpList.querySelectorAll(".event-verify-check").forEach((input) => {
     input.addEventListener("click", (e) => e.stopPropagation());
@@ -2316,7 +2452,7 @@ function renderEventReviewTable(list = null) {
       }
     });
   });
-  scrollActiveEventRowIntoView();
+  if (!options.fromScroll) scrollActiveEventRowIntoView();
   scheduleEventReviewListScrollHeight();
 }
 
@@ -2530,26 +2666,136 @@ function updateReviewTimelineSummary(total, verified, attention) {
     : `${total} 条 · 已标真 ${verified}`;
 }
 
+let eventMarkerRenderList = [];
+let eventMarkerBinsCache = { key: "", bins: new Map() };
+let reviewTimelineResizeRaf = 0;
+let reviewTimelineObservedBucketCount = 0;
+
+function reviewTimelineBucketCount() {
+  return Math.max(1, Math.ceil(reviewTimelineTrackWidth() / REVIEW_TIMELINE_BUCKET_PX));
+}
+
+function ensureReviewTimelineResizeObserver() {
+  if (!eventMarkersEl || typeof ResizeObserver === "undefined") return;
+  if (eventMarkersEl._eventMarkerResizeObserver) return;
+  const observer = new ResizeObserver(() => {
+    if (reviewTimelineResizeRaf) return;
+    reviewTimelineResizeRaf = requestAnimationFrame(() => {
+      reviewTimelineResizeRaf = 0;
+      const nextCount = reviewTimelineBucketCount();
+      if (nextCount === reviewTimelineObservedBucketCount) return;
+      reviewTimelineObservedBucketCount = nextCount;
+      eventMarkerBinsCache = { key: "", bins: new Map() };
+      renderEventMarkers();
+    });
+  });
+  observer.observe(eventMarkersEl);
+  eventMarkersEl._eventMarkerResizeObserver = observer;
+}
+
+function timelineBucketState(bucket) {
+  let attention = false;
+  let attentionCount = 0;
+  let verified = false;
+  let unreviewed = false;
+  for (const ev of bucket?.events || []) {
+    const needsAttention =
+      typeof eventNeedsIdentityAttention === "function" && eventNeedsIdentityAttention(ev);
+    if (needsAttention) {
+      attention = true;
+      attentionCount += 1;
+    }
+    else if (isEventVerified(ev)) verified = true;
+    else unreviewed = true;
+  }
+  return { attention, attentionCount, verified, unreviewed };
+}
+
+function patchTimelineBucketForEvent(ev) {
+  if (!ev || !eventMarkerBinsCache.bins.size) return false;
+  const bucketKey = reviewTimelineBucketByKey.get(eventRowKey(ev));
+  const bucket = bucketKey == null ? null : eventMarkerBinsCache.bins.get(bucketKey);
+  if (!bucket) return false;
+  const previousAttentionCount = Number(bucket.attentionCount) || 0;
+  const state = timelineBucketState(bucket);
+  Object.assign(bucket, state);
+  eventMarkerBinsCache.attentionTotal = Math.max(
+    0,
+    (Number(eventMarkerBinsCache.attentionTotal) || 0) +
+      state.attentionCount -
+      previousAttentionCount
+  );
+  const reviewDot = reviewMarkersEl?.querySelector(`[data-bucket="${bucketKey}"]`);
+  if (reviewDot) {
+    reviewDot.classList.toggle("attention", state.attention);
+    reviewDot.classList.toggle("unreviewed", !state.attention && state.unreviewed);
+    reviewDot.classList.toggle("verified", !state.attention && !state.unreviewed);
+    const stateText = state.attention
+      ? "身份待确认"
+      : state.unreviewed
+        ? "未处理"
+        : "已标真";
+    const groupNote = bucket.count > 1 ? ` · 共 ${bucket.count} 条` : "";
+    reviewDot.title = `${formatTime(bucket.firstEvent.timestamp_sec)} · ${stateText}${groupNote}`;
+  }
+  updateReviewTimelineSummary(
+    eventMarkerRenderList.length,
+    playbackEventStats.verified,
+    eventMarkerBinsCache.attentionTotal
+  );
+  return true;
+}
+
+function renderEventMarkerCursor() {
+  if (!eventMarkersEl) return;
+  let cursor = eventMarkersEl.querySelector(".event-marker-cursor");
+  if (!cursor) {
+    cursor = document.createElement("span");
+    cursor.className = "event-marker-cursor";
+    eventMarkersEl.appendChild(cursor);
+  }
+  const active = playbackEventsByKey.get(activeEventKey);
+  const dur = getPlaybackDurationSec();
+  if (!active || !dur) {
+    cursor.classList.add("hidden");
+    return;
+  }
+  const ratio = Math.min(1, Math.max(0, (Number(active.timestamp_sec) || 0) / dur));
+  cursor.style.transform = `translateX(${ratio * Math.max(0, eventMarkersEl.clientWidth - 1)}px)`;
+  cursor.classList.remove("hidden");
+}
+
 function renderEventMarkers() {
   if (!eventMarkersEl) return;
+  ensureReviewTimelineResizeObserver();
   bindReviewTimelineDelegation(eventMarkersEl);
   bindReviewTimelineDelegation(reviewMarkersEl);
-  eventMarkersEl.innerHTML = "";
-  if (reviewMarkersEl) reviewMarkersEl.innerHTML = "";
-  reviewTimelineBucketEvents.clear();
-  reviewTimelineBucketByKey.clear();
 
   const dur = getPlaybackDurationSec();
   if (!dur || !playbackEvents.length) {
+    eventMarkersEl.innerHTML = "";
+    if (reviewMarkersEl) reviewMarkersEl.innerHTML = "";
+    eventMarkerBinsCache = { key: "", bins: new Map() };
     updateReviewTimelineSummary(0, 0, 0);
     return;
   }
 
   const rows = filteredPlaybackEvents();
-  const bucketCount = Math.max(
-    1,
-    Math.ceil(reviewTimelineTrackWidth() / REVIEW_TIMELINE_BUCKET_PX)
-  );
+  const bucketCount = reviewTimelineBucketCount();
+  reviewTimelineObservedBucketCount = bucketCount;
+  const filterMode = eventFilterSelect?.value || "all";
+  const cacheKey = `${playbackEventsStructureVersion}|${filterMode}|${bucketCount}|${dur}|${rows.length}`;
+  if (eventMarkerBinsCache.key === cacheKey) {
+    patchTimelineBucketForEvent(getActiveEvent());
+    updateEventMarkerActiveState();
+    return;
+  }
+
+  eventMarkersEl.innerHTML = "";
+  if (reviewMarkersEl) reviewMarkersEl.innerHTML = "";
+  reviewTimelineBucketEvents.clear();
+  reviewTimelineBucketByKey.clear();
+  eventMarkerRenderList = rows;
   const buckets = new Map();
   let verifiedTotal = 0;
   let attentionTotal = 0;
@@ -2577,15 +2823,21 @@ function renderEventMarkers() {
         count: 0,
         alarm: false,
         attention: false,
+        attentionCount: 0,
         verified: false,
         unreviewed: false,
+        events: [],
       };
       buckets.set(bucketKey, bucket);
       reviewTimelineBucketEvents.set(bucketKey, ev);
     }
     bucket.count += 1;
+    bucket.events.push(ev);
     if (ev.event_type === "alarm") bucket.alarm = true;
-    if (attention) bucket.attention = true;
+    if (attention) {
+      bucket.attention = true;
+      bucket.attentionCount += 1;
+    }
     else if (verified) bucket.verified = true;
     else bucket.unreviewed = true;
   });
@@ -2633,7 +2885,9 @@ function renderEventMarkers() {
 
   eventMarkersEl.appendChild(eventFrag);
   if (reviewMarkersEl) reviewMarkersEl.appendChild(reviewFrag);
+  eventMarkerBinsCache = { key: cacheKey, bins: buckets, attentionTotal };
   updateReviewTimelineSummary(rows.length, verifiedTotal, attentionTotal);
+  renderEventMarkerCursor();
   if (typeof renderAccuracySeekMarkers === "function") renderAccuracySeekMarkers();
 }
 

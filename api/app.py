@@ -6,6 +6,7 @@ import argparse
 import sys
 
 from fastapi import FastAPI
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from api.routes import router as http_router
@@ -22,6 +23,7 @@ from pose_store import migrate_v1_json_dir
 
 def create_app() -> FastAPI:
     application = FastAPI(title="visual-dps-datacollect", version="0.2.0")
+    application.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
     application.include_router(http_router)
     web_dir = project_root() / "web"
     if web_dir.is_dir():

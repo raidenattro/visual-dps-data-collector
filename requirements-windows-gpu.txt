@@ -12,3 +12,6 @@ onnxruntime-gpu>=1.20.0
 
 # ORT CUDA 需 cuDNN 9 DLL；运行时由 ort_cuda_setup.py 加入 PATH / add_dll_directory
 nvidia-cudnn-cu12>=9.1.0
+
+# Bundled ffmpeg executable for H.264 fast-start playback previews.
+imageio-ffmpeg>=0.5.1,<0.7

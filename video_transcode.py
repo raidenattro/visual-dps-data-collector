@@ -3,20 +3,23 @@
 from __future__ import annotations
 
 import logging
+import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
 import cv2
 
-from config_loader import load_config_file, resolve_config_path
+from config_loader import load_config_file, project_root, resolve_config_path
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("uvicorn.error")
 
 ProgressCallback = Callable[[int, int], None]
 
@@ -40,6 +43,9 @@ class TranscodeJobState:
 
 _jobs_lock = threading.Lock()
 _jobs: dict[str, TranscodeJobState] = {}
+_preview_executor: ThreadPoolExecutor | None = None
+_nvenc_available_cache: bool | None = None
+_PREVIEW_CACHE_VERSION = "v3-gop1s-zero-pts"
 
 
 def probe_video_timing(video_path: Path) -> dict[str, float]:
@@ -120,9 +126,29 @@ def default_playback_transcode_height() -> int:
         return 480
 
 
+def default_playback_transcode_min_frames() -> int:
+    cfg = load_config_file(resolve_config_path(None))
+    raw = (cfg.get("video") or {}).get("preview_min_frames", 10_000)
+    try:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
+        return 10_000
+
+
 def preview_video_path(src: Path, target_height: int) -> Path:
     h = max(1, int(target_height))
-    return src.parent / f"{src.stem}_preview_h{h}{src.suffix}"
+    stat = src.stat()
+    identity = (
+        f"{_PREVIEW_CACHE_VERSION}|{src.resolve()}|{stat.st_size}|{stat.st_mtime_ns}|{h}"
+    )
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:20]
+    cfg = load_config_file(resolve_config_path(None))
+    video_cfg = cfg.get("video") if isinstance(cfg.get("video"), dict) else {}
+    raw_dir = str(video_cfg.get("preview_cache_dir") or "localdata/playback-cache/video")
+    cache_dir = Path(raw_dir)
+    if not cache_dir.is_absolute():
+        cache_dir = project_root() / cache_dir
+    return cache_dir.resolve() / digest[:2] / f"{src.stem}_{digest}_h{h}.mp4"
 
 
 def _job_key(src: Path, target_height: int) -> str:
@@ -140,6 +166,28 @@ def read_video_height(path: Path) -> int:
             if ret and frame is not None:
                 h = int(frame.shape[0])
         return max(0, h)
+    finally:
+        cap.release()
+
+
+def read_video_frame_count(path: Path) -> int:
+    """Return the container's decoded frame count, or zero when it cannot be read."""
+    cap = cv2.VideoCapture(str(path))
+    if not cap.isOpened():
+        return 0
+    try:
+        return max(0, int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0))
+    finally:
+        cap.release()
+
+
+def read_video_fps(path: Path) -> float:
+    """Return the source frame rate used to derive a one-second GOP."""
+    cap = cv2.VideoCapture(str(path))
+    if not cap.isOpened():
+        return 0.0
+    try:
+        return max(0.0, float(cap.get(cv2.CAP_PROP_FPS) or 0.0))
     finally:
         cap.release()
 
@@ -167,14 +215,29 @@ def is_usable_playback_video(path: Path, src: Path | None = None) -> bool:
     if not cap.isOpened():
         return False
     try:
+        preview_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
         ret, frame = cap.read()
         if not ret or frame is None:
             return False
         h = int(frame.shape[0])
         w = int(frame.shape[1])
-        return w > 0 and h > 0
+        if w <= 0 or h <= 0 or preview_frames <= 0:
+            return False
     finally:
         cap.release()
+
+    if src is not None and Path(src).is_file():
+        source_frames = read_video_frame_count(Path(src))
+        if source_frames <= 0 or preview_frames != source_frames:
+            logger.warning(
+                "preview frame count mismatch: %s=%s, %s=%s",
+                path.name,
+                preview_frames,
+                Path(src).name,
+                source_frames,
+            )
+            return False
+    return True
 
 
 def purge_invalid_preview(preview: Path, src: Path) -> bool:
@@ -200,7 +263,48 @@ def _even_dim(n: int) -> int:
 
 
 def _find_ffmpeg() -> str | None:
-    return shutil.which("ffmpeg")
+    system_ffmpeg = shutil.which("ffmpeg")
+    if system_ffmpeg:
+        return system_ffmpeg
+    try:
+        import imageio_ffmpeg
+
+        bundled = imageio_ffmpeg.get_ffmpeg_exe()
+        return bundled if bundled and Path(bundled).is_file() else None
+    except (ImportError, OSError, RuntimeError):
+        return None
+
+
+def _ffmpeg_nvenc_available(ffmpeg: str) -> bool:
+    global _nvenc_available_cache
+    if _nvenc_available_cache is not None:
+        return _nvenc_available_cache
+    probe = [
+        ffmpeg,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-f",
+        "lavfi",
+        "-i",
+        "color=size=64x64:rate=1:duration=1",
+        "-c:v",
+        "h264_nvenc",
+        "-f",
+        "null",
+        "NUL" if os.name == "nt" else "/dev/null",
+    ]
+    try:
+        _nvenc_available_cache = subprocess.run(
+            probe,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=15,
+            check=False,
+        ).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        _nvenc_available_cache = False
+    return _nvenc_available_cache
 
 
 def _ffmpeg_duration_sec(src: Path) -> float:
@@ -237,6 +341,14 @@ def transcode_with_ffmpeg(
         dest.unlink()
 
     duration_sec = _ffmpeg_duration_sec(src)
+    source_fps = read_video_fps(src)
+    gop_frames = max(1, int(round(source_fps))) if source_fps > 0 else 25
+    use_nvenc = _ffmpeg_nvenc_available(ffmpeg)
+    encoder_args = (
+        ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "23", "-b:v", "0"]
+        if use_nvenc
+        else ["-c:v", "libx264", "-preset", "fast", "-crf", "23"]
+    )
     cmd = [
         ffmpeg,
         "-y",
@@ -249,13 +361,16 @@ def transcode_with_ffmpeg(
         "-i",
         str(src),
         "-vf",
-        f"scale=-2:{th}",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "fast",
-        "-crf",
-        "23",
+        f"scale=-2:{th},setpts=PTS-STARTPTS",
+        *encoder_args,
+        "-g",
+        str(gop_frames),
+        "-keyint_min",
+        str(gop_frames),
+        "-sc_threshold",
+        "0",
+        "-fps_mode",
+        "passthrough",
         "-movflags",
         "+faststart",
         "-an",
@@ -418,6 +533,7 @@ def transcode_preview_video(
 def _preview_plan(src: Path, target_height: int | None = None) -> dict:
     src = Path(src)
     th = default_playback_transcode_height() if target_height is None else max(0, int(target_height))
+    min_frames = default_playback_transcode_min_frames()
     if not src.is_file():
         return {
             "needs_transcode": False,
@@ -425,16 +541,21 @@ def _preview_plan(src: Path, target_height: int | None = None) -> dict:
             "preview": None,
             "target_height": th,
             "source_height": 0,
+            "source_frames": 0,
+            "preview_min_frames": min_frames,
             "use_original": False,
         }
     src_h = read_video_height(src)
-    if th <= 0 or src_h <= 0 or src_h <= th:
+    src_frames = read_video_frame_count(src)
+    if th <= 0 or src_h <= 0 or src_h <= th or src_frames < min_frames:
         return {
             "needs_transcode": False,
             "ready": True,
             "preview": src,
             "target_height": th,
             "source_height": src_h,
+            "source_frames": src_frames,
+            "preview_min_frames": min_frames,
             "use_original": True,
         }
     preview = preview_video_path(src, th)
@@ -446,6 +567,8 @@ def _preview_plan(src: Path, target_height: int | None = None) -> dict:
                 "preview": preview,
                 "target_height": th,
                 "source_height": src_h,
+                "source_frames": src_frames,
+                "preview_min_frames": min_frames,
                 "use_original": False,
             }
         purge_invalid_preview(preview, src)
@@ -455,6 +578,8 @@ def _preview_plan(src: Path, target_height: int | None = None) -> dict:
         "preview": preview,
         "target_height": th,
         "source_height": src_h,
+        "source_frames": src_frames,
+        "preview_min_frames": min_frames,
         "use_original": False,
     }
 
@@ -479,6 +604,34 @@ def resolve_playback_serve_path(src: Path, *, target_height: int | None = None) 
     return src
 
 
+def build_preview_video_sync(
+    src: Path,
+    *,
+    target_height: int | None = None,
+    force: bool = False,
+) -> dict:
+    """Build one derived playback preview synchronously without modifying the source video."""
+    src = Path(src)
+    plan = _preview_plan(src, target_height=target_height)
+    preview = plan.get("preview")
+    if not src.is_file():
+        return _status_dict_from_plan(plan, status="missing", progress=0, message="source missing")
+    if not plan.get("needs_transcode") and not force:
+        return _status_dict_from_plan(plan, status="ready", message="video ready")
+    if not isinstance(preview, Path) or preview.resolve() == src.resolve():
+        return _status_dict_from_plan(plan, status="ready", message="preview not required")
+    if force and preview.is_file():
+        preview.unlink(missing_ok=True)
+    ok = transcode_preview_video(src, preview, int(plan["target_height"]))
+    refreshed = _preview_plan(src, target_height=int(plan["target_height"]))
+    if ok and refreshed.get("ready") and not refreshed.get("use_original"):
+        return _status_dict_from_plan(refreshed, status="ready", message="preview ready")
+    return {
+        **_status_dict_from_plan(refreshed, status="error", progress=0, message="preview failed"),
+        "error": "preview transcoding failed",
+    }
+
+
 def _run_transcode_job(src: Path, preview: Path, th: int, key: str) -> None:
     def on_progress(done: int, total: int) -> None:
         pct = min(99, int(round((done / max(1, total)) * 100)))
@@ -490,7 +643,18 @@ def _run_transcode_job(src: Path, preview: Path, th: int, key: str) -> None:
             job.total_frames = total
             job.message = f"转码中 {pct}%"
 
-    ok = transcode_preview_video(src, preview, th, on_progress=on_progress)
+    logger.info(
+        "preview transcode started source=%s preview=%s target_height=%d source_frames=%d",
+        src,
+        preview,
+        th,
+        read_video_frame_count(src),
+    )
+    try:
+        ok = transcode_preview_video(src, preview, th, on_progress=on_progress)
+    except Exception:
+        logger.exception("preview transcode crashed source=%s preview=%s", src, preview)
+        ok = False
     with _jobs_lock:
         job = _jobs.get(key)
         if not job:
@@ -500,12 +664,23 @@ def _run_transcode_job(src: Path, preview: Path, th: int, key: str) -> None:
             job.progress = 100
             job.use_original = False
             job.message = "预览视频已就绪"
+            logger.info(
+                "preview transcode ready source=%s preview=%s frames=%d",
+                src,
+                preview,
+                read_video_frame_count(preview),
+            )
         else:
             purge_invalid_preview(preview, src)
             job.status = "error"
             job.use_original = True
             job.error = "预览转码失败，将使用原视频"
             job.message = job.error
+            logger.error(
+                "preview transcode failed source=%s preview=%s; playback will use original",
+                src,
+                preview,
+            )
 
 
 def _status_dict_from_plan(plan: dict, *, status: str, progress: int = 100, message: str = "") -> dict:
@@ -516,11 +691,38 @@ def _status_dict_from_plan(plan: dict, *, status: str, progress: int = 100, mess
         "progress": progress,
         "needs_transcode": bool(plan.get("needs_transcode")),
         "source_height": src_h,
+        "source_frames": int(plan.get("source_frames") or 0),
+        "preview_min_frames": int(plan.get("preview_min_frames") or 0),
         "preview_height": src_h if th <= 0 or src_h <= th else th,
         "message": message,
         "error": "",
         "use_original": bool(plan.get("use_original")),
+        "cache_hit": bool(
+            isinstance(plan.get("preview"), Path)
+            and plan.get("preview") != plan.get("source")
+            and plan.get("ready")
+            and not plan.get("use_original")
+        ),
+        "cache_path_type": "local_preview" if not plan.get("use_original") else "original",
     }
+
+
+def _get_preview_executor() -> ThreadPoolExecutor:
+    global _preview_executor
+    with _jobs_lock:
+        if _preview_executor is None:
+            cfg = load_config_file(resolve_config_path(None))
+            video_cfg = cfg.get("video") if isinstance(cfg.get("video"), dict) else {}
+            try:
+                workers = max(1, int(video_cfg.get("preview_workers") or 1))
+            except (TypeError, ValueError):
+                workers = 1
+            _preview_executor = ThreadPoolExecutor(
+                max_workers=workers,
+                thread_name_prefix="preview-transcode",
+            )
+            logger.info("preview transcode executor initialized workers=%d", workers)
+        return _preview_executor
 
 
 def ensure_preview_transcode_async(src: Path, *, target_height: int | None = None) -> dict:
@@ -531,6 +733,15 @@ def ensure_preview_transcode_async(src: Path, *, target_height: int | None = Non
     preview: Path | None = plan["preview"]
 
     if not plan["needs_transcode"]:
+        logger.info(
+            "preview plan uses %s source=%s height=%d frames=%d threshold_frames=%d target_height=%d",
+            "cached preview" if not plan.get("use_original") else "original",
+            src,
+            src_h,
+            int(plan.get("source_frames") or 0),
+            int(plan.get("preview_min_frames") or 0),
+            th,
+        )
         return _status_dict_from_plan(
             plan,
             status="ready" if plan["ready"] else "missing",
@@ -546,10 +757,14 @@ def ensure_preview_transcode_async(src: Path, *, target_height: int | None = Non
                 "progress": job.progress,
                 "needs_transcode": True,
                 "source_height": src_h,
+                "source_frames": int(plan.get("source_frames") or 0),
+                "preview_min_frames": int(plan.get("preview_min_frames") or 0),
                 "preview_height": th,
                 "message": job.message or "正在生成预览视频…",
                 "error": "",
                 "use_original": False,
+                "cache_hit": False,
+                "cache_path_type": "original",
             }
         if job and job.status == "ready":
             if isinstance(preview, Path) and is_usable_playback_video(preview, src):
@@ -558,10 +773,14 @@ def ensure_preview_transcode_async(src: Path, *, target_height: int | None = Non
                     "progress": 100,
                     "needs_transcode": True,
                     "source_height": src_h,
+                    "source_frames": int(plan.get("source_frames") or 0),
+                    "preview_min_frames": int(plan.get("preview_min_frames") or 0),
                     "preview_height": th,
                     "message": "预览视频已就绪",
                     "error": "",
                     "use_original": False,
+                    "cache_hit": True,
+                    "cache_path_type": "local_preview",
                 }
             _jobs.pop(key, None)
             job = None
@@ -575,10 +794,14 @@ def ensure_preview_transcode_async(src: Path, *, target_height: int | None = Non
                     "progress": job.progress,
                     "needs_transcode": True,
                     "source_height": src_h,
+                    "source_frames": int(plan.get("source_frames") or 0),
+                    "preview_min_frames": int(plan.get("preview_min_frames") or 0),
                     "preview_height": th,
                     "message": job.message,
                     "error": job.error,
                     "use_original": True,
+                    "cache_hit": False,
+                    "cache_path_type": "original",
                 }
 
         job = TranscodeJobState(
@@ -591,22 +814,48 @@ def ensure_preview_transcode_async(src: Path, *, target_height: int | None = Non
         _jobs[key] = job
 
     assert preview is not None
-    thread = threading.Thread(
-        target=_run_transcode_job,
-        args=(Path(src), preview, th, key),
-        daemon=True,
-        name=f"preview-transcode-{src.stem}",
+    logger.info(
+        "preview transcode queued source=%s preview=%s height=%d frames=%d threshold_frames=%d",
+        src,
+        preview,
+        th,
+        int(plan.get("source_frames") or 0),
+        int(plan.get("preview_min_frames") or 0),
     )
-    thread.start()
+    try:
+        _get_preview_executor().submit(_run_transcode_job, Path(src), preview, th, key)
+    except Exception:
+        logger.exception("preview transcode enqueue failed source=%s preview=%s", src, preview)
+        with _jobs_lock:
+            failed = _jobs.get(key)
+            if failed:
+                failed.status = "error"
+                failed.use_original = True
+                failed.error = "preview transcode could not be scheduled"
+                failed.message = failed.error
+        return {
+            **_status_dict_from_plan(
+                plan,
+                status="error",
+                progress=0,
+                message="preview scheduling failed",
+            ),
+            "error": "preview transcode could not be scheduled",
+            "use_original": True,
+        }
     return {
         "status": "transcoding",
         "progress": 0,
         "needs_transcode": True,
         "source_height": src_h,
+        "source_frames": int(plan.get("source_frames") or 0),
+        "preview_min_frames": int(plan.get("preview_min_frames") or 0),
         "preview_height": th,
         "message": "正在生成预览视频…",
         "error": "",
         "use_original": False,
+        "cache_hit": False,
+        "cache_path_type": "original",
     }
 
 

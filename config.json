@@ -12,8 +12,15 @@
         "save_video": true
     },
     "video": {
-        "transcode_height": 0,
+        "transcode_height": 480,
+        "preview_min_frames": 10000,
+        "preview_cache_dir": "localdata/playback-cache/video",
+        "preview_workers": 1,
         "capture_height": 480
+    },
+    "playback_cache": {
+        "max_records": 8,
+        "max_bytes_mb": 256
     },
     "models": {
         "backend": "rtmpose_t",

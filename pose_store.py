@@ -3,15 +3,21 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import tempfile
 import threading
+import time
+from bisect import bisect_left, bisect_right
+from collections import OrderedDict
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
+
+logger = logging.getLogger("uvicorn.error")
 
 _review_write_locks: dict[str, Any] = {}
 _review_write_locks_mu = threading.Lock()
@@ -94,6 +100,25 @@ class RecordLocator:
     record_id: str
     storage: str
     path: Path
+
+
+@dataclass
+class _PlaybackParquetCacheEntry:
+    signature: tuple[tuple[int, int], tuple[int, int]]
+    timeline_table: Any
+    skeleton_table: Any | None
+    timeline_frame_ids: list[int]
+    skeleton_frame_ids: list[int]
+    skeleton_loaded: bool = False
+    timeline_index: list[dict[str, Any]] | None = None
+    timeline_rows: list[dict[str, Any]] | None = None
+    events: list[dict[str, Any]] | None = None
+    size_bytes: int = 0
+
+
+_playback_cache_lock = threading.RLock()
+_playback_cache: OrderedDict[str, _PlaybackParquetCacheEntry] = OrderedDict()
+_playback_cache_bytes = 0
 
 
 def is_v2_package(path: Path) -> bool:
@@ -509,6 +534,206 @@ def _read_parquet_table(path: Path):
     return table.to_pylist()
 
 
+def _playback_file_signature(path: Path) -> tuple[int, int]:
+    try:
+        stat = path.stat()
+        return int(stat.st_size), int(stat.st_mtime_ns)
+    except OSError:
+        return 0, 0
+
+
+def _playback_cache_signature(locator: RecordLocator) -> tuple[tuple[int, int], tuple[int, int]]:
+    return (
+        _playback_file_signature(locator.path / TIMELINE_FILE),
+        _playback_file_signature(locator.path / SKELETON_FILE),
+    )
+
+
+def _playback_cache_limits() -> tuple[int, int]:
+    max_records = 8
+    max_bytes = 256 * 1024 * 1024
+    try:
+        from config_loader import load_config_file, resolve_config_path
+
+        cfg = load_config_file(resolve_config_path(None))
+        block = cfg.get("playback_cache") if isinstance(cfg.get("playback_cache"), dict) else {}
+        max_records = max(1, int(block.get("max_records") or max_records))
+        max_bytes = max(16, int(block.get("max_bytes_mb") or 256)) * 1024 * 1024
+    except (OSError, TypeError, ValueError):
+        pass
+    return max_records, max_bytes
+
+
+def _estimate_playback_entry_bytes(entry: _PlaybackParquetCacheEntry) -> int:
+    total = int(getattr(entry.timeline_table, "nbytes", 0) or 0)
+    total += int(getattr(entry.skeleton_table, "nbytes", 0) or 0)
+    total += (len(entry.timeline_frame_ids) + len(entry.skeleton_frame_ids)) * 8
+    if entry.timeline_index is not None:
+        total += len(entry.timeline_index) * 160
+    if entry.timeline_rows is not None:
+        total += len(entry.timeline_rows) * 240
+    if entry.events is not None:
+        total += len(entry.events) * 192
+    return total
+
+
+def _trim_playback_cache_locked() -> None:
+    global _playback_cache_bytes
+    max_records, max_bytes = _playback_cache_limits()
+    _playback_cache_bytes = sum(entry.size_bytes for entry in _playback_cache.values())
+    while _playback_cache and (
+        len(_playback_cache) > max_records or _playback_cache_bytes > max_bytes
+    ):
+        evicted_key, evicted = _playback_cache.popitem(last=False)
+        _playback_cache_bytes = max(0, _playback_cache_bytes - evicted.size_bytes)
+        logger.info(
+            "playback cache evicted record=%s entry_mb=%.2f records=%d total_mb=%.2f limits=%d/%.0fMB",
+            evicted_key,
+            evicted.size_bytes / (1024 * 1024),
+            len(_playback_cache),
+            _playback_cache_bytes / (1024 * 1024),
+            max_records,
+            max_bytes / (1024 * 1024),
+        )
+
+
+def _refresh_playback_entry_size_locked(entry: _PlaybackParquetCacheEntry) -> None:
+    entry.size_bytes = _estimate_playback_entry_bytes(entry)
+    _trim_playback_cache_locked()
+
+
+def _load_playback_cache_entry(
+    locator: RecordLocator, *, include_skeleton: bool = False
+) -> _PlaybackParquetCacheEntry:
+    if locator.storage != STORAGE_V2_PARQUET:
+        raise RuntimeError("playback parquet cache only supports schema v2")
+    _, pq = _require_pyarrow()
+    signature = _playback_cache_signature(locator)
+    key = str(locator.record_id)
+    with _playback_cache_lock:
+        cached = _playback_cache.get(key)
+        if cached is not None and cached.signature == signature:
+            if include_skeleton and not cached.skeleton_loaded:
+                started = time.perf_counter()
+                skeleton_path = locator.path / SKELETON_FILE
+                cached.skeleton_table = pq.read_table(skeleton_path) if skeleton_path.is_file() else None
+                cached.skeleton_frame_ids = []
+                if cached.skeleton_table is not None:
+                    cached.skeleton_frame_ids = [
+                        int(v or 0) for v in cached.skeleton_table.column("frame_idx").to_pylist()
+                    ]
+                    if cached.skeleton_frame_ids != sorted(cached.skeleton_frame_ids):
+                        cached.skeleton_table = cached.skeleton_table.sort_by(
+                            [("frame_idx", "ascending")]
+                        )
+                        cached.skeleton_frame_ids = [
+                            int(v or 0)
+                            for v in cached.skeleton_table.column("frame_idx").to_pylist()
+                        ]
+                cached.skeleton_loaded = True
+                _refresh_playback_entry_size_locked(cached)
+                logger.info(
+                    "playback cache loaded skeleton record=%s rows=%d elapsed_ms=%.2f entry_mb=%.2f",
+                    key,
+                    len(cached.skeleton_frame_ids),
+                    (time.perf_counter() - started) * 1000,
+                    cached.size_bytes / (1024 * 1024),
+                )
+            _playback_cache.move_to_end(key)
+            logger.debug(
+                "playback cache hit record=%s component=%s",
+                key,
+                "timeline+skeleton" if include_skeleton else "timeline",
+            )
+            return cached
+
+        if cached is not None:
+            logger.info(
+                "playback cache invalidated record=%s old_signature=%s new_signature=%s",
+                key,
+                cached.signature,
+                signature,
+            )
+
+        started = time.perf_counter()
+        timeline_path = locator.path / TIMELINE_FILE
+        if not timeline_path.is_file():
+            raise RuntimeError(f"timeline parquet not found: {timeline_path}")
+        timeline_table = pq.read_table(timeline_path)
+        timeline_ids = [int(v or 0) for v in timeline_table.column("frame_idx").to_pylist()]
+        if timeline_ids != sorted(timeline_ids):
+            timeline_table = timeline_table.sort_by([("frame_idx", "ascending")])
+            timeline_ids = [int(v or 0) for v in timeline_table.column("frame_idx").to_pylist()]
+
+        skeleton_path = locator.path / SKELETON_FILE
+        skeleton_table = (
+            pq.read_table(skeleton_path)
+            if include_skeleton and skeleton_path.is_file()
+            else None
+        )
+        skeleton_ids: list[int] = []
+        if skeleton_table is not None:
+            skeleton_ids = [int(v or 0) for v in skeleton_table.column("frame_idx").to_pylist()]
+            if skeleton_ids != sorted(skeleton_ids):
+                skeleton_table = skeleton_table.sort_by([("frame_idx", "ascending")])
+                skeleton_ids = [int(v or 0) for v in skeleton_table.column("frame_idx").to_pylist()]
+
+        entry = _PlaybackParquetCacheEntry(
+            signature=signature,
+            timeline_table=timeline_table,
+            skeleton_table=skeleton_table,
+            timeline_frame_ids=timeline_ids,
+            skeleton_frame_ids=skeleton_ids,
+            skeleton_loaded=include_skeleton,
+        )
+        entry.size_bytes = _estimate_playback_entry_bytes(entry)
+        _playback_cache[key] = entry
+        _playback_cache.move_to_end(key)
+        _trim_playback_cache_locked()
+        logger.info(
+            "playback cache miss loaded record=%s timeline_rows=%d skeleton_rows=%d elapsed_ms=%.2f entry_mb=%.2f",
+            key,
+            len(timeline_ids),
+            len(skeleton_ids),
+            (time.perf_counter() - started) * 1000,
+            entry.size_bytes / (1024 * 1024),
+        )
+        return entry
+
+
+def playback_cache_is_warm(locator: RecordLocator, component: str = "tables") -> bool:
+    if locator.storage != STORAGE_V2_PARQUET:
+        return False
+    signature = _playback_cache_signature(locator)
+    with _playback_cache_lock:
+        entry = _playback_cache.get(str(locator.record_id))
+        if entry is None or entry.signature != signature:
+            return False
+        if component == "timeline":
+            return entry.timeline_index is not None
+        if component == "events":
+            return entry.events is not None
+        return entry.skeleton_loaded if component == "tables" else True
+
+
+def playback_cache_stats() -> dict[str, int]:
+    with _playback_cache_lock:
+        return {
+            "records": len(_playback_cache),
+            "bytes": sum(entry.size_bytes for entry in _playback_cache.values()),
+        }
+
+
+def _slice_table_by_frame(table: Any, frame_ids: list[int], lo: int, hi: int) -> list[dict[str, Any]]:
+    if table is None or not frame_ids:
+        return []
+    start = bisect_left(frame_ids, lo)
+    end = bisect_right(frame_ids, hi)
+    if end <= start:
+        return []
+    return table.slice(start, end - start).to_pylist()
+
+
 def load_frames_range(
     locator: RecordLocator,
     *,
@@ -525,28 +750,15 @@ def load_frames_range(
     if locator.storage != STORAGE_V2_PARQUET:
         return []
 
-    pa, pq = _require_pyarrow()
     lo = max(1, int(from_frame_idx))
     hi = int(to_frame_idx) if to_frame_idx is not None else 10**9
-
-    timeline_path = locator.path / TIMELINE_FILE
-    skeleton_path = locator.path / SKELETON_FILE
-    if not timeline_path.is_file():
-        return []
-
-    timeline_table = pq.read_table(
-        timeline_path,
-        filters=[("frame_idx", ">=", lo), ("frame_idx", "<=", hi)],
+    entry = _load_playback_cache_entry(locator, include_skeleton=True)
+    timeline_rows = _slice_table_by_frame(
+        entry.timeline_table, entry.timeline_frame_ids, lo, hi
     )
-    timeline_rows = timeline_table.to_pylist()
-
-    skeleton_rows: list[dict[str, Any]] = []
-    if skeleton_path.is_file():
-        skeleton_table = pq.read_table(
-            skeleton_path,
-            filters=[("frame_idx", ">=", lo), ("frame_idx", "<=", hi)],
-        )
-        skeleton_rows = skeleton_table.to_pylist()
+    skeleton_rows = _slice_table_by_frame(
+        entry.skeleton_table, entry.skeleton_frame_ids, lo, hi
+    )
 
     return _assemble_frames_from_tables(timeline_rows, skeleton_rows)
 
@@ -556,8 +768,9 @@ def load_all_frames(locator: RecordLocator) -> list[dict[str, Any]]:
         data = load_manifest(locator)
         return list(data.get("frames") or [])
 
-    timeline_rows = _read_parquet_table(locator.path / TIMELINE_FILE)
-    skeleton_rows = _read_parquet_table(locator.path / SKELETON_FILE)
+    entry = _load_playback_cache_entry(locator, include_skeleton=True)
+    timeline_rows = entry.timeline_table.to_pylist()
+    skeleton_rows = entry.skeleton_table.to_pylist() if entry.skeleton_table is not None else []
     return _assemble_frames_from_tables(timeline_rows, skeleton_rows)
 
 
@@ -594,15 +807,24 @@ def load_timeline_index(locator: RecordLocator) -> list[dict[str, Any]]:
             )
         return rows
 
-    pa, pq = _require_pyarrow()
-    path = locator.path / TIMELINE_FILE
-    if not path.is_file():
-        return []
-    table = pq.read_table(
-        path,
-        columns=["frame_idx", "source_frame_idx", "timestamp_sec"],
-    )
-    return table.to_pylist()
+    entry = _load_playback_cache_entry(locator)
+    with _playback_cache_lock:
+        if entry.timeline_index is None:
+            available = set(entry.timeline_table.column_names)
+            columns = [
+                name
+                for name in (
+                    "frame_idx",
+                    "source_frame_idx",
+                    "timestamp_sec",
+                    "infer_width",
+                    "infer_height",
+                )
+                if name in available
+            ]
+            entry.timeline_index = entry.timeline_table.select(columns).to_pylist()
+            _refresh_playback_entry_size_locked(entry)
+        return [dict(row) for row in entry.timeline_index]
 
 
 def load_timeline(locator: RecordLocator, *, include_events: bool = False) -> list[dict[str, Any]]:
@@ -626,28 +848,45 @@ def load_timeline(locator: RecordLocator, *, include_events: bool = False) -> li
             rows.append(row)
         return rows
 
-    rows_raw = _read_parquet_table(locator.path / TIMELINE_FILE)
-    out: list[dict[str, Any]] = []
-    for r in rows_raw:
-        if not isinstance(r, dict):
-            continue
-        row = {
-            "frame_idx": int(r.get("frame_idx") or 0),
-            "source_frame_idx": int(r.get("source_frame_idx") or r.get("frame_idx") or 0),
-            "timestamp_sec": float(r.get("timestamp_sec") or 0.0),
-            "infer_width": int(r.get("infer_width") or 0),
-            "infer_height": int(r.get("infer_height") or 0),
-        }
+    entry = _load_playback_cache_entry(locator)
+    with _playback_cache_lock:
+        if entry.timeline_rows is None:
+            out: list[dict[str, Any]] = []
+            for r in entry.timeline_table.to_pylist():
+                if not isinstance(r, dict):
+                    continue
+                out.append(
+                    {
+                        "frame_idx": int(r.get("frame_idx") or 0),
+                        "source_frame_idx": int(
+                            r.get("source_frame_idx") or r.get("frame_idx") or 0
+                        ),
+                        "timestamp_sec": float(r.get("timestamp_sec") or 0.0),
+                        "infer_width": int(r.get("infer_width") or 0),
+                        "infer_height": int(r.get("infer_height") or 0),
+                        "collisions": list(r.get("collisions") or []),
+                        "alarm_collisions": list(r.get("alarm_collisions") or []),
+                    }
+                )
+            entry.timeline_rows = out
+            _refresh_playback_entry_size_locked(entry)
         if include_events:
-            row["collisions"] = list(r.get("collisions") or [])
-            row["alarm_collisions"] = list(r.get("alarm_collisions") or [])
-        out.append(row)
-    return out
+            return [dict(row) for row in entry.timeline_rows]
+        return [
+            {k: v for k, v in row.items() if k not in ("collisions", "alarm_collisions")}
+            for row in entry.timeline_rows
+        ]
 
 
 def load_events(locator: RecordLocator) -> list[dict[str, Any]]:
     """逐帧复核列表（每个视频帧一条，同帧事件货框合并）。"""
     from event_engine.box_identity import canonicalize_box_token_list
+
+    entry = _load_playback_cache_entry(locator) if locator.storage == STORAGE_V2_PARQUET else None
+    if entry is not None:
+        with _playback_cache_lock:
+            if entry.events is not None:
+                return [dict(event) for event in entry.events]
 
     rows = load_timeline(locator, include_events=True)
     events: list[dict[str, Any]] = []
@@ -670,8 +909,13 @@ def load_events(locator: RecordLocator) -> list[dict[str, Any]]:
                 "source_frame_idx": sfi,
                 "timestamp_sec": ts,
                 "box_tokens": frame_tokens,
+                "verified_true": False,
             }
         )
+    if entry is not None:
+        with _playback_cache_lock:
+            entry.events = [dict(event) for event in events]
+            _refresh_playback_entry_size_locked(entry)
     return events
 
 
@@ -1321,23 +1565,35 @@ def load_verified_review_by_signature(locator: RecordLocator) -> dict[str, dict[
 def enrich_events_with_review(
     events: list[dict[str, Any]],
     locator: RecordLocator,
+    review: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """按 frame_idx 合并 v2 复核结果（只读 bindings，不做 legacy 聚合）。"""
-    review = load_event_review(locator)
-    by_frame: dict[int, dict[str, Any]] = {}
-    for item in review.get("verified_true") or []:
-        if not isinstance(item, dict):
+    review = review if review is not None else load_event_review(locator)
+    # load_events 的缓存基线已经带 verified_true=False。schema v2 每帧一条且按
+    # frame_idx 排序，因此只复制/覆盖真正标真的少量行，避免每次请求再复制数万行。
+    out = events
+    fallback_positions: dict[int, int] | None = None
+    for review_item in review.get("verified_true") or []:
+        if not isinstance(review_item, dict):
             continue
-        fi = int(item.get("frame_idx") or 0)
-        if fi > 0:
-            by_frame[fi] = item
-
-    out: list[dict[str, Any]] = []
-    for ev in events:
-        row = dict(ev)
-        fi = int(ev.get("frame_idx") or 0)
-        review_item = by_frame.get(fi)
-        row["verified_true"] = review_item is not None
+        fi = int(review_item.get("frame_idx") or 0)
+        if fi <= 0:
+            continue
+        position = fi - 1
+        if not (
+            0 <= position < len(out)
+            and int(out[position].get("frame_idx") or 0) == fi
+        ):
+            if fallback_positions is None:
+                fallback_positions = {
+                    int(event.get("frame_idx") or 0): index
+                    for index, event in enumerate(out)
+                }
+            position = fallback_positions.get(fi, -1)
+        if position < 0:
+            continue
+        row = dict(out[position])
+        row["verified_true"] = True
         confirmed_list = extract_confirmed_box_tokens(review_item or {})
         if confirmed_list:
             row["confirmed_box_tokens"] = confirmed_list
@@ -1352,7 +1608,7 @@ def enrich_events_with_review(
                 row["person_id"] = int(review_item.get("person_id"))
             except (TypeError, ValueError):
                 pass
-        out.append(row)
+        out[position] = row
     return out
 
 

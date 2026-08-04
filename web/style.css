@@ -1636,6 +1636,89 @@ main:has(#panel-playback.active) {
   font-size: 0.88rem;
 }
 
+.seek-stack {
+  position: relative;
+  margin-top: 0.5rem;
+  padding-top: 10px;
+}
+
+.seek-event-markers {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 10px;
+  pointer-events: none;
+}
+
+.event-marker-cursor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 3px;
+  height: 10px;
+  background: #f8fafc;
+  box-shadow: 0 0 4px rgba(248, 250, 252, 0.9);
+  pointer-events: none;
+  will-change: transform;
+}
+
+.stage-wrap.skeleton-pending::after {
+  content: "骨架数据加载中…";
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  z-index: 5;
+  padding: 3px 8px;
+  border-radius: 4px;
+  color: #cbd5e1;
+  background: rgba(15, 23, 42, 0.72);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.playback-events-panel.events-loading .event-review-dock,
+.playback-events-panel.events-loading .event-review-list-details {
+  opacity: 0.58;
+  pointer-events: none;
+}
+
+.event-review-virtual-spacer > td {
+  padding: 0 !important;
+  border: 0 !important;
+  pointer-events: none;
+}
+
+.seek-event-markers .event-marker {
+  position: absolute;
+  top: 2px;
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+  border-radius: 50%;
+  pointer-events: auto;
+  cursor: pointer;
+  border: 1px solid rgba(0, 0, 0, 0.35);
+}
+
+.seek-event-markers .event-marker.alarm {
+  background: #ff4757;
+}
+
+.seek-event-markers .event-marker.collision {
+  background: #ffd166;
+}
+
+.seek-event-markers .event-marker.active {
+  transform: translate(-50%, -50%) scale(1.35);
+  box-shadow: 0 0 0 2px #f8fafc, 0 0 6px 1px rgba(248, 250, 252, 0.85);
+  z-index: 2;
+}
+
+.seek-event-markers .event-marker.verified {
+  box-shadow: 0 0 0 2px #4ade80;
+  z-index: 2;
+}
 .event-accuracy-tag {
   display: inline-block;
   margin-left: 0.25rem;

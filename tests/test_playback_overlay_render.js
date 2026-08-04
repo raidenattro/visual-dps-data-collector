@@ -47,12 +47,14 @@ assert.match(accentOnly[0], /paintAnnotationBox\(displayPts, state\)/);
 assert.match(accentOnly[0], /annotationBoxStateIsPlain\(state\)\) return/);
 
 // 复核高亮不能再全表扫描：播放每帧都要算。
-const highlight = render.match(/function getReviewBoxHighlightContext\([\s\S]*?\n}\n/);
+const highlight = render.match(
+  /function getReviewBoxHighlightContext\([\s\S]*?\r?\n}\r?\n/
+);
 assert.ok(highlight);
 assert.match(highlight[0], /getEventsOnFrame\(segmentFi\)/);
 
 // 人物标签：播放时钉住的事件通常不在当前帧，必须回退到本帧标真事件取配对色。
-const personLabels = render.match(/function drawPersonIdLabels\([\s\S]*?\n}\n/);
+const personLabels = render.match(/function drawPersonIdLabels\([\s\S]*?\r?\n}\r?\n/);
 assert.ok(personLabels);
 assert.match(personLabels[0], /if \(!reviewEv && labelFrameIdx > 0/);
 assert.match(personLabels[0], /pairedPersonIds\.add\(Number\(binding\.person_id\)\)/);

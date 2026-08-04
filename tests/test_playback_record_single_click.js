@@ -82,16 +82,22 @@ vm.runInContext(selectionSource, context);
   );
 
   const firstChunk = recordsSource.indexOf(
-    "await prefetchFrameChunksParallel(1, 1)"
+    "const initialFramesPromise = prefetchFrameChunksParallel(1, FRAME_CHUNK_PREFETCH_INITIAL)"
   );
   const videoLoad = recordsSource.indexOf(
-    "await prepareAndLoadRecordVideo(recordId"
+    "const videoPromise = prepareAndLoadRecordVideo(recordId"
   );
-  const backgroundPrefetch = recordsSource.indexOf(
-    "void prefetchAllPlaybackChunksInBackground(recordId)"
+  assert.ok(firstChunk >= 0 && videoLoad >= 0, "首批骨架和视频应并行启动");
+  assert.doesNotMatch(
+    recordsSource,
+    /prefetchAllPlaybackChunksInBackground/,
+    "长记录不得后台预取全部骨架分块"
   );
-  assert.ok(firstChunk >= 0 && firstChunk < videoLoad);
-  assert.ok(backgroundPrefetch > videoLoad);
+  assert.doesNotMatch(
+    recordsSource,
+    /await eventsPromise/,
+    "事件与复核状态不得阻塞视频首开"
+  );
 
   console.log("playback record single-click tests passed");
 })().catch((err) => {

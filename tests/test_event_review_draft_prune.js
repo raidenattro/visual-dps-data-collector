@@ -48,11 +48,14 @@ vm.runInContext(
   var pendingReviewBindingsByKey = new Map();
   var pendingPersonIdByKey = new Map();
   var playbackEvents = [];
+  var frameCache = new Map();
   ${pick(core, ["parseBoxIdFromToken", "canonicalBoxToken", "canonicalizeBoxTokenList"])}
   ${pick(review, [
     "normalizeBoxTokenList",
     "eventRowKey",
     "normalizeReviewBindings",
+    "getPersonTrackIdAtFrame",
+    "addFrameTrackIdToBindings",
     "eventPersistedBindings",
     "getEventPersistedPersonId",
     "reviewBoxListSignature",

@@ -70,22 +70,68 @@ function invalidateDisplayLayoutCache() {
 }
 
 function resetFrameFetchState() {
+  if (frameFetchController) frameFetchController.abort();
+  frameFetchController = new AbortController();
+  frameFetchGeneration++;
   frameCache.clear();
   if (typeof resetStablePersonIdentityCache === "function") {
     resetStablePersonIdentityCache();
   }
   loadedChunkKeys.clear();
   prefetchPromises.clear();
+  loadedFrameChunks.clear();
   lastRenderedFrameIdx = -1;
   tickPoseFrameIdx = -1;
   tickVideoFrameIdx = -1;
   lastEventSyncFrameIdx = -1;
   playbackSkeletonReady = false;
-  playbackPrefetchRecordId = "";
-  playbackFullPrefetchPromise = null;
   renderGeneration++;
+  if (typeof playbackDebugLog === "function") {
+    playbackDebugLog("frame-cache-reset", {
+      generation: frameFetchGeneration,
+      recordId: currentRecordId,
+    });
+  }
   if (typeof invalidateVerifiedSegmentsCache === "function") {
     invalidateVerifiedSegmentsCache();
+  }
+}
+
+function touchFrameChunk(key) {
+  const entries = loadedFrameChunks.get(key);
+  if (!entries) return;
+  loadedFrameChunks.delete(key);
+  loadedFrameChunks.set(key, entries);
+}
+
+function touchFrameChunkForFrame(frameIdx) {
+  const { from, to } = chunkRangeForFrame(frameIdx);
+  const total = Number(poseData?.frame_count) || to;
+  touchFrameChunk(`${from}-${Math.min(total, to)}`);
+}
+
+function evictOldFrameChunks(protectedKey = "") {
+  if (frameCacheEvictionSuspended) return;
+  while (loadedFrameChunks.size > FRAME_CHUNK_CACHE_MAX) {
+    const oldestKey = loadedFrameChunks.keys().next().value;
+    if (!oldestKey) return;
+    if (oldestKey === protectedKey) {
+      touchFrameChunk(oldestKey);
+      continue;
+    }
+    const entries = loadedFrameChunks.get(oldestKey);
+    loadedFrameChunks.delete(oldestKey);
+    loadedChunkKeys.delete(oldestKey);
+    for (const [frameIdx, frame] of entries || []) {
+      if (frameCache.get(frameIdx) === frame) frameCache.delete(frameIdx);
+    }
+    if (typeof playbackDebugLog === "function") {
+      playbackDebugLog("frame-chunk-evicted", {
+        recordId: currentRecordId,
+        chunk: oldestKey,
+        cachedChunks: loadedFrameChunks.size,
+      });
+    }
   }
 }
 
@@ -134,23 +180,58 @@ function prefetchLookaheadFromFrame(frameIdx) {
 async function prefetchFrameChunk(from, to) {
   if (!currentRecordId || (poseData?.schema || 1) < 2) return;
   const lo = Math.max(1, from);
-  const hi = Math.max(lo, to);
+  const total = Number(poseData?.frame_count) || Math.max(lo, to);
+  const hi = Math.min(total, Math.max(lo, to));
   const key = `${lo}-${hi}`;
-  if (loadedChunkKeys.has(key)) return;
+  if (loadedChunkKeys.has(key)) {
+    touchFrameChunk(key);
+    return;
+  }
   if (prefetchPromises.has(key)) return prefetchPromises.get(key);
 
+  const recordId = currentRecordId;
+  const generation = frameFetchGeneration;
+  const signal = frameFetchController?.signal;
   const promise = (async () => {
-    const res = await fetch(
-      `${recordApiUrl(currentRecordId, "/frames")}?from_frame=${lo}&to_frame=${hi}`
-    );
-    if (!res.ok) return;
+    let res;
+    try {
+      res = await fetch(`${recordApiUrl(recordId, "/frames")}?from_frame=${lo}&to_frame=${hi}`, {
+        signal,
+      });
+    } catch (err) {
+      if (err?.name === "AbortError") return;
+      console.warn("[playback] 骨骼分块请求失败", { recordId, chunk: key, error: err });
+      throw err;
+    }
+    if (!res.ok) {
+      console.warn("[playback] 骨骼分块响应异常", {
+        recordId,
+        chunk: key,
+        status: res.status,
+      });
+      return;
+    }
     const body = await res.json();
+    if (
+      signal?.aborted ||
+      generation !== frameFetchGeneration ||
+      recordId !== currentRecordId
+    ) {
+      return;
+    }
+    const chunkEntries = new Map();
     (body.frames || []).forEach((fr) => {
       const fi = Number(fr?.frame_idx);
       const sfi = Number(fr?.source_frame_idx);
-      if (fi > 0) frameCache.set(fi, fr);
+      if (fi > 0) {
+        frameCache.set(fi, fr);
+        chunkEntries.set(fi, fr);
+      }
       // 回放索引用 source_frame_idx，缓存双键避免取不到帧
-      if (sfi > 0) frameCache.set(sfi, fr);
+      if (sfi > 0) {
+        frameCache.set(sfi, fr);
+        chunkEntries.set(sfi, fr);
+      }
     });
     if (typeof markStablePersonIdentityDirtyFrom === "function") {
       markStablePersonIdentityDirtyFrom(lo);
@@ -158,8 +239,20 @@ async function prefetchFrameChunk(from, to) {
       resetStablePersonIdentityCache();
     }
     loadedChunkKeys.add(key);
+    loadedFrameChunks.set(key, chunkEntries);
+    evictOldFrameChunks(key);
+    if (typeof playbackDebugLog === "function") {
+      playbackDebugLog("frame-chunk-loaded", {
+        recordId,
+        chunk: key,
+        rows: Array.isArray(body.frames) ? body.frames.length : 0,
+        cacheHeader: res.headers?.get?.("X-Playback-Cache") || "",
+        serverTiming: res.headers?.get?.("Server-Timing") || "",
+        cachedChunks: loadedFrameChunks.size,
+      });
+    }
   })().finally(() => {
-    prefetchPromises.delete(key);
+    if (prefetchPromises.get(key) === promise) prefetchPromises.delete(key);
   });
 
   prefetchPromises.set(key, promise);
@@ -183,48 +276,6 @@ async function prefetchFrameChunksParallel(from, count = 1) {
 /** 打开记录后预取前几块，减少开播后跨块等待 */
 async function prefetchInitialPlaybackChunks() {
   await prefetchFrameChunksParallel(1, FRAME_CHUNK_PREFETCH_INITIAL);
-}
-
-let playbackPrefetchRecordId = "";
-let playbackFullPrefetchPromise = null;
-
-/** 后台拉取全记录骨架分块，播放时只读内存缓存 */
-async function prefetchAllPlaybackChunksInBackground(recordId = currentRecordId, onProgress = null) {
-  const rid = String(recordId || "").trim();
-  const total = Number(poseData?.frame_count) || 0;
-  if (!rid || !total || (poseData?.schema || 1) < 2) {
-    playbackSkeletonReady = total > 0 && frameCache.size >= total;
-    if (onProgress) onProgress(playbackSkeletonReady ? 100 : 0);
-    return;
-  }
-
-  if (playbackFullPrefetchPromise && playbackPrefetchRecordId === rid) {
-    if (playbackSkeletonReady && onProgress) onProgress(100);
-    return playbackFullPrefetchPromise;
-  }
-
-  playbackPrefetchRecordId = rid;
-  playbackSkeletonReady = false;
-  const BATCH = 3;
-  const ranges = [];
-  for (let from = 1; from <= total; from += FRAME_CHUNK_SIZE) {
-    ranges.push({ from, to: Math.min(from + FRAME_CHUNK_SIZE - 1, total) });
-  }
-
-  playbackFullPrefetchPromise = (async () => {
-    const totalChunks = ranges.length;
-    let done = 0;
-    for (let i = 0; i < ranges.length; i += BATCH) {
-      if (playbackPrefetchRecordId !== rid) return;
-      await Promise.all(ranges.slice(i, i + BATCH).map((r) => prefetchFrameChunk(r.from, r.to)));
-      done += Math.min(BATCH, ranges.length - i);
-      if (onProgress) onProgress(Math.round((done / totalChunks) * 100));
-    }
-    playbackSkeletonReady = frameCache.size >= total;
-    if (onProgress) onProgress(100);
-  })();
-
-  return playbackFullPrefetchPromise;
 }
 
 function prefetchAheadFromFrame(frameIdx) {
@@ -257,7 +308,10 @@ function prefetchNextChunkIfNeeded(frameIdx) {
 
 async function ensureFrame(frameIdx) {
   if (frameIdx == null) return null;
-  if (frameCache.has(frameIdx)) return frameCache.get(frameIdx);
+  if (frameCache.has(frameIdx)) {
+    touchFrameChunkForFrame(frameIdx);
+    return frameCache.get(frameIdx);
+  }
   if ((poseData?.schema || 1) >= 2 && currentRecordId) {
     const { from, to } = chunkRangeForFrame(frameIdx);
     await prefetchFrameChunk(from, to);
@@ -270,6 +324,7 @@ async function ensureFrameChunkLoaded(frameIdx) {
   if (frameIdx == null) return;
   maybePrefetchByChunkProgress(frameIdx);
   if (frameCache.has(frameIdx)) {
+    touchFrameChunkForFrame(frameIdx);
     prefetchAheadFromFrame(frameIdx);
     return;
   }

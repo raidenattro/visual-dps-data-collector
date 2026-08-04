@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
+import pyarrow.parquet as pq
 
 from annotation_store import (
     ANNOTATION_SOURCE_ANNOTATION,
@@ -46,6 +48,7 @@ from pose_store import (
     is_persisted_review_terminal,
     iter_active_records,
     load_event_review,
+    load_pose_document,
     load_pose_header,
     locate_record as find_record,
     meta_sidecar_path,
@@ -57,14 +60,15 @@ from pose_store import (
 from api.naming import display_name_from_pose_file
 from api.reflection_service import REFLECTION_OK, load_reflection_or_http, normalize_corner_label
 from video_transcode import (
-    default_playback_transcode_height,
     ensure_preview_transcode_async,
     probe_video_timing,
+    read_video_frame_count,
     read_video_height,
     resolve_playback_serve_path,
-    transcode_preview_video,
 )
 from record_tag_store import get_tags_map
+
+logger = logging.getLogger("uvicorn.error")
 
 def json_archive_dir() -> Path:
     return resolve_app_paths().json_dir / "archive"
@@ -302,6 +306,115 @@ def video_path_for_record(record_id: str) -> Path | None:
     return None
 
 
+def _parquet_frame_bounds(path: Path) -> tuple[int | None, int | None]:
+    """Read frame_idx bounds from Parquet metadata without loading skeleton rows."""
+    if not path.is_file():
+        return None, None
+    parquet = pq.ParquetFile(path)
+    try:
+        column_index = parquet.schema_arrow.names.index("frame_idx")
+    except ValueError:
+        return None, None
+    minimum: int | None = None
+    maximum: int | None = None
+    for group_index in range(parquet.metadata.num_row_groups):
+        stats = parquet.metadata.row_group(group_index).column(column_index).statistics
+        if stats is None or not stats.has_min_max:
+            values = pq.read_table(path, columns=["frame_idx"])["frame_idx"].to_pylist()
+            values = [int(value) for value in values if value is not None]
+            return (min(values), max(values)) if values else (None, None)
+        group_min = int(stats.min)
+        group_max = int(stats.max)
+        minimum = group_min if minimum is None else min(minimum, group_min)
+        maximum = group_max if maximum is None else max(maximum, group_max)
+    return minimum, maximum
+
+
+def record_playback_frame_contract(record_id: str, video_path: Path | None = None) -> dict[str, Any]:
+    """Validate that video, manifest, collision timeline and skeleton share one frame domain."""
+    locator = locate_record_by_id(record_id, include_archive=False)
+    path = Path(video_path) if video_path else video_path_for_record(record_id)
+    if locator is None or path is None or not path.is_file():
+        logger.warning(
+            "playback frame contract unavailable record=%s locator=%s video=%s",
+            record_id,
+            bool(locator),
+            path,
+        )
+        return {"ok": False, "error": "record or video missing"}
+    header = load_pose_header(locator)
+    expected = int(header.get("frame_count") or header.get("total_frames") or 0)
+    actual = read_video_frame_count(path)
+    timeline_rows = 0
+    timeline_min: int | None = None
+    timeline_max: int | None = None
+    skeleton_min: int | None = None
+    skeleton_max: int | None = None
+    if locator.storage == STORAGE_V2_PARQUET and locator.path.is_dir():
+        timeline_path = locator.path / "timeline.parquet"
+        skeleton_path = locator.path / "skeleton.parquet"
+        if timeline_path.is_file():
+            timeline_rows = int(pq.read_metadata(timeline_path).num_rows or 0)
+            timeline_min, timeline_max = _parquet_frame_bounds(timeline_path)
+        skeleton_min, skeleton_max = _parquet_frame_bounds(skeleton_path)
+    else:
+        frames = list((load_pose_document(locator, include_frames=True).get("frames") or []))
+        frame_ids = [
+            int(frame.get("frame_idx") or 0)
+            for frame in frames
+            if isinstance(frame, dict) and int(frame.get("frame_idx") or 0) > 0
+        ]
+        timeline_rows = len(frame_ids)
+        timeline_min = min(frame_ids) if frame_ids else None
+        timeline_max = max(frame_ids) if frame_ids else None
+    timeline_ok = timeline_rows == expected and timeline_min == 1 and timeline_max == expected
+    # skeleton.parquet is sparse by design: a frame with no detected person has no row.
+    # Its frame ids must stay inside the shared video/timeline domain, but its row count
+    # must not be compared with the video frame count.
+    skeleton_ok = (
+        (skeleton_min is None and skeleton_max is None)
+        or (
+            skeleton_min is not None
+            and skeleton_max is not None
+            and 1 <= skeleton_min <= skeleton_max <= expected
+        )
+    )
+    ok = expected > 0 and actual == expected and timeline_ok and skeleton_ok
+    result = {
+        "ok": ok,
+        "expected_frames": expected,
+        "video_frames": actual,
+        "timeline_frames": timeline_rows,
+        "timeline_frame_min": timeline_min,
+        "timeline_frame_max": timeline_max,
+        "skeleton_frame_min": skeleton_min,
+        "skeleton_frame_max": skeleton_max,
+        "error": "" if ok else "video and pose/collision frame domains do not match",
+    }
+    if ok:
+        logger.debug(
+            "playback frame contract ok record=%s frames=%d timeline=%d skeleton_range=%s..%s",
+            record_id,
+            expected,
+            timeline_rows,
+            skeleton_min,
+            skeleton_max,
+        )
+    else:
+        logger.warning(
+            "playback frame contract mismatch record=%s expected=%d video=%d timeline=%d timeline_range=%s..%s skeleton_range=%s..%s",
+            record_id,
+            expected,
+            actual,
+            timeline_rows,
+            timeline_min,
+            timeline_max,
+            skeleton_min,
+            skeleton_max,
+        )
+    return result
+
+
 def video_path_for_video_stem(video_stem: str) -> Path | None:
     """按 video_stem / 标注内 source_video 在 video_dir 查找配套视频。"""
     paths = resolve_app_paths()
@@ -360,6 +473,8 @@ def playback_video_path_for_record(record_id: str) -> Path | None:
     path = video_path_for_record(record_id)
     if not path or not path.is_file():
         return None
+    if not record_playback_frame_contract(record_id, path).get("ok"):
+        return None
     return resolve_playback_serve_path(path)
 
 
@@ -376,7 +491,22 @@ def playback_video_prepare_status(record_id: str) -> dict[str, Any]:
             "message": "配套视频不存在",
             "error": "",
         }
-    return ensure_preview_transcode_async(path)
+    contract = record_playback_frame_contract(record_id, path)
+    if not contract.get("ok"):
+        return {
+            "status": "error",
+            "progress": 0,
+            "needs_transcode": False,
+            "source_height": read_video_height(path),
+            "preview_height": 0,
+            "message": "视频帧数与骨架/碰撞数据不一致，已阻止回放",
+            "error": str(contract.get("error") or "frame count mismatch"),
+            "frame_contract": contract,
+            "use_original": True,
+        }
+    result = ensure_preview_transcode_async(path)
+    result["frame_contract"] = contract
+    return result
 
 
 def persist_record_video(
@@ -385,7 +515,7 @@ def persist_record_video(
     *,
     camera_slug: str | None = None,
 ) -> Path:
-    """保存配套视频到 localdata/video；源分辨率过高时按配置转码为预览高度。"""
+    """原样保存配套视频；回放预览只写入独立 playback cache。"""
     src = Path(src)
     if not src.is_file():
         raise FileNotFoundError(f"源视频不存在: {src}")
@@ -398,13 +528,8 @@ def persist_record_video(
     if dest.is_file():
         dest.unlink()
 
-    th = default_playback_transcode_height()
-    src_h = read_video_height(src)
-    if th > 0 and src_h > th and transcode_preview_video(src, dest, th):
-        if not src.is_file():
-            raise RuntimeError(f"源视频在转码后丢失（不应发生）: {src}")
-        return dest
-
+    # 采集存档必须保留原始视频。回放降码率只允许写入独立 preview cache，
+    # 不能复用 playback transcode_height 覆盖采集视频的分辨率与帧时间轴。
     shutil.copy2(src, dest)
     if not src.is_file():
         raise RuntimeError(f"源视频在复制后丢失（不应发生）: {src}")
