@@ -24,6 +24,17 @@ const context = vm.createContext({
   pendingPersonIdByKey,
   boxAnnotationTouchedKeys: new Set(),
   personIdTouchedKeys: new Set(),
+  frameCache: new Map([
+    [
+      644,
+      {
+        persons: [
+          { person_id: 0, person_track_id: 101 },
+          { person_id: 1, person_track_id: 202 },
+        ],
+      },
+    ],
+  ]),
   canonicalizeBoxTokenList(tokens) {
     return [...new Set((tokens || []).map(String).map((v) => v.trim()).filter(Boolean))];
   },
@@ -119,13 +130,15 @@ const payload = context.eventToReviewPayload(event);
 assert.deepEqual(
   Array.from(payload.bindings, (binding) => [
     Number(binding.person_id),
+    String(binding.person_track_id),
     Array.from(binding.confirmed_box_tokens),
   ]),
   [
-    [0, ["Box_2011"]],
-    [1, ["Box_1007"]],
+    [0, "101", ["Box_2011"]],
+    [1, "202", ["Box_1007"]],
   ]
 );
+assert.equal(payload.person_track_id, "101");
 
 // After Y commits the draft onto the event, serializing again must not append
 // an anonymous binding that merges both boxes and loses the person pairing.
@@ -136,7 +149,9 @@ context.pendingPersonIdByKey.delete(key);
 const committedPayload = context.eventToReviewPayload(event);
 assert.equal(committedPayload.bindings.length, 2);
 assert.ok(
-  committedPayload.bindings.every((binding) => binding.person_id != null)
+  committedPayload.bindings.every(
+    (binding) => binding.person_id != null && binding.person_track_id != null
+  )
 );
 
 const indexHtml = fs.readFileSync(

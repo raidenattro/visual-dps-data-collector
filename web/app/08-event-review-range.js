@@ -278,23 +278,6 @@ function normalizeRangeAnnotBounds(start, end) {
   return { start: Math.min(a, b), end: Math.max(a, b) };
 }
 
-function getPersonTrackIdAtFrame(frameIdx, personId) {
-  const fi = parseInt(frameIdx, 10) || 0;
-  if (fi <= 0 || typeof frameCache === "undefined") return null;
-  const frame = frameCache.get(fi);
-  if (!frame?.persons?.length) return null;
-  const target = Number(personId);
-  for (let idx = 0; idx < frame.persons.length; idx++) {
-    const p = frame.persons[idx];
-    const pid = p.person_id != null ? Number(p.person_id) : idx;
-    if (pid !== target) continue;
-    const tid = p.person_track_id;
-    if (tid != null && String(tid).trim()) return String(tid).trim();
-    return null;
-  }
-  return null;
-}
-
 function eventInRangeFrame(ev, start, end) {
   const fi = parseInt(ev?.frame_idx, 10) || 0;
   return fi >= start && fi <= end;

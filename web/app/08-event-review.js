@@ -215,6 +215,32 @@ function normalizeReviewBindings(bindings) {
   return out;
 }
 
+/** 按帧内 raw person_id 读取骨架追踪 ID；找不到时绝不猜测。 */
+function getPersonTrackIdAtFrame(frameIdx, personId) {
+  const fi = parseInt(frameIdx, 10) || 0;
+  if (fi <= 0 || typeof frameCache === "undefined") return null;
+  const frame = frameCache.get(fi);
+  if (!frame?.persons?.length) return null;
+  const target = Number(personId);
+  for (let idx = 0; idx < frame.persons.length; idx++) {
+    const person = frame.persons[idx];
+    const pid = person.person_id != null ? Number(person.person_id) : idx;
+    if (pid !== target) continue;
+    const trackId = person.person_track_id;
+    return trackId != null && String(trackId).trim() ? String(trackId).trim() : null;
+  }
+  return null;
+}
+
+/** 为缺少追踪 ID 的 binding 补入该帧骨架值，已有值保持不变。 */
+function addFrameTrackIdToBindings(bindings, frameIdx) {
+  return normalizeReviewBindings(bindings).map((binding) => {
+    if (binding.person_track_id != null || binding.person_id == null) return binding;
+    const trackId = getPersonTrackIdAtFrame(frameIdx, binding.person_id);
+    return trackId ? { ...binding, person_track_id: trackId } : binding;
+  });
+}
+
 function bindingConfirmedBoxesForPerson(bindings, personId) {
   const pid = Number(personId);
   if (!Number.isFinite(pid)) return [];
@@ -292,7 +318,7 @@ function pruneSettledEventReviewDrafts() {
 function eventPersistedBindings(ev) {
   if (!ev) return [];
   const bindings = normalizeReviewBindings(ev.bindings);
-  if (bindings.length) return bindings;
+  if (bindings.length) return addFrameTrackIdToBindings(bindings, ev.frame_idx);
   const confirmed = Array.isArray(ev.confirmed_box_tokens)
     ? normalizeBoxTokenList(ev.confirmed_box_tokens)
     : String(ev.confirmed_box_token || "").trim()
@@ -304,7 +330,13 @@ function eventPersistedBindings(ev) {
       : Number(ev.person_id);
   if (!confirmed.length) return [];
   const binding = { confirmed_box_tokens: confirmed };
-  if (personId != null) binding.person_id = personId;
+  if (personId != null) {
+    binding.person_id = personId;
+    const trackId =
+      String(ev.person_track_id ?? ev.track_id ?? "").trim() ||
+      getPersonTrackIdAtFrame(ev.frame_idx, personId);
+    if (trackId) binding.person_track_id = trackId;
+  }
   return [binding];
 }
 
@@ -318,7 +350,7 @@ function getEventEffectiveBindings(ev) {
   return eventPersistedBindings(ev);
 }
 
-function setBindingBoxesForPerson(bindings, personId, tokens) {
+function setBindingBoxesForPerson(bindings, personId, tokens, frameIdx = 0) {
   const pid = Number(personId);
   if (!Number.isFinite(pid)) return normalizeReviewBindings(bindings);
   const boxes = normalizeBoxTokenList(tokens);
@@ -340,7 +372,10 @@ function setBindingBoxesForPerson(bindings, personId, tokens) {
     }
   });
   if (!replaced && boxes.length) {
-    next.push({ person_id: pid, confirmed_box_tokens: boxes });
+    const binding = { person_id: pid, confirmed_box_tokens: boxes };
+    const trackId = getPersonTrackIdAtFrame(frameIdx, pid);
+    if (trackId) binding.person_track_id = trackId;
+    next.push(binding);
   }
   return normalizeReviewBindings(next);
 }
@@ -521,7 +556,7 @@ function setEventConfirmedBoxes(ev, tokens, { commitToEvent = false } = {}) {
     const baseBindings = pendingReviewBindingsByKey.has(key)
       ? pendingReviewBindingsByKey.get(key)
       : eventPersistedBindings(ev);
-    const nextBindings = setBindingBoxesForPerson(baseBindings, personId, list);
+    const nextBindings = setBindingBoxesForPerson(baseBindings, personId, list, ev.frame_idx);
     pendingConfirmedBoxesByKey.delete(key);
     if (!commitToEvent) {
       pendingReviewBindingsByKey.set(key, nextBindings);
@@ -724,15 +759,21 @@ function eventToReviewPayload(ev) {
   ) {
     if (personId != null) payload.person_id = personId;
   }
+  const personTrackId =
+    personId != null ? getPersonTrackIdAtFrame(frameIdx, personId) : null;
+  if (personTrackId) payload.person_track_id = personTrackId;
   const hasBindingDraft = pendingReviewBindingsByKey.has(key);
-  let bindings = getEventEffectiveBindings(ev);
+  let bindings = addFrameTrackIdToBindings(getEventEffectiveBindings(ev), frameIdx);
   if (
     !hasBindingDraft &&
     confirmed.length &&
     (personId != null || bindings.length <= 1)
   ) {
     const incoming = { confirmed_box_tokens: [...confirmed] };
-    if (personId != null) incoming.person_id = personId;
+    if (personId != null) {
+      incoming.person_id = personId;
+      if (personTrackId) incoming.person_track_id = personTrackId;
+    }
     if (personId != null) {
       bindings = bindings.filter((binding) => binding.person_id !== personId);
     } else if (bindings.length <= 1) {
@@ -740,7 +781,7 @@ function eventToReviewPayload(ev) {
     }
     bindings.push(incoming);
   }
-  if (bindings.length) payload.bindings = normalizeReviewBindings(bindings);
+  if (bindings.length) payload.bindings = addFrameTrackIdToBindings(bindings, frameIdx);
   return payload;
 }
 

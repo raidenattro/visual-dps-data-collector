@@ -817,6 +817,7 @@ def normalize_review_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
     if not isinstance(entry, dict):
         return None
     from event_engine.box_identity import canonicalize_box_token_list
+    from event_review_frame_v2 import normalize_bindings
 
     event_type = str(entry.get("event_type") or "").strip()
     if event_type not in ("alarm", "collision", "frame"):
@@ -847,6 +848,11 @@ def normalize_review_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
     }
     if confirmed_list:
         out["confirmed_box_tokens"] = confirmed_list
+    bindings = normalize_bindings(
+        item for item in (entry.get("bindings") or []) if isinstance(item, dict)
+    )
+    if bindings:
+        out["bindings"] = bindings
     if "person_id" in entry and entry.get("person_id") is not None:
         try:
             person_id = int(entry.get("person_id"))
@@ -854,6 +860,11 @@ def normalize_review_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
             person_id = -1
         if person_id >= 0:
             out["person_id"] = person_id
+    track_id = entry.get("person_track_id")
+    if track_id is None:
+        track_id = entry.get("track_id")
+    if track_id is not None and str(track_id).strip():
+        out["person_track_id"] = str(track_id).strip()
     return out
 
 
@@ -1119,6 +1130,90 @@ def load_verified_true_signatures(locator: RecordLocator) -> set[str]:
     return out
 
 
+def backfill_verified_person_track_ids(
+    locator: RecordLocator,
+    entries: list[dict[str, Any]],
+) -> int:
+    """从对应帧骨架补全 binding 追踪 ID；已有值保持不变。"""
+    missing_frames: set[int] = set()
+    for entry in entries:
+        try:
+            frame_idx = int(entry.get("frame_idx") or 0)
+        except (TypeError, ValueError):
+            continue
+        for binding in entry.get("bindings") or []:
+            if not isinstance(binding, dict):
+                continue
+            if binding.get("person_track_id") not in (None, ""):
+                continue
+            if binding.get("person_id") not in (None, "") and frame_idx >= 1:
+                missing_frames.add(frame_idx)
+    if not missing_frames:
+        return 0
+
+    sorted_frames = sorted(missing_frames)
+    ranges: list[tuple[int, int]] = []
+    start = previous = sorted_frames[0]
+    for frame_idx in sorted_frames[1:]:
+        if frame_idx == previous + 1:
+            previous = frame_idx
+            continue
+        ranges.append((start, previous))
+        start = previous = frame_idx
+    ranges.append((start, previous))
+
+    tracks_by_frame: dict[int, dict[int, str]] = {}
+    for start, end in ranges:
+        for frame in load_frames_range(
+            locator,
+            from_frame_idx=start,
+            to_frame_idx=end,
+        ):
+            try:
+                frame_idx = int(frame.get("frame_idx") or 0)
+            except (TypeError, ValueError):
+                continue
+            frame_tracks: dict[int, str] = {}
+            for index, person in enumerate(frame.get("persons") or []):
+                if not isinstance(person, dict):
+                    continue
+                try:
+                    person_id = int(
+                        person.get("person_id")
+                        if person.get("person_id") is not None
+                        else index
+                    )
+                except (TypeError, ValueError):
+                    continue
+                raw_track = person.get("person_track_id")
+                track_id = "" if raw_track is None else str(raw_track).strip()
+                if track_id:
+                    frame_tracks[person_id] = track_id
+            tracks_by_frame[frame_idx] = frame_tracks
+
+    added = 0
+    for entry in entries:
+        try:
+            frame_idx = int(entry.get("frame_idx") or 0)
+        except (TypeError, ValueError):
+            continue
+        frame_tracks = tracks_by_frame.get(frame_idx, {})
+        for binding in entry.get("bindings") or []:
+            if not isinstance(binding, dict):
+                continue
+            if binding.get("person_track_id") not in (None, ""):
+                continue
+            try:
+                person_id = int(binding.get("person_id"))
+            except (TypeError, ValueError):
+                continue
+            track_id = frame_tracks.get(person_id)
+            if track_id:
+                binding["person_track_id"] = track_id
+                added += 1
+    return added
+
+
 def save_event_review(
     locator: RecordLocator,
     verified_true: list[dict[str, Any]] | None = None,
@@ -1159,6 +1254,7 @@ def save_event_review(
             raise LegacyReviewMigrationRequired(
                 f"有 {migration_stats.unresolved_entries} 条复核记录无法无歧义写入 schema v2"
             )
+        backfill_verified_person_track_ids(locator, v2_entries)
 
         payload: dict[str, Any] = {
             "schema": EVENT_REVIEW_SCHEMA_V2,

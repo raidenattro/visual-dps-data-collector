@@ -7,6 +7,10 @@ const source = fs.readFileSync(
   path.join(__dirname, "..", "web", "app", "08-event-review-range.js"),
   "utf8"
 );
+const reviewSource = fs.readFileSync(
+  path.join(__dirname, "..", "web", "app", "08-event-review.js"),
+  "utf8"
+);
 const context = vm.createContext({
   console,
   Map,
@@ -17,6 +21,13 @@ const context = vm.createContext({
   setTimeout,
   clearTimeout,
 });
+const trackHelperStart = reviewSource.indexOf("function getPersonTrackIdAtFrame");
+const trackHelperEnd = reviewSource.indexOf(
+  "/** 为缺少追踪 ID 的 binding",
+  trackHelperStart
+);
+assert.ok(trackHelperStart >= 0 && trackHelperEnd > trackHelperStart);
+vm.runInContext(reviewSource.slice(trackHelperStart, trackHelperEnd), context);
 vm.runInContext(source, context);
 
 function person(personId, trackId, bbox) {
