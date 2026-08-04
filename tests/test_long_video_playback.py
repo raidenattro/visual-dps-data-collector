@@ -30,7 +30,7 @@ class LongVideoPreviewPlanTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
-    def test_only_high_resolution_videos_at_threshold_need_preview(self) -> None:
+    def test_all_videos_at_threshold_need_preview_regardless_of_height(self) -> None:
         with (
             patch.object(video_transcode, "load_config_file", return_value=self.config),
             patch.object(video_transcode, "read_video_height", return_value=1080),
@@ -50,6 +50,22 @@ class LongVideoPreviewPlanTest(unittest.TestCase):
         self.assertFalse(long_plan["use_original"])
         self.assertNotEqual(long_plan["preview"].parent, self.source.parent)
         self.assertTrue(long_plan["preview"].is_relative_to(self.root / "cache"))
+
+        for source_height in (360, 480):
+            with (
+                patch.object(video_transcode, "load_config_file", return_value=self.config),
+                patch.object(video_transcode, "read_video_height", return_value=source_height),
+                patch.object(video_transcode, "read_video_frame_count", return_value=10_000),
+            ):
+                same_or_lower_plan = video_transcode._preview_plan(self.source)
+                status = video_transcode._status_dict_from_plan(
+                    same_or_lower_plan,
+                    status="transcoding",
+                    progress=0,
+                )
+            self.assertTrue(same_or_lower_plan["needs_transcode"])
+            self.assertFalse(same_or_lower_plan["use_original"])
+            self.assertEqual(status["preview_height"], 480)
 
     def test_gop_is_derived_from_source_fps(self) -> None:
         source = Path(video_transcode.__file__).read_text(encoding="utf-8")

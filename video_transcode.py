@@ -473,9 +473,6 @@ def transcode_with_opencv(
             src_h, src_w = probe.shape[:2]
             cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
-        if src_h <= th:
-            return False
-
         out_h = _even_dim(th)
         out_w = _even_dim(int(round(src_w * (out_h / float(src_h)))))
         writer = _open_video_writer(dest, fps, (out_w, out_h))
@@ -547,7 +544,10 @@ def _preview_plan(src: Path, target_height: int | None = None) -> dict:
         }
     src_h = read_video_height(src)
     src_frames = read_video_frame_count(src)
-    if th <= 0 or src_h <= 0 or src_h <= th or src_frames < min_frames:
+    # Preview eligibility is frame-count based. Long videos are re-encoded even
+    # when their source height is already at or below the configured target so
+    # they still gain fast-start and the one-second GOP used for responsive seek.
+    if th <= 0 or src_frames < min_frames:
         return {
             "needs_transcode": False,
             "ready": True,
@@ -693,7 +693,11 @@ def _status_dict_from_plan(plan: dict, *, status: str, progress: int = 100, mess
         "source_height": src_h,
         "source_frames": int(plan.get("source_frames") or 0),
         "preview_min_frames": int(plan.get("preview_min_frames") or 0),
-        "preview_height": src_h if th <= 0 or src_h <= th else th,
+        "preview_height": (
+            src_h
+            if bool(plan.get("use_original")) or th <= 0 or src_h <= 0
+            else th
+        ),
         "message": message,
         "error": "",
         "use_original": bool(plan.get("use_original")),
