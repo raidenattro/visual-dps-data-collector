@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>骨架采集与回放</title>
-  <link rel="stylesheet" href="style.css?v=80" />
+  <link rel="stylesheet" href="style.css?v=81" />
 </head>
 <body>
   <header>
@@ -536,31 +536,33 @@
                   <option value="8">8×</option>
                 </select>
               </div>
-              <label class="playback-det-bbox-label toggle-row" title="叠加显示人体骨架连线与关键点（默认关闭，避免遮挡标注）">
-                <input type="checkbox" id="playback-show-skeleton" />
-                <span>骨架</span>
-              </label>
-              <label class="playback-det-bbox-label toggle-row" title="叠加显示采集时 RTMDet 人体检测框（person.bbox）">
-                <input type="checkbox" id="playback-show-det-bbox" />
-                <span>检测框</span>
-              </label>
-              <label class="playback-det-bbox-label toggle-row" title="暂停时在画面下方显示骨骼特征参数面板（默认关闭）">
-                <input type="checkbox" id="playback-show-skeleton-features" />
-                <span>骨骼特征</span>
-              </label>
-              <label class="playback-det-bbox-label toggle-row" title="暂停时在画面上显示 track / person_id">
-                <input type="checkbox" id="playback-show-feature-labels" />
-                <span>特征ID</span>
-              </label>
-              <label class="playback-det-bbox-label toggle-row" title="叠加算法碰撞/告警色（黄/红）。关闭后只保留货框轮廓与人工确认色，减少标注干扰">
-                <input type="checkbox" id="playback-show-algo-collision" checked />
-                <span>算法色框</span>
-              </label>
-              <label class="playback-det-bbox-label toggle-row" title="复核模式下的漏标/标错描边与侧栏冲突提示。默认关闭，需要时再勾选">
-                <input type="checkbox" id="playback-show-review-risk" />
-                <span>复核风险</span>
-              </label>
               <span id="time-label">0:00</span>
+              <div class="playback-overlay-toggles" role="group" aria-label="叠加层选项">
+                <label class="playback-det-bbox-label toggle-row" title="叠加显示人体骨架连线与关键点（默认关闭，避免遮挡标注）">
+                  <input type="checkbox" id="playback-show-skeleton" />
+                  <span>骨架</span>
+                </label>
+                <label class="playback-det-bbox-label toggle-row" title="叠加显示采集时 RTMDet 人体检测框（person.bbox）">
+                  <input type="checkbox" id="playback-show-det-bbox" />
+                  <span>检测框</span>
+                </label>
+                <label class="playback-det-bbox-label toggle-row" title="暂停时在画面下方显示骨骼特征参数面板（默认关闭）">
+                  <input type="checkbox" id="playback-show-skeleton-features" />
+                  <span>骨骼特征</span>
+                </label>
+                <label class="playback-det-bbox-label toggle-row" title="暂停时在画面上显示 track / person_id">
+                  <input type="checkbox" id="playback-show-feature-labels" />
+                  <span>特征ID</span>
+                </label>
+                <label class="playback-det-bbox-label toggle-row" title="叠加算法碰撞/告警色（黄/红）。关闭后只保留货框轮廓与人工确认色，减少标注干扰">
+                  <input type="checkbox" id="playback-show-algo-collision" checked />
+                  <span>算法色框</span>
+                </label>
+                <label class="playback-det-bbox-label toggle-row" title="复核模式下的漏标/标错描边与侧栏冲突提示。默认关闭，需要时再勾选">
+                  <input type="checkbox" id="playback-show-review-risk" />
+                  <span>复核风险提示</span>
+                </label>
+              </div>
             </div>
             <div class="review-timeline" aria-label="复核时间轴">
               <div class="review-timeline-track">
