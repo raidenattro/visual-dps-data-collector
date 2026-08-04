@@ -76,10 +76,16 @@ const FRAME_CHUNK_PREFETCH_LOOKAHEAD_SEC = 2;
 const COLLISION_CFG_STORAGE_KEY = "datacollect_collision_cfg";
 const DET_BBOX_STORAGE_KEY = "datacollect_playback_show_det_bbox";
 const SKELETON_STORAGE_KEY = "datacollect_playback_show_skeleton";
+const ALGO_COLLISION_STORAGE_KEY = "datacollect_playback_show_algo_collision";
+const REVIEW_RISK_STORAGE_KEY = "datacollect_playback_show_review_risk";
 /** 回放叠加 RTMDet 人体框（person.bbox） */
 let showDetBbox = false;
 /** 回放叠加人体骨架（连线/关键点），默认关闭以免遮挡标注 */
 let showSkeleton = false;
+/** 算法碰撞/告警色框（黄/红），默认开；标注时可关 */
+let showAlgoCollisionColors = true;
+/** 复核风险描边与侧栏冲突条；复核时默认关，需要时再勾 */
+let showReviewRiskHints = false;
 /** getDisplayLayout 缓存（窗口/视频尺寸变化时失效） */
 let cachedDisplayLayout = null;
 let cachedDisplayLayoutKey = "";

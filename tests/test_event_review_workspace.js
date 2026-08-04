@@ -17,14 +17,21 @@ const collision = read("web/app/10-render-collision.js");
 assert.match(html, /<option value="0\.25">0\.25×<\/option>/);
 assert.match(html, /<option value="1" selected>1×<\/option>/);
 
-// 第一批：模式隔离、明确影响范围与键盘切换。
-assert.match(html, /id="event-review-mode-frame-btn"/);
-assert.match(html, /id="event-review-mode-range-btn"/);
-assert.match(html, /class="[^"]*review-mode-range-only[^"]*"/);
-assert.match(html, /class="[^"]*review-mode-frame-only[^"]*"/);
+// 第一批：侧栏标注/事件分区；Y 与 A/D/R 同时可用，Tab 切侧栏。
+assert.match(html, /id="event-review-side-annotate-btn"/);
+assert.match(html, /id="event-review-side-events-btn"/);
+assert.match(html, /id="event-review-pane-annotate"/);
+assert.match(html, /id="event-review-pane-events"/);
+assert.match(html, /class="[^"]*event-review-range-card[^"]*"/);
+assert.doesNotMatch(html, /id="event-review-mode-frame-btn"/);
+assert.doesNotMatch(html, /review-mode-range-only/);
 assert.match(workspace, /event\.key === "Tab"/);
+assert.match(workspace, /toggleEventReviewSideTab\(\)/);
 assert.match(workspace, /event\.key === "Escape"/);
-assert.match(controls, /isEventReviewRangeMode\(\)/);
+assert.match(workspace, /hasRangeAnnotDraft\(\)/);
+assert.match(controls, /e\.key === "y" \|\| e\.key === "Y"/);
+assert.match(controls, /e\.key === "a" \|\| e\.key === "A"/);
+assert.doesNotMatch(controls, /isEventReviewRangeMode\(\)/);
 
 // 第二批：保存保护、撤销/重试、异常导航、专注与长列表分批。
 assert.match(html, /id="event-save-retry-btn"/);
@@ -121,13 +128,22 @@ assert.match(html, /app\/14-event-review-recheck\.js\?v=/);
 assert.match(html, /id="event-review-recheck-btn"/);
 assert.match(html, /id="event-review-recheck-edit-btn"/);
 assert.match(html, /id="event-review-conflict-bar"/);
-// 复核模式是叠在单帧/区间之上的镜头，不能新增第四种标注模式按钮。
-assert.match(recheck, /setEventReviewMode\(EVENT_REVIEW_MODE_FRAME, { silent: true }\)/);
+assert.match(html, /id="playback-show-algo-collision"/);
+assert.match(html, /id="playback-show-review-risk"/);
+assert.match(controls, /initPlaybackAlgoCollisionToggle/);
+assert.match(controls, /initPlaybackReviewRiskToggle/);
+assert.match(collision, /showAlgoCollisionColors/);
+assert.match(recheck, /showReviewRiskHints/);
+// 复核模式是叠在侧栏之上的镜头，不能新增第三种侧栏 Tab。
+assert.match(recheck, /setEventReviewSideTab\(/);
+assert.doesNotMatch(html, /data-side-tab="recheck"/);
 assert.doesNotMatch(html, /data-review-mode="recheck"/);
 // 只读态靠 CSS 收起标注控件，不动 DOM 结构。
 const styleCss = read("web/style.css");
 assert.match(styleCss, /is-recheck-mode:not\(\.is-recheck-editing\)/);
 assert.match(styleCss, /#event-review-person-select/);
+assert.match(styleCss, /\.event-review-range-card/);
+assert.match(html, /<span>切换标注 \/ 事件侧栏<\/span><kbd>Tab<\/kbd>/);
 // 出问题的两条召出编辑态的路径：点画面与按 E。
 assert.match(recheck, /function interceptRecheckCanvasClick/);
 assert.match(controls, /interceptRecheckCanvasClick\(\)/);

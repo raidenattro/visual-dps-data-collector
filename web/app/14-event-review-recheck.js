@@ -120,6 +120,16 @@ function drawReviewConflictOutlines(frameIdx, collisionSet, alarmSet, reviewCtx)
     eventReviewFrameConflicts = null;
     return;
   }
+  if (typeof showReviewRiskHints !== "undefined" && !showReviewRiskHints) {
+    // 仍计算冲突供侧栏开关重新打开时立刻恢复，但不画描边。
+    eventReviewFrameConflicts = computeReviewFrameConflicts(
+      frameIdx,
+      collisionSet,
+      alarmSet,
+      reviewCtx
+    );
+    return;
+  }
   const conflicts = computeReviewFrameConflicts(frameIdx, collisionSet, alarmSet, reviewCtx);
   eventReviewFrameConflicts = conflicts;
   if (!(conflicts.missing || conflicts.mismatch)) return;
@@ -147,6 +157,9 @@ let lastReviewConflictBarSignature = null;
 
 function reviewConflictBarSignature() {
   if (!eventReviewRecheckMode) return "off";
+  if (typeof showReviewRiskHints !== "undefined" && !showReviewRiskHints) {
+    return "risk-off";
+  }
   const conflicts = eventReviewFrameConflicts;
   return [
     conflicts?.missing || 0,
@@ -179,8 +192,11 @@ function updateReviewConflictBar() {
   const bar = $("#event-review-conflict-bar");
   if (!bar) return;
   const conflicts = eventReviewFrameConflicts;
-  bar.classList.toggle("hidden", !eventReviewRecheckMode);
-  if (!eventReviewRecheckMode) return;
+  const showBar =
+    eventReviewRecheckMode &&
+    (typeof showReviewRiskHints === "undefined" || !!showReviewRiskHints);
+  bar.classList.toggle("hidden", !showBar);
+  if (!showBar) return;
 
   const missing = conflicts?.missing || 0;
   const mismatch = conflicts?.mismatch || 0;
@@ -235,6 +251,14 @@ function setEventReviewRecheckEditing(enabled, options = {}) {
   if (eventReviewRecheckEditing === next) return;
   eventReviewRecheckEditing = next;
   eventReviewRecheckEditFrame = null;
+  if (next && typeof setEventReviewSideTab === "function") {
+    setEventReviewSideTab(
+      typeof EVENT_REVIEW_SIDE_ANNOTATE !== "undefined"
+        ? EVENT_REVIEW_SIDE_ANNOTATE
+        : "annotate",
+      { silent: true }
+    );
+  }
   syncEventReviewRecheckUi();
   if (options.silent) return;
   if (typeof setEventReviewSaveStatus === "function") {
@@ -263,9 +287,14 @@ function setEventReviewRecheckMode(enabled, options = {}) {
   eventReviewRecheckMode = next;
   eventReviewRecheckEditing = false;
   eventReviewRecheckEditFrame = null;
-  // 复核模式默认只读，区间草稿留在原处不动，仅把模式切回单帧免得 A/D/R 误触。
-  if (next && typeof isEventReviewRangeMode === "function" && isEventReviewRangeMode()) {
-    setEventReviewMode(EVENT_REVIEW_MODE_FRAME, { silent: true });
+  // 复核默认回到标注侧栏；区间草稿保留，A/D/R 与 Y 可同时用。
+  if (next && typeof setEventReviewSideTab === "function") {
+    setEventReviewSideTab(
+      typeof EVENT_REVIEW_SIDE_ANNOTATE !== "undefined"
+        ? EVENT_REVIEW_SIDE_ANNOTATE
+        : "annotate",
+      { silent: true }
+    );
   }
   // 进来压到 0.25×，退出还原进来之前的倍速；期间用户仍可自己改下拉框。
   if (typeof setPlaybackSpeed === "function") {

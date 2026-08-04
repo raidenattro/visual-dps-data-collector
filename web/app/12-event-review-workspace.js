@@ -1,11 +1,11 @@
-/** 复核工作台：模式、撤销、重试、异常导航、专注模式与快捷键帮助。 */
+/** 复核工作台：侧栏分区、撤销、重试、异常导航、专注模式与快捷键帮助。 */
 
-const EVENT_REVIEW_MODE_FRAME = "frame";
-const EVENT_REVIEW_MODE_RANGE = "range";
+const EVENT_REVIEW_SIDE_ANNOTATE = "annotate";
+const EVENT_REVIEW_SIDE_EVENTS = "events";
 const EVENT_REVIEW_WINDOW_SIZE = 240;
 const EVENT_REVIEW_UNDO_LIMIT = 30;
 
-let eventReviewMode = EVENT_REVIEW_MODE_FRAME;
+let eventReviewSideTab = EVENT_REVIEW_SIDE_ANNOTATE;
 let eventReviewFocusMode = false;
 let eventReviewRetryAction = null;
 let eventReviewWindowStart = 0;
@@ -24,8 +24,16 @@ function isReviewTypingTarget(target) {
   return tag === "textarea" || tag === "select" || !!target?.isContentEditable;
 }
 
+/** 兼容旧调用：已取消单帧/区间互斥模式，始终视为非区间模式。 */
 function isEventReviewRangeMode() {
-  return eventReviewMode === EVENT_REVIEW_MODE_RANGE;
+  return false;
+}
+
+function hasRangeAnnotDraft() {
+  return (
+    (typeof rangeAnnotStartFrame !== "undefined" && rangeAnnotStartFrame != null) ||
+    (typeof rangeAnnotEndFrame !== "undefined" && rangeAnnotEndFrame != null)
+  );
 }
 
 function currentReviewFrameIdx() {
@@ -39,62 +47,96 @@ function currentReviewFrameIdx() {
   );
 }
 
-function updateEventReviewModeUi() {
-  const panel = $("#playback-events-panel");
-  const isRange = isEventReviewRangeMode();
-  panel?.classList.toggle("is-range-mode", isRange);
-  panel?.classList.toggle("is-frame-mode", !isRange);
-
-  document.querySelectorAll(".event-review-mode-btn").forEach((button) => {
-    const active = button.dataset.reviewMode === eventReviewMode;
-    button.classList.toggle("is-active", active);
-    button.setAttribute("aria-selected", active ? "true" : "false");
-  });
-
-  // 模式横幅已移除：模式按钮自带高亮，帧号由标真按钮和区间面板各自展示，不再重复占位。
+function updateEventReviewPrimaryActionLabels() {
   const frameIdx = currentReviewFrameIdx();
   const markButton = $("#event-mark-true-next-btn");
   const unmarkButton = $("#event-unmark-btn");
   if (markButton) {
-    markButton.textContent = frameIdx > 0 ? `✓ 标真当前帧 ${frameIdx} · 下一帧` : "✓ 标真当前帧 · 下一帧";
+    markButton.textContent =
+      frameIdx > 0 ? `✓ 标真当前帧 ${frameIdx} · 下一帧` : "✓ 标真当前帧 · 下一帧";
   }
   if (unmarkButton) {
-    unmarkButton.textContent = frameIdx > 0 ? `取消帧 ${frameIdx} 标真 · 下一帧` : "取消当前帧标真 · 下一帧";
+    unmarkButton.textContent =
+      frameIdx > 0 ? `取消帧 ${frameIdx} 标真 · 下一帧` : "取消当前帧标真 · 下一帧";
   }
 }
 
-function setEventReviewMode(mode, options = {}) {
-  const next = mode === EVENT_REVIEW_MODE_RANGE ? EVENT_REVIEW_MODE_RANGE : EVENT_REVIEW_MODE_FRAME;
-  if (eventReviewMode === next) {
-    updateEventReviewModeUi();
+function updateEventReviewSideTabUi() {
+  const panel = $("#playback-events-panel");
+  const isAnnotate = eventReviewSideTab === EVENT_REVIEW_SIDE_ANNOTATE;
+  panel?.classList.toggle("is-side-annotate", isAnnotate);
+  panel?.classList.toggle("is-side-events", !isAnnotate);
+
+  document.querySelectorAll(".event-review-side-tab").forEach((button) => {
+    const active = button.dataset.sideTab === eventReviewSideTab;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+
+  const annotatePane = $("#event-review-pane-annotate");
+  const eventsPane = $("#event-review-pane-events");
+  if (annotatePane) {
+    annotatePane.classList.toggle("is-active", isAnnotate);
+    annotatePane.hidden = !isAnnotate;
+  }
+  if (eventsPane) {
+    eventsPane.classList.toggle("is-active", !isAnnotate);
+    eventsPane.hidden = isAnnotate;
+  }
+  updateEventReviewPrimaryActionLabels();
+}
+
+/** @deprecated 旧模式 API：统一切到标注侧栏，不再区分单帧/区间模式。 */
+function setEventReviewMode(_mode, options = {}) {
+  setEventReviewSideTab(EVENT_REVIEW_SIDE_ANNOTATE, options);
+}
+
+function setEventReviewSideTab(tab, options = {}) {
+  const next =
+    tab === EVENT_REVIEW_SIDE_EVENTS
+      ? EVENT_REVIEW_SIDE_EVENTS
+      : EVENT_REVIEW_SIDE_ANNOTATE;
+  if (eventReviewSideTab === next) {
+    updateEventReviewSideTabUi();
     return;
   }
-  eventReviewMode = next;
-  if (next === EVENT_REVIEW_MODE_RANGE) {
-    const details = $(".event-review-range-details");
-    if (details) details.open = true;
-    setEventReviewSaveStatus("已进入区间标注：A 首帧 · D 尾帧 · R 执行", "mode");
-  } else if (!options.silent) {
-    setEventReviewSaveStatus(
-      rangeAnnotStartFrame != null || rangeAnnotEndFrame != null
-        ? "已返回单帧标注 · 区间草稿仍保留"
-        : "已进入单帧标注",
-      "mode"
-    );
-  }
-  updateEventReviewModeUi();
-}
-
-function toggleEventReviewMode() {
-  setEventReviewMode(
-    isEventReviewRangeMode() ? EVENT_REVIEW_MODE_FRAME : EVENT_REVIEW_MODE_RANGE
+  eventReviewSideTab = next;
+  updateEventReviewSideTabUi();
+  if (options.silent) return;
+  setEventReviewSaveStatus(
+    next === EVENT_REVIEW_SIDE_EVENTS
+      ? "已切换到事件列表 · Tab 可回标注"
+      : "已切换到标注 · Y 单帧 · A/D/R 区间",
+    "mode"
   );
 }
 
+function toggleEventReviewSideTab() {
+  // 只读复核时不盲切，避免看不见的侧栏状态变化。
+  if (
+    typeof eventReviewRecheckMode !== "undefined" &&
+    eventReviewRecheckMode &&
+    !eventReviewRecheckEditing
+  ) {
+    return;
+  }
+  setEventReviewSideTab(
+    eventReviewSideTab === EVENT_REVIEW_SIDE_ANNOTATE
+      ? EVENT_REVIEW_SIDE_EVENTS
+      : EVENT_REVIEW_SIDE_ANNOTATE
+  );
+}
+
+function clearRangeAnnotDraftOnly() {
+  if (!hasRangeAnnotDraft()) return false;
+  if (typeof clearRangeAnnotBounds === "function") clearRangeAnnotBounds();
+  setEventReviewSaveStatus("已清除区间草稿", "mode");
+  return true;
+}
+
+/** 兼容旧调用：只清区间草稿，不再切换模式。 */
 function exitRangeReviewMode({ clear = true } = {}) {
-  if (clear && typeof clearRangeAnnotBounds === "function") clearRangeAnnotBounds();
-  setEventReviewMode(EVENT_REVIEW_MODE_FRAME, { silent: true });
-  setEventReviewSaveStatus(clear ? "已清除区间并返回单帧标注" : "已返回单帧标注", "mode");
+  if (clear) clearRangeAnnotDraftOnly();
 }
 
 function hasUnsavedEventReviewDrafts() {
@@ -420,9 +462,9 @@ function resetEventReviewWorkspaceState() {
   eventReviewUndoStack.length = 0;
   clearEventReviewRetryAction();
   resetEventReviewWindow();
-  eventReviewMode = EVENT_REVIEW_MODE_FRAME;
+  eventReviewSideTab = EVENT_REVIEW_SIDE_ANNOTATE;
   updateEventReviewUndoUi();
-  updateEventReviewModeUi();
+  updateEventReviewSideTabUi();
   // 复核模式本身是用户偏好，跨记录保留；只把编辑态与冲突结果清空。
   if (typeof resetEventReviewRecheckState === "function") resetEventReviewRecheckState();
 }
@@ -467,7 +509,7 @@ function shiftEventReviewWindow(direction) {
 }
 
 function updateEventReviewWorkspaceUi() {
-  updateEventReviewModeUi();
+  updateEventReviewSideTabUi();
   updateReviewDraftStatus();
   updateEventReviewUndoUi();
   updateEventReviewAnomalyUi();
@@ -475,11 +517,11 @@ function updateEventReviewWorkspaceUi() {
 }
 
 function initEventReviewWorkspace() {
-  $("#event-review-mode-frame-btn")?.addEventListener("click", () =>
-    setEventReviewMode(EVENT_REVIEW_MODE_FRAME)
+  $("#event-review-side-annotate-btn")?.addEventListener("click", () =>
+    setEventReviewSideTab(EVENT_REVIEW_SIDE_ANNOTATE)
   );
-  $("#event-review-mode-range-btn")?.addEventListener("click", () =>
-    setEventReviewMode(EVENT_REVIEW_MODE_RANGE)
+  $("#event-review-side-events-btn")?.addEventListener("click", () =>
+    setEventReviewSideTab(EVENT_REVIEW_SIDE_EVENTS)
   );
   $("#event-review-focus-btn")?.addEventListener("click", toggleEventReviewFocusMode);
   $("#event-review-shortcuts-btn")?.addEventListener("click", openEventReviewShortcuts);
@@ -494,6 +536,7 @@ function initEventReviewWorkspace() {
   $("#event-review-window-next-btn")?.addEventListener("click", () =>
     shiftEventReviewWindow(1)
   );
+  updateEventReviewSideTabUi();
 
   document.addEventListener("keydown", (event) => {
     if (!panels.playback?.classList.contains("active") || isReviewTypingTarget(event.target)) {
@@ -503,12 +546,12 @@ function initEventReviewWorkspace() {
     if (document.querySelector("dialog[open]")) return;
     if (event.key === "Tab") {
       event.preventDefault();
-      toggleEventReviewMode();
+      toggleEventReviewSideTab();
       return;
     }
-    if (event.key === "Escape" && isEventReviewRangeMode()) {
+    if (event.key === "Escape" && hasRangeAnnotDraft()) {
       event.preventDefault();
-      exitRangeReviewMode({ clear: true });
+      clearRangeAnnotDraftOnly();
       return;
     }
     if (event.key === "F1") {

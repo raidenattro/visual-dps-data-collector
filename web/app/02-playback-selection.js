@@ -78,15 +78,9 @@ function suspendPlaybackOnTabLeave() {
   stopPlayback();
 }
 
-/** 回到回放页：恢复导出链接、事件 UI 与当前帧叠加 */
+/** 回到回放页：恢复事件 UI 与当前帧叠加 */
 function restorePlaybackPanelUi() {
   if (!poseData && !currentRecordId) return;
-  const exportLink = $("#playback-export-xlsx");
-  if (exportLink && currentRecordId) {
-    exportLink.href = recordApiUrl(currentRecordId, "/export.xlsx");
-    exportLink.download = `${currentRecordId}_skeleton.xlsx`;
-    exportLink.classList.remove("hidden");
-  }
   renderEventJumpList();
   renderEventMarkers();
   redrawCurrentFrame();

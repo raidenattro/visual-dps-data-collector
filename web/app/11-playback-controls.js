@@ -133,6 +133,69 @@ function initPlaybackSkeletonToggle() {
   });
 }
 
+function readShowAlgoCollisionFromStorage() {
+  try {
+    const raw = localStorage.getItem(ALGO_COLLISION_STORAGE_KEY);
+    // 未写过时默认开启，与改造前行为一致。
+    return raw == null ? true : raw === "1";
+  } catch {
+    return true;
+  }
+}
+
+function persistShowAlgoCollision() {
+  try {
+    localStorage.setItem(ALGO_COLLISION_STORAGE_KEY, showAlgoCollisionColors ? "1" : "0");
+  } catch {
+    /* ignore */
+  }
+}
+
+function initPlaybackAlgoCollisionToggle() {
+  const cb = $("#playback-show-algo-collision");
+  if (!cb || cb.dataset.bound) return;
+  cb.dataset.bound = "1";
+  showAlgoCollisionColors = readShowAlgoCollisionFromStorage();
+  cb.checked = showAlgoCollisionColors;
+  cb.addEventListener("change", () => {
+    showAlgoCollisionColors = !!cb.checked;
+    persistShowAlgoCollision();
+    redrawCurrentFrame();
+  });
+}
+
+function readShowReviewRiskFromStorage() {
+  try {
+    const raw = localStorage.getItem(REVIEW_RISK_STORAGE_KEY);
+    // 未写过时默认关闭，避免复核时干扰标注。
+    return raw == null ? false : raw === "1";
+  } catch {
+    return false;
+  }
+}
+
+function persistShowReviewRisk() {
+  try {
+    localStorage.setItem(REVIEW_RISK_STORAGE_KEY, showReviewRiskHints ? "1" : "0");
+  } catch {
+    /* ignore */
+  }
+}
+
+function initPlaybackReviewRiskToggle() {
+  const cb = $("#playback-show-review-risk");
+  if (!cb || cb.dataset.bound) return;
+  cb.dataset.bound = "1";
+  showReviewRiskHints = readShowReviewRiskFromStorage();
+  cb.checked = showReviewRiskHints;
+  cb.addEventListener("change", () => {
+    showReviewRiskHints = !!cb.checked;
+    persistShowReviewRisk();
+    if (typeof updateReviewConflictBar === "function") updateReviewConflictBar();
+    redrawCurrentFrame();
+  });
+}
+
 function isPlaybackActive() {
   if (jsonOnlyTimer) return true;
   return !!(videoEl.src && !videoEl.paused && !videoEl.ended);
@@ -272,10 +335,6 @@ function initPlaybackFrameNavigationControls() {
 
 $("#play-btn").addEventListener("click", () => {
   togglePlaybackTransport();
-});
-
-$("#end-playback-btn").addEventListener("click", () => {
-  finishPlaybackSession();
 });
 
 videoEl.addEventListener("ended", () => {
@@ -560,8 +619,6 @@ function initEventReviewControls() {
       return;
     }
     if (
-      typeof isEventReviewRangeMode === "function" &&
-      isEventReviewRangeMode() &&
       (e.key === "a" || e.key === "A") &&
       !e.altKey &&
       !e.ctrlKey &&
@@ -572,8 +629,6 @@ function initEventReviewControls() {
       return;
     }
     if (
-      typeof isEventReviewRangeMode === "function" &&
-      isEventReviewRangeMode() &&
       (e.key === "d" || e.key === "D") &&
       !e.altKey &&
       !e.ctrlKey &&
@@ -584,8 +639,6 @@ function initEventReviewControls() {
       return;
     }
     if (
-      typeof isEventReviewRangeMode === "function" &&
-      isEventReviewRangeMode() &&
       (e.key === "r" || e.key === "R") &&
       !e.altKey &&
       !e.ctrlKey &&
@@ -639,19 +692,13 @@ function initEventReviewControls() {
       return;
     }
     if (!playbackEvents.length) return;
-    if (
-      (typeof isEventReviewRangeMode !== "function" || !isEventReviewRangeMode()) &&
-      (e.key === "y" || e.key === "Y")
-    ) {
+    if (e.key === "y" || e.key === "Y") {
       e.preventDefault();
       void confirmTrueAndNextFrame();
     } else if (e.key === "n" || e.key === "N" || e.key === "j" || e.key === "J") {
       e.preventDefault();
       void skipToNextEvent();
-    } else if (
-      (typeof isEventReviewRangeMode !== "function" || !isEventReviewRangeMode()) &&
-      (e.key === "u" || e.key === "U")
-    ) {
+    } else if (e.key === "u" || e.key === "U") {
       e.preventDefault();
       void unmarkTrueAndNextFrame();
     } else if (e.key === "ArrowDown") {
@@ -804,6 +851,8 @@ bindStageLayoutWatch();
 initPlaybackSpeedControl();
 initPlaybackDetBboxToggle();
 initPlaybackSkeletonToggle();
+initPlaybackAlgoCollisionToggle();
+initPlaybackReviewRiskToggle();
 initPlaybackFrameNavigationControls();
 initEventReviewControls();
 initPlaybackRecordFilter();

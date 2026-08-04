@@ -158,15 +158,13 @@ const indexHtml = fs.readFileSync(
   path.join(__dirname, "..", "web", "index.html"),
   "utf8"
 );
-const rangePos = indexHtml.indexOf("event-review-range-details--prominent");
-const scrollPos = indexHtml.indexOf('class="event-review-dock-scroll"');
-assert.ok(rangePos >= 0 && rangePos < scrollPos);
-assert.match(
-  indexHtml,
-  /event-review-range-details--prominent[^"\r\n]*" open/
-);
+const rangePos = indexHtml.indexOf("event-review-range-card");
+const annotatePane = indexHtml.indexOf('id="event-review-pane-annotate"');
+assert.ok(annotatePane >= 0 && rangePos > annotatePane);
+assert.match(indexHtml, /event-review-range-card/);
 assert.match(indexHtml, /人员 — 货框配对/);
 assert.match(indexHtml, /id="event-review-person-progress"/);
+assert.match(indexHtml, /id="event-review-side-annotate-btn"/);
 
 const controlsSource = fs.readFileSync(
   path.join(__dirname, "..", "web", "app", "11-playback-controls.js"),

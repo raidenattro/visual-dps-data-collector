@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>骨架采集与回放</title>
-  <link rel="stylesheet" href="style.css?v=78" />
+  <link rel="stylesheet" href="style.css?v=80" />
 </head>
 <body>
   <header>
@@ -521,8 +521,21 @@
                 <label class="playback-frame-input-label" title="输入帧号并按 Enter 跳转（G 聚焦）">
                   <input type="number" id="playback-frame-input" min="1" step="1" inputmode="numeric" placeholder="帧" aria-label="跳转到具体帧" />
                 </label>
+                <select id="playback-speed" class="playback-speed-select" title="播放倍速" aria-label="播放倍速">
+                  <option value="0.25">0.25×</option>
+                  <option value="0.5">0.5×</option>
+                  <option value="0.75">0.75×</option>
+                  <option value="1" selected>1×</option>
+                  <option value="1.25">1.25×</option>
+                  <option value="1.5">1.5×</option>
+                  <option value="2">2×</option>
+                  <option value="3">3×</option>
+                  <option value="4">4×</option>
+                  <option value="5">5×</option>
+                  <option value="6">6×</option>
+                  <option value="8">8×</option>
+                </select>
               </div>
-              <button type="button" id="end-playback-btn">停止回放</button>
               <label class="playback-det-bbox-label toggle-row" title="叠加显示人体骨架连线与关键点（默认关闭，避免遮挡标注）">
                 <input type="checkbox" id="playback-show-skeleton" />
                 <span>骨架</span>
@@ -539,24 +552,14 @@
                 <input type="checkbox" id="playback-show-feature-labels" />
                 <span>特征ID</span>
               </label>
-              <label class="playback-speed-label">
-                倍速
-                <select id="playback-speed" title="播放倍速">
-                  <option value="0.25">0.25×</option>
-                  <option value="0.5">0.5×</option>
-                  <option value="0.75">0.75×</option>
-                  <option value="1" selected>1×</option>
-                  <option value="1.25">1.25×</option>
-                  <option value="1.5">1.5×</option>
-                  <option value="2">2×</option>
-                  <option value="3">3×</option>
-                  <option value="4">4×</option>
-                  <option value="5">5×</option>
-                  <option value="6">6×</option>
-                  <option value="8">8×</option>
-                </select>
+              <label class="playback-det-bbox-label toggle-row" title="叠加算法碰撞/告警色（黄/红）。关闭后只保留货框轮廓与人工确认色，减少标注干扰">
+                <input type="checkbox" id="playback-show-algo-collision" checked />
+                <span>算法色框</span>
               </label>
-              <a id="playback-export-xlsx" class="btn-link hidden" href="#" download>导出 Excel</a>
+              <label class="playback-det-bbox-label toggle-row" title="复核模式下的漏标/标错描边与侧栏冲突提示。默认关闭，需要时再勾选">
+                <input type="checkbox" id="playback-show-review-risk" />
+                <span>复核风险</span>
+              </label>
               <span id="time-label">0:00</span>
             </div>
             <div class="review-timeline" aria-label="复核时间轴">
@@ -587,160 +590,170 @@
         </div>
 
         <aside class="playback-layout-side playback-layout-right">
-          <div id="playback-events-panel" class="playback-events-panel hidden">
+          <div id="playback-events-panel" class="playback-events-panel is-side-annotate hidden">
             <div class="playback-events-head">
-              <h2 class="playback-events-heading">事件复核</h2>
-              <div class="playback-events-head-actions">
-                <button type="button" id="event-review-recheck-btn" class="btn-review-head btn-review-recheck" aria-pressed="false" title="复核模式：收起标注控件只看画面，出问题按 E 调出（V）"><span class="btn-review-recheck-icon" aria-hidden="true">◎</span><span id="event-review-recheck-label">复核模式</span></button>
-                <button type="button" id="event-review-focus-btn" class="btn-review-head btn-review-focus" aria-pressed="false" title="专注模式：全屏铺满，隐藏浏览器与站点导航（F）"><span class="btn-review-focus-icon" aria-hidden="true">⛶</span><span id="event-review-focus-label">专注模式</span></button>
-                <button type="button" id="event-review-shortcuts-btn" class="btn-review-head" title="快捷键帮助（F1）">? 快捷键</button>
+              <div class="playback-events-head-row">
+                <h2 class="playback-events-heading">事件复核</h2>
+                <div class="playback-events-head-actions">
+                  <button type="button" id="event-review-recheck-btn" class="btn-review-head btn-review-recheck" aria-pressed="false" title="复核模式：收起标注控件只看画面，出问题按 E 调出（V）"><span class="btn-review-recheck-icon" aria-hidden="true">◎</span><span id="event-review-recheck-label">复核模式</span></button>
+                  <button type="button" id="event-review-focus-btn" class="btn-review-head btn-review-focus" aria-pressed="false" title="专注模式：全屏铺满，隐藏浏览器与站点导航（F）"><span class="btn-review-focus-icon" aria-hidden="true">⛶</span><span id="event-review-focus-label">专注模式</span></button>
+                  <button type="button" id="event-review-shortcuts-btn" class="btn-review-head" title="快捷键帮助（F1）">? 快捷键</button>
+                </div>
               </div>
-              <div class="playback-events-toolbar">
-                <label class="event-filter-label">
-                  队列
-                  <select id="event-filter">
-                    <option value="all" selected>全部</option>
-                    <option value="unreviewed">未标真</option>
-                    <option value="needs_box">待确认货框</option>
-                    <option value="verified">已标真</option>
-                    <option value="alarm">告警</option>
-                    <option value="collision">碰撞</option>
-                    <option value="miss">漏报段</option>
-                    <option value="false_alarm">误报</option>
-                  </select>
-                </label>
-                <span id="event-count-label" class="hint">—</span>
+              <div class="event-review-side-tabs" role="tablist" aria-label="侧栏分区">
+                <button type="button" id="event-review-side-annotate-btn" class="event-review-side-tab is-active" role="tab" aria-selected="true" aria-controls="event-review-pane-annotate" data-side-tab="annotate">标注 <kbd>Tab</kbd></button>
+                <button type="button" id="event-review-side-events-btn" class="event-review-side-tab" role="tab" aria-selected="false" aria-controls="event-review-pane-events" data-side-tab="events">事件</button>
               </div>
             </div>
             <div id="event-review-dock" class="event-review-dock">
               <div class="event-review-dock-top">
                 <span id="event-review-position" class="event-review-position">—</span>
-                <div class="event-save-status-row">
-                  <span id="event-save-status" class="event-save-status hint" aria-live="polite"></span>
-                  <button type="button" id="event-save-retry-btn" class="event-save-retry-btn hidden">重试</button>
-                  <button type="button" id="event-review-undo-btn" class="event-review-undo-btn" title="撤销上一步（Ctrl+Z）" disabled>撤销</button>
-                </div>
               </div>
               <div id="event-review-recheck-bar" class="event-review-recheck-bar hidden">
                 <span id="event-review-recheck-state" class="event-review-recheck-state">只读复核中 · 点画面或按 E 调出标注</span>
                 <button type="button" id="event-review-recheck-edit-btn" class="event-review-recheck-edit-btn">调出标注 <kbd>E</kbd></button>
               </div>
-              <div class="event-review-mode-switch" role="tablist" aria-label="标注模式">
-                <button type="button" id="event-review-mode-frame-btn" class="event-review-mode-btn is-active" role="tab" aria-selected="true" data-review-mode="frame">单帧标注</button>
-                <button type="button" id="event-review-mode-range-btn" class="event-review-mode-btn" role="tab" aria-selected="false" data-review-mode="range">区间标注 <kbd>Tab</kbd></button>
-              </div>
-              <details class="event-review-range-details event-review-range-details--prominent review-mode-range-only" open>
-                <summary>
-                  <span>区间标真</span>
-                  <span class="event-review-range-shortcuts" aria-label="区间标真快捷键">A 首帧 · D 尾帧 · R 执行</span>
-                </summary>
-                <div class="event-review-range-panel">
-                  <div class="event-review-range-bounds">
-                    <span id="event-range-start-label" class="event-range-bound">首帧：—</span>
-                    <span id="event-range-end-label" class="event-range-bound">尾帧：—</span>
-                  </div>
-                  <div class="event-review-range-actions">
-                    <button type="button" id="event-range-set-start-btn" class="btn-review-range-set" title="快捷键 A">当前帧 → 首帧 <kbd>A</kbd></button>
-                    <button type="button" id="event-range-set-end-btn" class="btn-review-range-set" title="快捷键 D">当前帧 → 尾帧 <kbd>D</kbd></button>
-                    <button type="button" id="event-range-clear-btn" class="btn-review-range-clear" title="快捷键 Shift+R">清除区间 <kbd>Shift+R</kbd></button>
-                  </div>
-                  <p id="event-range-hint" class="event-review-range-hint hint" aria-live="polite">
-                    按 A 设首帧、D 设尾帧，最后按 R 标真整个区间
-                  </p>
-                  <button type="button" id="event-range-apply-btn" class="btn-review-range-apply" title="快捷键 R" disabled>
-                    区间标真 <kbd>R</kbd>
-                  </button>
-                </div>
-              </details>
-              <div class="event-review-dock-scroll">
-              <div class="event-review-dock-block event-review-dock-block--summary">
-              <div id="event-review-current" class="event-review-current">
-                <div class="event-review-current-head">
-                  <div class="event-review-current-main">
-                    <span id="event-review-badge" class="event-badge collision">—</span>
-                    <span id="event-review-verified-tag" class="event-review-verified-tag hidden">已标真</span>
-                  </div>
-                  <span id="event-review-meta" class="event-review-meta">请选择或等待加载事件</span>
-                  <div id="event-review-tokens" class="event-review-tokens" aria-hidden="true">&nbsp;</div>
-                </div>
 
-                <section class="event-review-section event-review-section--person">
-                  <div id="event-review-conflict-bar" class="event-review-conflict-bar hidden" role="status" aria-live="polite">
-                    <span class="event-review-conflict-title">画面冲突</span>
-                    <span id="event-review-conflict-missing" class="event-review-conflict-chip is-missing hidden">漏标嫌疑 0</span>
-                    <span id="event-review-conflict-mismatch" class="event-review-conflict-chip is-mismatch hidden">标错嫌疑 0</span>
-                    <span id="event-review-conflict-orphan" class="event-review-conflict-chip is-orphan hidden">身份悬空 0</span>
-                    <span id="event-review-conflict-clean" class="event-review-conflict-clean">这一帧没有冲突</span>
-                  </div>
-                  <div id="event-review-anomaly-toolbar" class="event-review-identity-bar hidden" role="status">
-                    <span class="event-review-identity-state">
-                      <span class="event-review-identity-dot" aria-hidden="true"></span>
-                      <span id="event-review-identity-title" class="event-review-identity-title">身份待确认</span>
-                    </span>
-                    <span class="event-review-identity-note">区间跟踪遇到身份切换，请选择人物后继续</span>
-                    <button type="button" id="event-review-anomaly-jump-btn" title="跳转到待确认的那一帧">跳转</button>
-                  </div>
-                  <div id="event-review-person-select" class="event-review-person-select hidden">
-                    <div class="event-review-person-toolbar">
-                      <span class="event-review-section-title">人员 — 货框配对</span>
-                      <span id="event-review-person-progress" class="event-review-person-progress"></span>
-                      <button type="button" id="event-review-person-cycle-btn" class="event-review-person-cycle-btn hidden" title="快捷键 Alt">切换 <kbd>Alt</kbd></button>
+              <div id="event-review-pane-annotate" class="event-review-side-pane is-active" role="tabpanel" aria-labelledby="event-review-side-annotate-btn">
+                <div class="event-review-dock-scroll">
+                  <div class="event-review-dock-block event-review-dock-block--summary">
+                    <div id="event-review-current" class="event-review-current">
+                      <div class="event-review-current-head">
+                        <div class="event-review-current-main">
+                          <span id="event-review-badge" class="event-badge collision">—</span>
+                          <span id="event-review-verified-tag" class="event-review-verified-tag hidden">已标真</span>
+                        </div>
+                        <span id="event-review-meta" class="event-review-meta">请选择或等待加载事件</span>
+                        <div id="event-review-tokens" class="event-review-tokens" aria-hidden="true">&nbsp;</div>
+                      </div>
+                      <section class="event-review-section event-review-section--person">
+                        <div id="event-review-conflict-bar" class="event-review-conflict-bar hidden" role="status" aria-live="polite">
+                          <span class="event-review-conflict-title">画面冲突</span>
+                          <span id="event-review-conflict-missing" class="event-review-conflict-chip is-missing hidden">漏标嫌疑 0</span>
+                          <span id="event-review-conflict-mismatch" class="event-review-conflict-chip is-mismatch hidden">标错嫌疑 0</span>
+                          <span id="event-review-conflict-orphan" class="event-review-conflict-chip is-orphan hidden">身份悬空 0</span>
+                          <span id="event-review-conflict-clean" class="event-review-conflict-clean">这一帧没有冲突</span>
+                        </div>
+                        <div id="event-review-anomaly-toolbar" class="event-review-identity-bar hidden" role="status">
+                          <span class="event-review-identity-state">
+                            <span class="event-review-identity-dot" aria-hidden="true"></span>
+                            <span id="event-review-identity-title" class="event-review-identity-title">身份待确认</span>
+                          </span>
+                          <span class="event-review-identity-note">区间跟踪遇到身份切换，请选择人物后继续</span>
+                          <button type="button" id="event-review-anomaly-jump-btn" title="跳转到待确认的那一帧">跳转</button>
+                        </div>
+                        <div id="event-review-person-select" class="event-review-person-select hidden">
+                          <div class="event-review-person-toolbar">
+                            <span class="event-review-section-title">人员 — 货框配对</span>
+                            <span id="event-review-person-progress" class="event-review-person-progress"></span>
+                            <button type="button" id="event-review-person-cycle-btn" class="event-review-person-cycle-btn hidden" title="快捷键 Alt">切换 <kbd>Alt</kbd></button>
+                          </div>
+                          <div id="event-review-person-options" class="event-review-person-options" role="radiogroup" aria-label="选择当前要分配货框的人员"></div>
+                          <ol class="event-review-person-steps" aria-hidden="true">
+                            <li>选人物</li>
+                            <li>点画面货框</li>
+                            <li>按 Y 保存</li>
+                          </ol>
+                        </div>
+                        <p id="event-review-person-hint" class="event-review-person-hint hint" aria-live="polite"></p>
+                      </section>
                     </div>
-                    <div id="event-review-person-options" class="event-review-person-options" role="radiogroup" aria-label="选择当前要分配货框的人员"></div>
-                    <ol class="event-review-person-steps" aria-hidden="true">
-                      <li>选人物</li>
-                      <li>点画面货框</li>
-                      <li>按 Y 保存</li>
-                    </ol>
                   </div>
-                  <p id="event-review-person-hint" class="event-review-person-hint hint" aria-live="polite"></p>
-                </section>
-              </div>
-              </div>
-              <div class="event-review-dock-block event-review-dock-block--transport review-mode-frame-only">
-              <div class="event-review-actions event-review-actions--primary">
-                <button type="button" id="event-prev-btn" class="btn-review-nav" title="快捷键 ↑">‹ 上一条</button>
-                <button type="button" id="event-skip-next-btn" class="btn-review-skip" title="快捷键 N">下一条 ›</button>
-                <button type="button" id="event-mark-true-next-btn" class="btn-review-true" title="快捷键 Y">✓ 标为真 · 下一帧</button>
-                <button type="button" id="event-unmark-btn" class="btn-review-unmark" title="快捷键 U">取消标真 · 下一帧</button>
-              </div>
-              </div>
-              <div class="event-review-dock-block event-review-dock-block--extras">
-              <div class="event-review-complete-bar">
-                <button type="button" id="event-review-complete-btn" class="btn-review-complete">标记复核完成</button>
-              </div>
-              <details class="event-review-bulk-details">
-                <summary>批量操作</summary>
-                <div class="event-review-actions event-review-actions--bulk">
-                  <button type="button" id="event-mark-all-true-btn" class="btn-review-bulk-true">全部标真</button>
-                  <button type="button" id="event-unmark-all-btn" class="btn-review-bulk-unmark">全部取消标真</button>
+                  <section class="event-review-range-card" aria-label="区间标真">
+                    <div class="event-review-range-card-head">
+                      <span class="event-review-range-card-title">区间</span>
+                      <span class="event-review-range-shortcuts" aria-label="区间标真快捷键">A 首帧 · D 尾帧 · R 执行</span>
+                    </div>
+                    <div class="event-review-range-panel">
+                      <div class="event-review-range-bounds">
+                        <span id="event-range-start-label" class="event-range-bound">首帧：—</span>
+                        <span id="event-range-end-label" class="event-range-bound">尾帧：—</span>
+                      </div>
+                      <div class="event-review-range-actions">
+                        <button type="button" id="event-range-set-start-btn" class="btn-review-range-set" title="快捷键 A">当前帧 → 首帧 <kbd>A</kbd></button>
+                        <button type="button" id="event-range-set-end-btn" class="btn-review-range-set" title="快捷键 D">当前帧 → 尾帧 <kbd>D</kbd></button>
+                        <button type="button" id="event-range-clear-btn" class="btn-review-range-clear" title="快捷键 Shift+R / Esc">清除 <kbd>Esc</kbd></button>
+                      </div>
+                      <p id="event-range-hint" class="event-review-range-hint hint" aria-live="polite">
+                        Y 标当前帧；A/D 设区间，R 整段标真
+                      </p>
+                      <button type="button" id="event-range-apply-btn" class="btn-review-range-apply" title="快捷键 R" disabled>
+                        区间标真 <kbd>R</kbd>
+                      </button>
+                    </div>
+                  </section>
                 </div>
-              </details>
               </div>
+
+              <div id="event-review-pane-events" class="event-review-side-pane" role="tabpanel" aria-labelledby="event-review-side-events-btn" hidden>
+                <div class="event-review-dock-scroll">
+                  <div class="playback-events-toolbar">
+                    <label class="event-filter-label">
+                      队列
+                      <select id="event-filter">
+                        <option value="all" selected>全部</option>
+                        <option value="unreviewed">未标真</option>
+                        <option value="needs_box">待确认货框</option>
+                        <option value="verified">已标真</option>
+                        <option value="alarm">告警</option>
+                        <option value="collision">碰撞</option>
+                        <option value="miss">漏报段</option>
+                        <option value="false_alarm">误报</option>
+                      </select>
+                    </label>
+                    <span id="event-count-label" class="hint">—</span>
+                  </div>
+                  <div class="event-review-dock-block event-review-dock-block--extras">
+                    <div class="event-review-complete-bar">
+                      <button type="button" id="event-review-complete-btn" class="btn-review-complete">标记复核完成</button>
+                    </div>
+                    <details class="event-review-bulk-details">
+                      <summary>批量操作</summary>
+                      <div class="event-review-actions event-review-actions--bulk">
+                        <button type="button" id="event-mark-all-true-btn" class="btn-review-bulk-true">全部标真</button>
+                        <button type="button" id="event-unmark-all-btn" class="btn-review-bulk-unmark">全部取消标真</button>
+                      </div>
+                    </details>
+                  </div>
+                  <details id="event-review-list-details" class="event-review-list-details" open>
+                    <summary id="event-review-list-summary">逐帧复核列表</summary>
+                    <div class="event-review-window-toolbar">
+                      <button type="button" id="event-review-window-prev-btn">上一批</button>
+                      <span id="event-review-window-status" class="hint">—</span>
+                      <button type="button" id="event-review-window-next-btn">下一批</button>
+                    </div>
+                    <div class="event-review-table-wrap" id="event-review-list-scroll">
+                      <table class="event-review-table">
+                        <thead>
+                          <tr>
+                            <th class="col-verify" scope="col">真</th>
+                            <th class="col-type" scope="col">类型</th>
+                            <th class="col-time" scope="col">时间</th>
+                            <th class="col-frame" scope="col">帧</th>
+                            <th class="col-tokens" scope="col">货框</th>
+                          </tr>
+                        </thead>
+                        <tbody id="event-jump-list"></tbody>
+                      </table>
+                    </div>
+                  </details>
+                </div>
+              </div>
+
+              <div class="event-review-dock-block event-review-dock-block--transport">
+                <div class="event-save-status-row">
+                  <span id="event-save-status" class="event-save-status hint" aria-live="polite"></span>
+                  <button type="button" id="event-save-retry-btn" class="event-save-retry-btn hidden">重试</button>
+                  <button type="button" id="event-review-undo-btn" class="event-review-undo-btn" title="撤销上一步（Ctrl+Z）" disabled>撤销</button>
+                </div>
+                <div class="event-review-actions event-review-actions--primary">
+                  <button type="button" id="event-prev-btn" class="btn-review-nav" title="快捷键 ↑">‹ 上一条</button>
+                  <button type="button" id="event-skip-next-btn" class="btn-review-skip" title="快捷键 N">下一条 ›</button>
+                  <button type="button" id="event-mark-true-next-btn" class="btn-review-true" title="快捷键 Y">✓ 标为真 · 下一帧</button>
+                  <button type="button" id="event-unmark-btn" class="btn-review-unmark" title="快捷键 U">取消标真 · 下一帧</button>
+                </div>
               </div>
             </div>
-            <details id="event-review-list-details" class="event-review-list-details">
-              <summary id="event-review-list-summary">逐帧复核列表</summary>
-              <div class="event-review-window-toolbar">
-                <button type="button" id="event-review-window-prev-btn">上一批</button>
-                <span id="event-review-window-status" class="hint">—</span>
-                <button type="button" id="event-review-window-next-btn">下一批</button>
-              </div>
-              <div class="event-review-table-wrap" id="event-review-list-scroll">
-                <table class="event-review-table">
-                  <thead>
-                    <tr>
-                      <th class="col-verify" scope="col">真</th>
-                      <th class="col-type" scope="col">类型</th>
-                      <th class="col-time" scope="col">时间</th>
-                      <th class="col-frame" scope="col">帧</th>
-                      <th class="col-tokens" scope="col">货框</th>
-                    </tr>
-                  </thead>
-                  <tbody id="event-jump-list"></tbody>
-                </table>
-              </div>
-            </details>
           </div>
         </aside>
       </div>
@@ -754,11 +767,11 @@
         <button value="close" aria-label="关闭快捷键帮助">×</button>
       </div>
       <div class="event-review-shortcuts-grid">
-        <span>切换单帧 / 区间模式</span><kbd>Tab</kbd>
+        <span>切换标注 / 事件侧栏</span><kbd>Tab</kbd>
         <span>切换人物</span><kbd>Alt</kbd>
         <span>标真 / 取消当前帧</span><kbd>Y / U</kbd>
         <span>区间首帧 / 尾帧</span><kbd>A / D</kbd>
-        <span>执行 / 清除区间</span><kbd>R / Shift+R</kbd>
+        <span>执行 / 清除区间</span><kbd>R / Esc</kbd>
         <span>播放 / 暂停</span><kbd>Space</kbd>
         <span>前后 1 帧</span><kbd>← / →</kbd>
         <span>前后 10 帧</span><kbd>Ctrl+← / Ctrl+→</kbd>
@@ -792,22 +805,22 @@
   <script src="annotateGeometry.js"></script>
   <script src="annotateVisualMode.js?v=2"></script>
   <!-- 回放/采集主逻辑（由 app.monolith.js 拆分，按依赖顺序加载） -->
-  <script src="app/00-core.js?v=80"></script>
+  <script src="app/00-core.js?v=81"></script>
   <script src="app/01-layout-frames.js?v=56"></script>
-  <script src="app/02-playback-selection.js?v=35"></script>
+  <script src="app/02-playback-selection.js?v=36"></script>
   <script src="app/03-tabs.js?v=37"></script>
   <script src="app/04-collision-config.js?v=35"></script>
   <script src="app/05-collect.js?v=42"></script>
-  <script src="app/06-records.js?v=62"></script>
+  <script src="app/06-records.js?v=63"></script>
   <script src="app/07-playback-stage.js?v=73"></script>
   <script src="app/08-event-review.js?v=107"></script>
-  <script src="app/08-event-review-range.js?v=19"></script>
+  <script src="app/08-event-review-range.js?v=20"></script>
   <script src="app/09-playback-events.js?v=103"></script>
-  <script src="app/10-render-collision.js?v=126"></script>
-  <script src="app/11-playback-controls.js?v=105"></script>
-  <script src="app/12-event-review-workspace.js?v=8"></script>
+  <script src="app/10-render-collision.js?v=127"></script>
+  <script src="app/11-playback-controls.js?v=108"></script>
+  <script src="app/12-event-review-workspace.js?v=9"></script>
   <script src="app/13-playback-skeleton-features.js?v=9"></script>
-  <script src="app/14-event-review-recheck.js?v=4"></script>
+  <script src="app/14-event-review-recheck.js?v=7"></script>
   <script src="annotate.js?v=17"></script>
   <script src="accuracy.js?v=14"></script>
 </body>

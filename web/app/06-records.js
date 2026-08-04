@@ -1446,16 +1446,6 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
   tabs.forEach((b) => b.classList.toggle("active", b.dataset.tab === "playback"));
   Object.values(panels).forEach((p) => p.classList.remove("active"));
   panels.playback.classList.add("active");
-  const exportLink = $("#playback-export-xlsx");
-  if (exportLink) {
-    if (recordId) {
-      exportLink.href = recordApiUrl(recordId, "/export.xlsx");
-      exportLink.download = `${recordId}_skeleton.xlsx`;
-      exportLink.classList.remove("hidden");
-    } else {
-      exportLink.classList.add("hidden");
-    }
-  }
   await cleanupPlaybackVideo();
   clearVideoElement();
   currentRecordId = recordId;

@@ -2069,9 +2069,11 @@ function resolveOverlayFrameIdx(frame) {
 
 /** 一个货框该显示成什么状态。lite 与 full 必须用同一份判断。 */
 function resolveAnnotationBoxState(token, ctxSets) {
+  const showAlgo =
+    typeof showAlgoCollisionColors === "undefined" || !!showAlgoCollisionColors;
   return {
-    isAlarm: tokenInCollisionSet(token, ctxSets.alarmSet),
-    isHit: tokenInCollisionSet(token, ctxSets.collisionSet),
+    isAlarm: showAlgo && tokenInCollisionSet(token, ctxSets.alarmSet),
+    isHit: showAlgo && tokenInCollisionSet(token, ctxSets.collisionSet),
     manualAccent: tokenValueInTokenMap(token, ctxSets.reviewCtx?.confirmedByToken) || null,
     isMiss: tokenInTokenSet(token, ctxSets.missTokens),
     isFalseAlarm: tokenInTokenSet(token, ctxSets.falseAlarmTokens),

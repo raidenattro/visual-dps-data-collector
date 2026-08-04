@@ -1192,8 +1192,8 @@ function updateRangeAnnotUi() {
     applyBtn.disabled = !canApply;
     applyBtn.textContent = previewN > 0 ? `区间标真（${previewN} 帧）· R` : "区间标真 · R";
   }
-  if (typeof updateEventReviewModeUi === "function") {
-    updateEventReviewModeUi();
+  if (typeof updateEventReviewPrimaryActionLabels === "function") {
+    updateEventReviewPrimaryActionLabels();
   }
 }
 
