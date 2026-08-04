@@ -42,6 +42,10 @@ assert.match(html, /id="event-review-window-next-btn"/);
 assert.match(workspace, /beforeunload/);
 assert.match(workspace, /EVENT_REVIEW_WINDOW_SIZE = 240/);
 assert.match(workspace, /persistEventReviewVerifiedList\(snapshot\.verifiedTrue/);
+// 专注模式切换后必须重建播放冻结布局，否则长视频预览下画面仍按旧舞台对齐。
+assert.match(collision, /function refreshPlaybackStageLayout\(/);
+assert.match(workspace, /refreshPlaybackStageLayout\(/);
+assert.match(read("web/app/07-playback-stage.js"), /refreshPlaybackStageLayout\(/);
 assert.match(review, /hasUnsavedEventReviewDrafts\(\)/);
 
 // 切换事件只切当前显示，不应清空尚未落盘的人物/货框草稿。

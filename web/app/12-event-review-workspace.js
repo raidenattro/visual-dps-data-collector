@@ -391,9 +391,14 @@ function syncEventReviewFocusUi() {
     if (label) label.textContent = eventReviewFocusMode ? "退出专注" : "专注模式";
     else button.textContent = eventReviewFocusMode ? "退出专注" : "专注模式";
   }
+  // 等全屏/布局样式生效后再量尺寸；播放中必须重建冻结布局，否则仍按旧舞台对齐。
   setTimeout(() => {
-    if (typeof syncCanvasSize === "function") syncCanvasSize({ force: true });
-    if (typeof redrawCurrentFrame === "function") redrawCurrentFrame();
+    if (typeof refreshPlaybackStageLayout === "function") {
+      refreshPlaybackStageLayout();
+    } else {
+      if (typeof syncCanvasSize === "function") syncCanvasSize({ force: true });
+      if (typeof redrawCurrentFrame === "function") redrawCurrentFrame();
+    }
     if (typeof renderEventMarkers === "function") renderEventMarkers();
     updateReviewTimelineCursor();
   }, 0);
@@ -418,6 +423,10 @@ async function setEventReviewFocusMode(enabled, options = {}) {
     if (eventReviewFocusMode) {
       setEventReviewSaveStatus("浏览器未允许全屏，已启用页面内专注布局", "");
     }
+  }
+  // 全屏切换完成后几何才稳定；再刷一次，覆盖 setTimeout(0) 抢跑的情况。
+  if (typeof refreshPlaybackStageLayout === "function") {
+    requestAnimationFrame(() => refreshPlaybackStageLayout());
   }
 }
 

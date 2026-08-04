@@ -2523,6 +2523,38 @@ function clearPausedPlaybackLayout() {
   pausedPlaybackCanvasCss = null;
 }
 
+/**
+ * 专注模式 / 全屏 / 窗口缩放后刷新舞台几何。
+ * 长视频播放会冻结 layout 与静态货框层；尺寸变化后若不重建，
+ * 画面仍按旧的 16:9 小舞台对齐，表现为「专注模式失效」。
+ */
+function refreshPlaybackStageLayout() {
+  const playing = !!(
+    typeof playbackRenderLoopActive !== "undefined" &&
+    playbackRenderLoopActive &&
+    videoEl &&
+    !videoEl.paused &&
+    !videoEl.ended
+  );
+  if (typeof invalidateDisplayLayoutCache === "function") {
+    invalidateDisplayLayoutCache();
+  }
+  clearFrozenPlaybackLayout();
+  clearPausedPlaybackLayout();
+  const size = syncCanvasSize({ force: true });
+  if (playing) {
+    frozenPlaybackLayout = getDisplayLayout();
+    frozenPlaybackCanvasCss = size;
+    getAnnotationDisplayCache();
+    bakePlaybackStaticLayer();
+    // 下一帧覆盖层按新几何重画；避免沿用旧 lastRenderedFrameIdx 跳过绘制。
+    lastRenderedFrameIdx = -1;
+    lastPlaybackOverlayRenderMs = 0;
+  } else if (typeof redrawCurrentFrame === "function") {
+    redrawCurrentFrame();
+  }
+}
+
 /** 暂停/seek 绘制后更新碰撞提示与特征侧栏 */
 function updatePlaybackFrameUi(frame, collisionSets) {
   stageWrap?.classList.remove("skeleton-pending");

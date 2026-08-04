@@ -96,15 +96,19 @@ function bindStageLayoutWatch() {
 
   let layoutTimer = null;
   const onLayoutChange = () => {
-    if (typeof playbackRenderLoopActive !== "undefined" && playbackRenderLoopActive) return;
     if (layoutTimer) clearTimeout(layoutTimer);
     layoutTimer = setTimeout(() => {
       layoutTimer = null;
-      if (typeof invalidateDisplayLayoutCache === "function") {
-        invalidateDisplayLayoutCache();
+      // 播放中也要重建冻结布局：专注模式全屏会改变舞台尺寸。
+      if (typeof refreshPlaybackStageLayout === "function") {
+        refreshPlaybackStageLayout();
+      } else {
+        if (typeof invalidateDisplayLayoutCache === "function") {
+          invalidateDisplayLayoutCache();
+        }
+        syncCanvasSize({ force: true });
+        redrawCurrentFrame();
       }
-      syncCanvasSize({ force: true });
-      redrawCurrentFrame();
     }, 50);
   };
 
