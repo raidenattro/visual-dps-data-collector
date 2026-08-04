@@ -544,9 +544,9 @@ def _preview_plan(src: Path, target_height: int | None = None) -> dict:
         }
     src_h = read_video_height(src)
     src_frames = read_video_frame_count(src)
-    # Preview eligibility is frame-count based. Long videos are re-encoded even
-    # when their source height is already at or below the configured target so
-    # they still gain fast-start and the one-second GOP used for responsive seek.
+    # 仅帧数达到 preview_min_frames（默认 10000）才派生 480p 预览；
+    # 短片一律原片。达到阈值后即使源高度已 ≤480，仍会重编码以获得
+    # fast-start 与约 1 秒 GOP，便于长片段 seek。
     if th <= 0 or src_frames < min_frames:
         return {
             "needs_transcode": False,

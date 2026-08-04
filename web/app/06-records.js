@@ -1348,7 +1348,12 @@ async function prepareAndLoadRecordVideo(recordId, displayName = "") {
   let usedOriginal = false;
 
   const formatWaitSec = () => Math.max(0, Math.round((Date.now() - startedAt) / 1000));
-  const result = (loaded) => ({ loaded: !!loaded, usedOriginal });
+  let usedDerivedPreview = false;
+  const result = (loaded) => ({
+    loaded: !!loaded,
+    usedOriginal,
+    usedDerivedPreview: !!usedDerivedPreview && !usedOriginal,
+  });
 
   showStageLoading(`【${label}】正在检查视频…`);
   setPlaybackInfo(`【${label}】正在检查视频…`);
@@ -1407,12 +1412,15 @@ async function prepareAndLoadRecordVideo(recordId, displayName = "") {
   updateStageLoading(waitSec > 2 ? `${readyMsg}（总耗时 ${waitSec}s）` : readyMsg);
   setPlaybackInfo(readyMsg);
 
+  // 只有帧数达到 preview_min_frames（默认 10000）才会派生 480p 预览；短片始终原片。
   const derivedPreview = body.cache_path_type === "local_preview" && !body.use_original;
+  usedDerivedPreview = derivedPreview;
   let loaded = await loadSavedRecordVideo(recordId, { derivedPreview });
   if (!loaded) {
     updateStageLoading(`【${label}】预览视频无法播放，正在加载原视频…`);
     setPlaybackInfo(`【${label}】预览视频无法播放，正在加载原视频…`);
     usedOriginal = true;
+    usedDerivedPreview = false;
     loaded = await loadSavedRecordVideo(recordId, { original: true });
   }
   hideStageLoading();
@@ -1527,6 +1535,7 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
 
   const videoLoaded = !!videoResult.loaded;
   const usedOriginalVideo = !!videoResult.usedOriginal;
+  const usedDerivedPreview = !!videoResult.usedDerivedPreview;
   void eventsPromise.then(async () => {
     if (openGeneration !== frameFetchGeneration || recordId !== currentRecordId) return;
     const hadPendingAccuracyNav = !!pendingPlaybackAccuracyNav;
@@ -1551,8 +1560,9 @@ async function openRecordReplay(recordId, displayName = "", jsonFileName = "", e
     hint += "。";
     if (usedOriginalVideo) {
       hint += " 预览转码不可用，已使用原片（可能略卡）。";
-    } else if (frameW > 720) {
-      hint += " 播放中使用预览分辨率与静态货框，暂停后可查看碰撞高亮。";
+    } else if (usedDerivedPreview) {
+      // 仅 ≥10000 帧才会派生 480p；勿用分辨率宽度误判短片。
+      hint += " 已使用 ≥10000 帧派生的 480p 预览；播放中为静态货框，暂停后可查看碰撞高亮。";
     }
     if (f0 && (f0.w !== frameW || f0.h !== frameH)) {
       hint += ` JSON 推理 ${f0.w}×${f0.h}，将自动对齐。`;

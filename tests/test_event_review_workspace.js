@@ -114,6 +114,10 @@ assert.match(records, /function observeRecordsAutoLoad/);
 assert.match(records, /new IntersectionObserver/);
 assert.match(records, /playback-records-sentinel/);
 assert.match(records, /observeRecordsAutoLoad\(list\);/);
+// 480p 预览提示只在真正派生预览时出现，不能用宽度 >720 误判短片。
+assert.match(records, /usedDerivedPreview/);
+assert.match(records, /≥10000 帧派生的 480p 预览/);
+assert.doesNotMatch(records, /frameW > 720/);
 
 // 时间轴中间准确率层：默认不画，显示时按像素桶聚合，避免白点叠团。
 assert.match(collision, /function shouldShowAccuracySeekMarkers/);
