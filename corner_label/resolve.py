@@ -1,4 +1,4 @@
-"""机位标识（camera）→ reflection → localdata/json/annotations/{编号}.json。"""
+  """机位标识（camera）→ reflection → localdata/json/annotations/{编号}.json。"""
 
 from __future__ import annotations
 

@@ -74,6 +74,13 @@ assert.match(review, /REVIEW_TIMELINE_BUCKET_PX/);
 assert.match(review, /function bindReviewTimelineDelegation/);
 assert.match(events, /reviewTimelineBucketByKey/);
 
+// 标真后走缓存分支时要补齐所有受影响的桶，否则区间标真与标真跳帧不会立刻变绿。
+assert.match(review, /function markReviewTimelineBucketDirty/);
+assert.match(review, /function flushDirtyTimelineBuckets/);
+assert.match(review, /markReviewTimelineBucketDirty\(ev\);/);
+assert.match(review, /markReviewTimelineAllBucketsDirty\(\);/);
+assert.match(review, /playbackEvents = body\.events;\s*\n\s*invalidateReviewTimelineCache\(\);/);
+
 // 专注模式必须进入浏览器全屏，才能覆盖标签栏。
 assert.match(workspace, /requestFullscreen/);
 assert.match(workspace, /"fullscreenchange"/);

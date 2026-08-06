@@ -990,6 +990,8 @@ function refreshEventCountLabel() {
 
 function syncVerifiedKeysFromEvents(events, reviewPayload = null) {
   verifiedTrueKeys.clear();
+  // 服务端回包会整体改写标真集合（区间标真、全部标真），逐桶对账。
+  markReviewTimelineAllBucketsDirty();
   const reviewList = reviewPayload?.verified_true;
   if (Array.isArray(reviewList)) {
     const eventsByFrame = new Map();
@@ -1072,6 +1074,7 @@ function setEventVerified(ev, verified) {
   if (typeof refreshPlaybackEventVerificationIndex === "function") {
     refreshPlaybackEventVerificationIndex(ev);
   }
+  markReviewTimelineBucketDirty(ev);
   if (!verified && isReviewTerminalStatus(currentEventReviewStatus)) {
     currentEventReviewStatus = "in_progress";
     patchPlaybackRecordReviewStatus(currentRecordId, "in_progress", "复核中");
@@ -1119,6 +1122,7 @@ function applyEventReviewResponse(body, seq, forRecordId = currentRecordId, opti
   if (applyUi && Array.isArray(body.events)) {
     const prevKey = activeEventKey;
     playbackEvents = body.events;
+    invalidateReviewTimelineCache();
     syncVerifiedKeysFromEvents(playbackEvents, body.event_review);
     applyVerifiedFlagsToEvents();
     if (prevKey && playbackEvents.some((e) => eventRowKey(e) === prevKey)) {
@@ -2670,6 +2674,35 @@ let eventMarkerRenderList = [];
 let eventMarkerBinsCache = { key: "", bins: new Map() };
 let reviewTimelineResizeRaf = 0;
 let reviewTimelineObservedBucketCount = 0;
+/**
+ * 标真状态变化但事件集合没变时，时间轴走缓存分支不重建 DOM。
+ * 这里记下受影响的桶，渲染时逐个补色；否则区间标真与标真后自动跳帧
+ * 都只会刷新当前选中的那一个桶，进度条要等下次重建才变绿。
+ */
+const reviewTimelineDirtyBuckets = new Set();
+let reviewTimelineAllBucketsDirty = false;
+
+function markReviewTimelineBucketDirty(ev) {
+  if (!ev) return;
+  const bucketKey = reviewTimelineBucketByKey.get(eventRowKey(ev));
+  if (bucketKey != null) reviewTimelineDirtyBuckets.add(bucketKey);
+}
+
+/** 服务端响应整体重算标真（区间标真、全部标真）时逐桶对账。 */
+function markReviewTimelineAllBucketsDirty() {
+  reviewTimelineAllBucketsDirty = true;
+}
+
+function clearReviewTimelineDirtyBuckets() {
+  reviewTimelineDirtyBuckets.clear();
+  reviewTimelineAllBucketsDirty = false;
+}
+
+/** 事件数组被整体替换后桶里仍指向旧对象，只能整条时间轴重建。 */
+function invalidateReviewTimelineCache() {
+  eventMarkerBinsCache = { key: "", bins: new Map() };
+  clearReviewTimelineDirtyBuckets();
+}
 
 function reviewTimelineBucketCount() {
   return Math.max(1, Math.ceil(reviewTimelineTrackWidth() / REVIEW_TIMELINE_BUCKET_PX));
@@ -2711,9 +2744,7 @@ function timelineBucketState(bucket) {
   return { attention, attentionCount, verified, unreviewed };
 }
 
-function patchTimelineBucketForEvent(ev) {
-  if (!ev || !eventMarkerBinsCache.bins.size) return false;
-  const bucketKey = reviewTimelineBucketByKey.get(eventRowKey(ev));
+function patchTimelineBucketByKey(bucketKey) {
   const bucket = bucketKey == null ? null : eventMarkerBinsCache.bins.get(bucketKey);
   if (!bucket) return false;
   const previousAttentionCount = Number(bucket.attentionCount) || 0;
@@ -2738,12 +2769,25 @@ function patchTimelineBucketForEvent(ev) {
     const groupNote = bucket.count > 1 ? ` · 共 ${bucket.count} 条` : "";
     reviewDot.title = `${formatTime(bucket.firstEvent.timestamp_sec)} · ${stateText}${groupNote}`;
   }
+  return true;
+}
+
+/** 补齐所有待更新的桶颜色，最后统一刷新一次汇总文字。 */
+function flushDirtyTimelineBuckets() {
+  if (!eventMarkerBinsCache.bins.size) {
+    clearReviewTimelineDirtyBuckets();
+    return;
+  }
+  const keys = reviewTimelineAllBucketsDirty
+    ? [...eventMarkerBinsCache.bins.keys()]
+    : [...reviewTimelineDirtyBuckets];
+  clearReviewTimelineDirtyBuckets();
+  keys.forEach((bucketKey) => patchTimelineBucketByKey(bucketKey));
   updateReviewTimelineSummary(
     eventMarkerRenderList.length,
     playbackEventStats.verified,
     eventMarkerBinsCache.attentionTotal
   );
-  return true;
 }
 
 function renderEventMarkerCursor() {
@@ -2776,6 +2820,7 @@ function renderEventMarkers() {
     eventMarkersEl.innerHTML = "";
     if (reviewMarkersEl) reviewMarkersEl.innerHTML = "";
     eventMarkerBinsCache = { key: "", bins: new Map() };
+    clearReviewTimelineDirtyBuckets();
     updateReviewTimelineSummary(0, 0, 0);
     return;
   }
@@ -2786,13 +2831,15 @@ function renderEventMarkers() {
   const filterMode = eventFilterSelect?.value || "all";
   const cacheKey = `${playbackEventsStructureVersion}|${filterMode}|${bucketCount}|${dur}|${rows.length}`;
   if (eventMarkerBinsCache.key === cacheKey) {
-    patchTimelineBucketForEvent(getActiveEvent());
+    markReviewTimelineBucketDirty(getActiveEvent());
+    flushDirtyTimelineBuckets();
     updateEventMarkerActiveState();
     return;
   }
 
   eventMarkersEl.innerHTML = "";
   if (reviewMarkersEl) reviewMarkersEl.innerHTML = "";
+  clearReviewTimelineDirtyBuckets();
   reviewTimelineBucketEvents.clear();
   reviewTimelineBucketByKey.clear();
   eventMarkerRenderList = rows;
