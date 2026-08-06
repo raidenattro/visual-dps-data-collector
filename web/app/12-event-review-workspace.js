@@ -319,9 +319,52 @@ async function focusEventReviewPendingIdentity() {
   setEventReviewSaveStatus(`身份待确认 · 帧 ${target.frame_idx} · 请选择人物`, "mode");
 }
 
-/** 专注模式全屏的容器：回放三栏布局本身，全屏后可覆盖浏览器标签栏。 */
+/** 专注模式全屏的容器：回放三栏布局本身，全屏后可覆盖浏览器标签栏与系统任务栏。 */
 function reviewFocusContainer() {
   return document.querySelector("#panel-playback .playback-layout");
+}
+
+/** 当前系统全屏元素（含 webkit 前缀，兼容 Chromium / Safari 旧行为）。 */
+function getReviewFullscreenElement() {
+  return (
+    document.fullscreenElement ||
+    document.webkitFullscreenElement ||
+    document.msFullscreenElement ||
+    null
+  );
+}
+
+/**
+ * 进入真全屏以盖住系统任务栏。
+ * 部分浏览器不接受 navigationUI 参数会直接 reject，需降级为无参调用。
+ */
+async function requestReviewFullscreen(el) {
+  if (!el) throw new Error("missing fullscreen target");
+  const req =
+    el.requestFullscreen ||
+    el.webkitRequestFullscreen ||
+    el.webkitRequestFullScreen ||
+    el.msRequestFullscreen;
+  if (typeof req !== "function") throw new Error("fullscreen unsupported");
+  try {
+    await req.call(el, { navigationUI: "hide" });
+  } catch {
+    await req.call(el);
+  }
+  if (!getReviewFullscreenElement()) {
+    throw new Error("fullscreen not active");
+  }
+}
+
+async function exitReviewFullscreen() {
+  const exit =
+    document.exitFullscreen ||
+    document.webkitExitFullscreen ||
+    document.webkitCancelFullScreen ||
+    document.msExitFullscreen;
+  if (typeof exit === "function" && getReviewFullscreenElement()) {
+    await exit.call(document);
+  }
 }
 
 /** 全屏元素之外的 <dialog> 不会渲染，复核用的弹窗需跟随全屏容器搬家。 */
@@ -412,16 +455,19 @@ async function setEventReviewFocusMode(enabled, options = {}) {
   const container = reviewFocusContainer();
   try {
     if (eventReviewFocusMode) {
-      if (container?.requestFullscreen && !document.fullscreenElement) {
-        await container.requestFullscreen({ navigationUI: "hide" });
+      if (container && getReviewFullscreenElement() !== container) {
+        await requestReviewFullscreen(container);
         relocateShortcutsDialog(container);
       }
-    } else if (document.fullscreenElement) {
-      await document.exitFullscreen();
+    } else if (getReviewFullscreenElement()) {
+      await exitReviewFullscreen();
     }
   } catch {
     if (eventReviewFocusMode) {
-      setEventReviewSaveStatus("浏览器未允许全屏，已启用页面内专注布局", "");
+      setEventReviewSaveStatus(
+        "浏览器未允许全屏（任务栏仍会显示），已启用页面内专注布局",
+        ""
+      );
     }
   }
   // 全屏切换完成后几何才稳定；再刷一次，覆盖 setTimeout(0) 抢跑的情况。
@@ -437,7 +483,7 @@ function toggleEventReviewFocusMode() {
 /** 用户按 Esc / F11 退出系统全屏时，把专注状态同步回来。 */
 function handleReviewFullscreenChange() {
   const container = reviewFocusContainer();
-  const active = !!document.fullscreenElement && document.fullscreenElement === container;
+  const active = getReviewFullscreenElement() === container;
   if (!active) relocateShortcutsDialog(null);
   if (eventReviewFocusMode === active) return;
   eventReviewFocusMode = active;
@@ -585,6 +631,7 @@ function initEventReviewWorkspace() {
   });
 
   document.addEventListener("fullscreenchange", handleReviewFullscreenChange);
+  document.addEventListener("webkitfullscreenchange", handleReviewFullscreenChange);
 
   // 时间轴宽度变化会改变像素桶数量，需要重建标记以免错位。
   let timelineResizeTimer = null;

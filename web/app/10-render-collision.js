@@ -576,6 +576,11 @@ function renderAccuracySeekMarkers() {
 /** 当前帧漏报（黑描边）/ 误报（白描边）货框 token 集合 */
 function getAccuracyOutlineForFrame(frameIdx, alarmSet) {
   const empty = { missTokens: new Set(), falseAlarmTokens: new Set() };
+  // 普通复核不画准确率黑/白描边，避免误报白边干扰标真；
+  // 仅「漏报/误报」筛选或准确率页跳转携带 overlay 时启用。
+  if (typeof shouldShowAccuracySeekMarkers === "function" && !shouldShowAccuracySeekMarkers()) {
+    return empty;
+  }
   const overlay = getPlaybackAccuracyOverlay();
   if (!overlay) return empty;
 

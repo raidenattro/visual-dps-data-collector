@@ -46,6 +46,11 @@ assert.match(workspace, /persistEventReviewVerifiedList\(snapshot\.verifiedTrue/
 assert.match(collision, /function refreshPlaybackStageLayout\(/);
 assert.match(workspace, /refreshPlaybackStageLayout\(/);
 assert.match(read("web/app/07-playback-stage.js"), /refreshPlaybackStageLayout\(/);
+// 真全屏需兼容无 navigationUI 参数与 webkit 前缀，才能盖住系统任务栏。
+assert.match(workspace, /function requestReviewFullscreen\(/);
+assert.match(workspace, /navigationUI: "hide"/);
+assert.match(workspace, /webkitRequestFullscreen|webkitRequestFullScreen/);
+assert.match(workspace, /webkitfullscreenchange/);
 assert.match(review, /hasUnsavedEventReviewDrafts\(\)/);
 
 // 切换事件只切当前显示，不应清空尚未落盘的人物/货框草稿。
@@ -123,6 +128,13 @@ assert.doesNotMatch(records, /frameW > 720/);
 assert.match(collision, /function shouldShowAccuracySeekMarkers/);
 assert.match(collision, /externalPlaybackAccuracyOverlay/);
 assert.match(collision, /filter === "miss" \|\| filter === "false_alarm"/);
+// 普通复核不画误报白描边；与时间轴准确率点同一开关。
+const accuracyOutline = collision.match(
+  /function getAccuracyOutlineForFrame\([\s\S]*?\n}/
+);
+assert.ok(accuracyOutline);
+assert.match(accuracyOutline[0], /shouldShowAccuracySeekMarkers/);
+assert.match(accuracyOutline[0], /!shouldShowAccuracySeekMarkers\(\)/);
 const renderAccuracy = collision.match(
   /function renderAccuracySeekMarkers\([\s\S]*?\n}/
 );

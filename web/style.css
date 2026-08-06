@@ -4149,8 +4149,17 @@ body.review-focus-mode #panel-playback.active {
   display: none;
 }
 
-/* 全屏内 <dialog> 需要显式给出背景层，否则会被全屏根元素吞掉 */
-.playback-layout:fullscreen {
+/* 真全屏：铺满显示器，盖住浏览器栏与系统任务栏 */
+.playback-layout:fullscreen,
+.playback-layout:-webkit-full-screen {
+  box-sizing: border-box;
+  width: 100vw;
+  height: 100vh;
+  width: 100dvw;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
   background: #0b1220;
 }
 

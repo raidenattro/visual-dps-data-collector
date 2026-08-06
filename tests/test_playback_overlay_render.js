@@ -56,8 +56,9 @@ assert.match(highlight[0], /getEventsOnFrame\(segmentFi\)/);
 // 人物标签：播放时钉住的事件通常不在当前帧，必须回退到本帧标真事件取配对色。
 const personLabels = render.match(/function drawPersonIdLabels\([\s\S]*?\r?\n}\r?\n/);
 assert.ok(personLabels);
-assert.match(personLabels[0], /if \(!reviewEv && labelFrameIdx > 0/);
+assert.match(personLabels[0], /allowEventHighlight &&\s*\r?\n\s*!reviewEv &&\s*\r?\n\s*labelFrameIdx > 0/);
 assert.match(personLabels[0], /pairedPersonIds\.add\(Number\(binding\.person_id\)\)/);
+assert.match(personLabels[0], /showEventReviewHighlights/);
 // 已配对的单人帧在播放时也要出颜色。
 assert.match(
   personLabels[0],
