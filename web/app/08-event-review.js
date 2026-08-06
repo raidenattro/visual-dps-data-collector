@@ -293,6 +293,15 @@ function reviewBindingsSignature(bindings) {
  * @returns {number} 清掉的草稿条数
  */
 function pruneSettledEventReviewDrafts() {
+  // 没有草稿时不必为整表建索引：每次保存回包都建一遍在两万帧记录上很贵。
+  if (
+    !pendingConfirmedBoxesByKey.size &&
+    !pendingReviewBindingsByKey.size &&
+    !pendingPersonIdByKey.size
+  ) {
+    return 0;
+  }
+  // 事件数组可能刚被回包整体替换，playbackEventsByKey 未必已重建，这里现建。
   const eventByKey = new Map();
   playbackEvents.forEach((ev) => eventByKey.set(eventRowKey(ev), ev));
   let dropped = 0;
@@ -989,9 +998,10 @@ function refreshEventCountLabel() {
 }
 
 function syncVerifiedKeysFromEvents(events, reviewPayload = null) {
+  // 服务端回包整体改写标真集合，但绝大多数回包（单帧 toggle）与本地状态一致。
+  // 留一份快照按差集标脏：只有真正翻转的桶才补色，避免每次保存都全表重算。
+  const previousVerifiedKeys = new Set(verifiedTrueKeys);
   verifiedTrueKeys.clear();
-  // 服务端回包会整体改写标真集合（区间标真、全部标真），逐桶对账。
-  markReviewTimelineAllBucketsDirty();
   const reviewList = reviewPayload?.verified_true;
   if (Array.isArray(reviewList)) {
     const eventsByFrame = new Map();
@@ -1015,6 +1025,7 @@ function syncVerifiedKeysFromEvents(events, reviewPayload = null) {
       if (ev?.verified_true) verifiedTrueKeys.add(eventRowKey(ev));
     });
   }
+  markReviewTimelineBucketsDirtyByKeyDiff(previousVerifiedKeys, verifiedTrueKeys);
   syncConfirmedBoxFromReview(reviewPayload, events);
 }
 
@@ -1134,11 +1145,17 @@ function applyEventReviewResponse(body, seq, forRecordId = currentRecordId, opti
   }
 
   if (applyUi && !options.skipAutoConfirmBoxes) {
-    playbackEvents.forEach((ev) => {
-      if (isEventVerified(ev)) {
-        applyAutoConfirmedBoxOnVerify(ev);
-        applyAutoPersonIdOnVerify(ev);
-      }
+    // 只有本次真正改动的帧需要补自动确认；对全部已标真事件重跑会随标真数
+    // 线性变慢（每条都要展开 bindings/box_tokens），几千条以后按 Y 就明显卡。
+    // 回包带 events 时事件对象已被整体替换，传进来的引用作废，只能全表补。
+    const scoped =
+      Array.isArray(options.autoConfirmEvents) && !Array.isArray(body.events)
+        ? options.autoConfirmEvents
+        : playbackEvents;
+    scoped.forEach((ev) => {
+      if (!ev || !isEventVerified(ev)) return;
+      applyAutoConfirmedBoxOnVerify(ev);
+      applyAutoPersonIdOnVerify(ev);
     });
   }
 
@@ -1406,7 +1423,9 @@ async function persistEventReviewToggle(ev, wantVerified, eventPayloadOverride =
         throw new Error(err.detail || `保存失败 (${res.status})`);
       }
       const body = await res.json();
-      return applyEventReviewResponse(body, seq, recordId);
+      return applyEventReviewResponse(body, seq, recordId, {
+        autoConfirmEvents: [ev],
+      });
     } catch (err) {
       if (seq !== eventReviewSaveSeq) return false;
       if (recordId === currentRecordId) {
@@ -2680,22 +2699,33 @@ let reviewTimelineObservedBucketCount = 0;
  * 都只会刷新当前选中的那一个桶，进度条要等下次重建才变绿。
  */
 const reviewTimelineDirtyBuckets = new Set();
-let reviewTimelineAllBucketsDirty = false;
 
-function markReviewTimelineBucketDirty(ev) {
-  if (!ev) return;
-  const bucketKey = reviewTimelineBucketByKey.get(eventRowKey(ev));
+function markReviewTimelineBucketDirtyByRowKey(rowKey) {
+  const bucketKey = reviewTimelineBucketByKey.get(rowKey);
   if (bucketKey != null) reviewTimelineDirtyBuckets.add(bucketKey);
 }
 
-/** 服务端响应整体重算标真（区间标真、全部标真）时逐桶对账。 */
-function markReviewTimelineAllBucketsDirty() {
-  reviewTimelineAllBucketsDirty = true;
+function markReviewTimelineBucketDirty(ev) {
+  if (!ev) return;
+  markReviewTimelineBucketDirtyByRowKey(eventRowKey(ev));
+}
+
+/**
+ * 标真集合前后对称差集所在的桶才需要补色。
+ * 差集大小等于本次真正改动的帧数，单帧 toggle 时通常为空。
+ */
+function markReviewTimelineBucketsDirtyByKeyDiff(previousKeys, nextKeys) {
+  if (!reviewTimelineBucketByKey.size) return;
+  previousKeys.forEach((rowKey) => {
+    if (!nextKeys.has(rowKey)) markReviewTimelineBucketDirtyByRowKey(rowKey);
+  });
+  nextKeys.forEach((rowKey) => {
+    if (!previousKeys.has(rowKey)) markReviewTimelineBucketDirtyByRowKey(rowKey);
+  });
 }
 
 function clearReviewTimelineDirtyBuckets() {
   reviewTimelineDirtyBuckets.clear();
-  reviewTimelineAllBucketsDirty = false;
 }
 
 /** 事件数组被整体替换后桶里仍指向旧对象，只能整条时间轴重建。 */
@@ -2774,14 +2804,10 @@ function patchTimelineBucketByKey(bucketKey) {
 
 /** 补齐所有待更新的桶颜色，最后统一刷新一次汇总文字。 */
 function flushDirtyTimelineBuckets() {
-  if (!eventMarkerBinsCache.bins.size) {
-    clearReviewTimelineDirtyBuckets();
-    return;
-  }
-  const keys = reviewTimelineAllBucketsDirty
-    ? [...eventMarkerBinsCache.bins.keys()]
-    : [...reviewTimelineDirtyBuckets];
+  if (!reviewTimelineDirtyBuckets.size) return;
+  const keys = [...reviewTimelineDirtyBuckets];
   clearReviewTimelineDirtyBuckets();
+  if (!eventMarkerBinsCache.bins.size) return;
   keys.forEach((bucketKey) => patchTimelineBucketByKey(bucketKey));
   updateReviewTimelineSummary(
     eventMarkerRenderList.length,

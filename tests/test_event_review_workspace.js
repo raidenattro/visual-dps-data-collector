@@ -78,8 +78,26 @@ assert.match(events, /reviewTimelineBucketByKey/);
 assert.match(review, /function markReviewTimelineBucketDirty/);
 assert.match(review, /function flushDirtyTimelineBuckets/);
 assert.match(review, /markReviewTimelineBucketDirty\(ev\);/);
-assert.match(review, /markReviewTimelineAllBucketsDirty\(\);/);
 assert.match(review, /playbackEvents = body\.events;\s*\n\s*invalidateReviewTimelineCache\(\);/);
+
+// 保存回包按标真差集标脏，避免每次单帧标真都整表重算桶状态。
+assert.match(review, /function markReviewTimelineBucketsDirtyByKeyDiff/);
+assert.match(review, /const previousVerifiedKeys = new Set\(verifiedTrueKeys\);/);
+assert.match(
+  review,
+  /markReviewTimelineBucketsDirtyByKeyDiff\(previousVerifiedKeys, verifiedTrueKeys\);/
+);
+assert.doesNotMatch(review, /markReviewTimelineAllBucketsDirty/);
+
+// 单帧标真只补这一帧的自动确认；否则每次保存都要遍历全部已标真事件。
+assert.match(review, /autoConfirmEvents: \[ev\]/);
+assert.match(review, /Array\.isArray\(options\.autoConfirmEvents\) && !Array\.isArray\(body\.events\)/);
+// 没有草稿时不为整表建索引。
+assert.match(
+  review,
+  /!pendingConfirmedBoxesByKey\.size &&\s*\n\s*!pendingReviewBindingsByKey\.size &&\s*\n\s*!pendingPersonIdByKey\.size/
+);
+assert.match(review, /function flushDirtyTimelineBuckets\(\) \{\s*\n\s*if \(!reviewTimelineDirtyBuckets\.size\) return;/);
 
 // 专注模式必须进入浏览器全屏，才能覆盖标签栏。
 assert.match(workspace, /requestFullscreen/);
