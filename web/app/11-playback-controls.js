@@ -815,14 +815,27 @@ window.addEventListener("beforeunload", () => {
   cleanupPlaybackVideo();
 });
 
-// 拖完不把焦点留在进度条上：焦点环看着像「选中了这一块」，容易让人以为页面卡住。
-// 键盘 Tab 过来仍能用，上面的 keydown 已经放行 range。
-seekBar.addEventListener("pointerup", () => seekBar.blur());
-
 let playbackSeekInputTimer = 0;
 let playbackSeekInputSeq = 0;
+/**
+ * 指针拖动进度条期间只刷新时间读数。每次停顿都真去 seek 会连续触发视频解码
+ * 与骨架分块请求，长记录上拖起来非常黏；松手（pointerup / change）再定位一次。
+ */
+let playbackSeekScrubbing = false;
 
-seekBar.addEventListener("input", () => {
+function playbackSeekTargetFrameEntry() {
+  if (typeof playbackFrameEntryForSeekValue === "function") {
+    return playbackFrameEntryForSeekValue(seekBar.value);
+  }
+  if (!frameByTime.length) return null;
+  const idx = Math.min(
+    Math.round((Number(seekBar.value) / 1000) * Math.max(0, frameByTime.length - 1)),
+    frameByTime.length - 1
+  );
+  return frameByTime[idx] || null;
+}
+
+async function commitPlaybackSeek() {
   if (typeof clearPlaybackAuthorityFrameIdx === "function") clearPlaybackAuthorityFrameIdx();
   else if (typeof clearExplicitSeekFrameIdx === "function") clearExplicitSeekFrameIdx();
   if (typeof clearPlaybackVideoPtsSeekClock === "function") clearPlaybackVideoPtsSeekClock();
@@ -831,54 +844,81 @@ seekBar.addEventListener("input", () => {
   tickPoseFrameIdx = -1;
   lastEventSyncFrameIdx = -1;
   resetPlaybackCollisionTracker();
-  const frameEntry =
-    typeof playbackFrameEntryForSeekValue === "function"
-      ? playbackFrameEntryForSeekValue(seekBar.value)
-      : frameByTime.length
-        ? frameByTime[
-            Math.min(
-              Math.round(
-                (Number(seekBar.value) / 1000) *
-                  Math.max(0, frameByTime.length - 1)
-              ),
-              frameByTime.length - 1
-            )
-          ]
-        : null;
+
+  const seq = ++playbackSeekInputSeq;
+  const frameEntry = playbackSeekTargetFrameEntry();
+  const seekValue = Number(seekBar.value) || 0;
+  if (frameEntry) {
+    if (!videoEl.paused) videoEl.pause();
+    await seekToTimestamp(frameEntry.t, frameEntry.frameIdx, { skipEventSync: false });
+    return;
+  }
+  if (!videoEl.duration || !Number.isFinite(videoEl.duration)) {
+    const idx = Math.floor((seekValue / 1000) * frameByTime.length);
+    const item = frameByTime[Math.min(idx, frameByTime.length - 1)];
+    if (item) await renderFrameEntry(item);
+    if (seq === playbackSeekInputSeq) {
+      syncActiveEventFromPlaybackPosition({ timeSec: item?.t, frameIdx: item?.frameIdx });
+    }
+    return;
+  }
+  videoEl.currentTime = (seekValue / 1000) * videoEl.duration;
+  await renderAtTime(videoEl.currentTime);
+  if (seq === playbackSeekInputSeq) {
+    syncActiveEventFromPlaybackPosition({ timeSec: videoEl.currentTime });
+  }
+}
+
+function cancelScheduledPlaybackSeek() {
+  if (!playbackSeekInputTimer) return;
+  clearTimeout(playbackSeekInputTimer);
+  playbackSeekInputTimer = 0;
+}
+
+function schedulePlaybackSeek(delayMs = 60) {
+  cancelScheduledPlaybackSeek();
+  playbackSeekInputTimer = setTimeout(() => {
+    playbackSeekInputTimer = 0;
+    void commitPlaybackSeek();
+  }, delayMs);
+}
+
+seekBar.addEventListener("pointerdown", () => {
+  playbackSeekScrubbing = true;
+  cancelScheduledPlaybackSeek();
+});
+
+// 拖完不把焦点留在进度条上：焦点环看着像「选中了这一块」，容易让人以为页面卡住。
+// 键盘 Tab 过来仍能用，上面的 keydown 已经放行 range。
+seekBar.addEventListener("pointerup", () => {
+  playbackSeekScrubbing = false;
+  seekBar.blur();
+  cancelScheduledPlaybackSeek();
+  void commitPlaybackSeek();
+});
+
+seekBar.addEventListener("pointercancel", () => {
+  playbackSeekScrubbing = false;
+  schedulePlaybackSeek(0);
+});
+
+// 键盘调整时没有 pointerup；拖动松手的 change 早于 pointerup，留一段延迟兜底
+// 指针事件丢失的情况，正常路径会被 pointerup 里的取消抢先。
+seekBar.addEventListener("change", () => {
+  schedulePlaybackSeek(playbackSeekScrubbing ? 200 : 0);
+});
+
+seekBar.addEventListener("input", () => {
   const seekValue = Number(seekBar.value) || 0;
   const duration = Number(videoEl.duration);
   if (duration > 0 && Number.isFinite(duration)) {
     timeLabel.textContent = formatTime((seekValue / 1000) * duration);
   }
-  const seq = ++playbackSeekInputSeq;
-  if (playbackSeekInputTimer) clearTimeout(playbackSeekInputTimer);
-  playbackSeekInputTimer = setTimeout(() => {
-    playbackSeekInputTimer = 0;
-    void (async () => {
-      if (seq !== playbackSeekInputSeq) return;
-      if (frameEntry) {
-        if (!videoEl.paused) videoEl.pause();
-        await seekToTimestamp(frameEntry.t, frameEntry.frameIdx, {
-          skipEventSync: false,
-        });
-        return;
-      }
-      if (!videoEl.duration || !Number.isFinite(videoEl.duration)) {
-        const idx = Math.floor((seekValue / 1000) * frameByTime.length);
-        const item = frameByTime[Math.min(idx, frameByTime.length - 1)];
-        if (item) await renderFrameEntry(item);
-        if (seq === playbackSeekInputSeq) {
-          syncActiveEventFromPlaybackPosition({ timeSec: item?.t, frameIdx: item?.frameIdx });
-        }
-        return;
-      }
-      videoEl.currentTime = (seekValue / 1000) * videoEl.duration;
-      await renderAtTime(videoEl.currentTime);
-      if (seq === playbackSeekInputSeq) {
-        syncActiveEventFromPlaybackPosition({ timeSec: videoEl.currentTime });
-      }
-    })();
-  }, 60);
+  if (playbackSeekScrubbing) {
+    cancelScheduledPlaybackSeek();
+    return;
+  }
+  schedulePlaybackSeek();
 });
 
 bindStageLayoutWatch();

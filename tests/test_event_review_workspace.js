@@ -272,7 +272,14 @@ assert.match(prune[0], /getEventPersistedPersonId\(ev\) === draft/);
 const typingTarget = workspace.match(/function isReviewTypingTarget\([\s\S]*?\n}/);
 assert.ok(typingTarget);
 assert.match(typingTarget[0], /!== "range"/);
-assert.match(controls, /seekBar\.addEventListener\("pointerup", \(\) => seekBar\.blur\(\)\)/);
+const seekPointerUp = controls.match(
+  /seekBar\.addEventListener\("pointerup", \(\) => \{[\s\S]*?\n\}\);/
+);
+assert.ok(seekPointerUp);
+assert.match(seekPointerUp[0], /seekBar\.blur\(\);/);
+// 拖动期间只更新读数，松手才真正 seek：长记录上逐次 seek 会不停触发解码与分块请求。
+assert.match(seekPointerUp[0], /void commitPlaybackSeek\(\);/);
+assert.match(controls, /if \(playbackSeekScrubbing\) \{\s*\n\s*cancelScheduledPlaybackSeek\(\);\s*\n\s*return;/);
 // 判定只留一份，避免两处让位规则将来走偏。
 assert.match(controls, /if \(isReviewTypingTarget\(e\.target\)\) return;/);
 assert.doesNotMatch(controls, /tag === "textarea" \|\| tag === "select"/);

@@ -587,7 +587,7 @@ function frameEntryByIdx(frameIdx) {
   if (!fi) return null;
   if (typeof ensureFrameIndexEntry === "function") return ensureFrameIndexEntry(fi);
   if (!frameByTime?.length) return null;
-  return frameByTime.find((item) => item.frameIdx === fi) || null;
+  return frameByTimeEntryOf(fi);
 }
 
 /** 复核显式跳转后钉住的事件帧（与视频 currentTime 可能差 1 帧） */
@@ -953,7 +953,7 @@ async function seekToTimestamp(timeSec, frameIdx = null, opts = {}) {
   if (!hit) hit = findFrameAt(t);
   if (hit) {
     await renderFrameEntry(hit);
-    const idx = frameByTime.indexOf(hit);
+    const idx = frameByTimePositionOf(hit.frameIdx);
     if (idx >= 0 && frameByTime.length) {
       seekBar.value = String(
         frameByTime.length <= 1 ? 1000 : (idx / (frameByTime.length - 1)) * 1000

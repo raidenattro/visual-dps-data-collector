@@ -465,11 +465,11 @@ function frameIdxToSeekPct(frameIdx) {
     typeof getPlaybackDurationSec === "function" ? getPlaybackDurationSec() : 0;
   if (!dur || !frameByTime?.length) return null;
   const fi = Number(frameIdx) || 0;
-  const row = frameByTime.find((r) => Number(r.frameIdx) === fi);
+  const idx = frameByTimePositionOf(fi);
+  const row = idx < 0 ? null : frameByTime[idx];
   if (row && Number.isFinite(row.t)) {
     return Math.min(100, Math.max(0, (row.t / dur) * 100));
   }
-  const idx = frameByTime.findIndex((r) => Number(r.frameIdx) === fi);
   if (idx < 0) return null;
   return Math.min(100, Math.max(0, (idx / frameByTime.length) * 100));
 }
@@ -492,7 +492,7 @@ function bindAccuracySeekMarkerDelegation() {
     if (!dot) return;
     event.stopPropagation();
     const fi = parseInt(dot.dataset.frameIdx, 10) || 0;
-    const row = frameByTime.find((r) => Number(r.frameIdx) === fi);
+    const row = frameByTimeEntryOf(fi);
     if (row && typeof seekToTimestamp === "function") {
       void seekToTimestamp(row.t, fi, { skipEventSync: false });
     }
@@ -1127,6 +1127,7 @@ async function loadAnnotationBoxesFromFile(file) {
 /** 将 timeline 行写入 frameByTime（v2 分包回放索引用，帧号与 export 一致） */
 async function applyTimelineRowsToFrameIndex(rows, inferW, inferH) {
   frameByTime = [];
+  invalidateFrameByTimeIndex();
   const timelineRows = rows || [];
   const chunkSize = 500;
   for (let start = 0; start < timelineRows.length; start += chunkSize) {
@@ -1143,20 +1144,21 @@ async function applyTimelineRowsToFrameIndex(rows, inferW, inferH) {
       });
     }
     if (end < timelineRows.length) {
+      // 分块之间会让出主线程，期间可能有人按帧号查表，索引必须跟着作废。
+      invalidateFrameByTimeIndex();
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
   }
   frameByTime.sort((a, b) => a.t - b.t);
+  invalidateFrameByTimeIndex();
 }
 
 /** 确保 frame_idx 在时间轴中有条目（必要时虚拟补齐） */
 function ensureFrameIndexEntry(frameIdx) {
   const fi = parseInt(frameIdx, 10) || 0;
   if (!fi) return null;
-  if (frameByTime?.length) {
-    const hit = frameByTime.find((e) => e.frameIdx === fi) || null;
-    if (hit) return hit;
-  }
+  const existing = frameByTimeEntryOf(fi);
+  if (existing) return existing;
   const fps = Number(poseData?.fps) || 25;
   const inferW = poseData?.infer_width || frameByTime?.[0]?.w || 640;
   const inferH = poseData?.infer_height || frameByTime?.[0]?.h || 480;
@@ -1164,11 +1166,13 @@ function ensureFrameIndexEntry(frameIdx) {
   if (!frameByTime) frameByTime = [];
   frameByTime.push(hit);
   frameByTime.sort((a, b) => a.t - b.t);
+  invalidateFrameByTimeIndex();
   return hit;
 }
 
 function buildFrameIndex(recordId = null, options = {}) {
   frameByTime = [];
+  invalidateFrameByTimeIndex();
   if (options.reset !== false) resetFrameFetchState();
   const loadGeneration = frameFetchGeneration;
   const signal = frameFetchController?.signal;
@@ -1218,6 +1222,7 @@ function buildFrameIndex(recordId = null, options = {}) {
     frameCache.set(fi, f);
   });
   frameByTime.sort((a, b) => a.t - b.t);
+  invalidateFrameByTimeIndex();
   if (typeof renderAccuracySeekMarkers === "function") renderAccuracySeekMarkers();
   playbackSkeletonReady =
     frameCache.size >= (Number(poseData?.frame_count) || frameByTime.length || 0);
@@ -1416,7 +1421,7 @@ function playbackTimelineSecFromVideo() {
 function playbackFrameProgress(frameIdx) {
   const fi = parseInt(frameIdx, 10) || 0;
   if (!fi || !frameByTime?.length) return null;
-  const idx = frameByTime.findIndex((item) => Number(item?.frameIdx) === fi);
+  const idx = frameByTimePositionOf(fi);
   if (idx < 0) return null;
   if (frameByTime.length <= 1) return 1;
   return idx / (frameByTime.length - 1);
@@ -2804,7 +2809,7 @@ function redrawCurrentFrame() {
         ? ensureFrameIndexEntry(targetFi)
         : typeof frameEntryByIdx === "function"
           ? frameEntryByIdx(targetFi)
-          : frameByTime.find((item) => item.frameIdx === targetFi) || null;
+          : frameByTimeEntryOf(targetFi);
     if (hit) {
       void renderFrameEntry(hit, gen);
       return;
@@ -2841,7 +2846,7 @@ async function renderFrameEntry(hit, renderGen) {
         ? ensureFrameIndexEntry(authorityFi)
         : typeof frameEntryByIdx === "function"
           ? frameEntryByIdx(authorityFi)
-          : frameByTime.find((e) => e.frameIdx === authorityFi) || null;
+          : frameByTimeEntryOf(authorityFi);
     if (!authHit) return;
     hit = authHit;
   }
@@ -2877,7 +2882,7 @@ async function renderAtTimeCore(timeSec, opts = {}) {
         ? ensureFrameIndexEntry(authorityFi)
         : typeof frameEntryByIdx === "function"
           ? frameEntryByIdx(authorityFi)
-          : frameByTime.find((e) => e.frameIdx === authorityFi) || null;
+          : frameByTimeEntryOf(authorityFi);
     if (authHit) {
       await renderFrameEntry(authHit);
       return;

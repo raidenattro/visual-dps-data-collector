@@ -140,7 +140,7 @@ function findNearestCachedFrameEntry(targetIdx) {
   const target = Math.max(1, Number(targetIdx) || 0);
   if (!target || !frameByTime.length) return null;
   if (frameCache.has(target)) {
-    return frameByTime.find((e) => e.frameIdx === target) || null;
+    return frameByTimeEntryOf(target);
   }
   let lo = 0;
   let hi = frameByTime.length - 1;

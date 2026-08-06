@@ -19,6 +19,41 @@ let poseData = null;
 let annotationBoxes = [];
 let annotationSize = null;
 let frameByTime = [];
+/**
+ * frameByTime 按时间排序，但很多地方要按 frame_idx 反查。两万帧记录上
+ * 逐次线性扫描会让每次 seek 重复几万次比较，这里维护一份惰性位置索引。
+ * frameByTime 原地 push / sort 后必须调用 invalidateFrameByTimeIndex()。
+ */
+let frameByTimePositionCache = null;
+
+function invalidateFrameByTimeIndex() {
+  frameByTimePositionCache = null;
+}
+
+function frameByTimePositionMap() {
+  const rows = frameByTime || [];
+  if (frameByTimePositionCache?.source === rows) return frameByTimePositionCache.map;
+  const map = new Map();
+  rows.forEach((row, position) => {
+    const fi = Number(row?.frameIdx) || 0;
+    if (fi && !map.has(fi)) map.set(fi, position);
+  });
+  frameByTimePositionCache = { source: rows, map };
+  return map;
+}
+
+function frameByTimePositionOf(frameIdx) {
+  const fi = parseInt(frameIdx, 10) || 0;
+  if (!fi || !frameByTime?.length) return -1;
+  const position = frameByTimePositionMap().get(fi);
+  return position == null ? -1 : position;
+}
+
+function frameByTimeEntryOf(frameIdx) {
+  const position = frameByTimePositionOf(frameIdx);
+  return position < 0 ? null : frameByTime[position] || null;
+}
+
 let frameCache = new Map();
 /** 已拉取的 Parquet 分块 "from-to"，避免播放时重复请求 */
 const loadedChunkKeys = new Set();
